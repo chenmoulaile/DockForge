@@ -1,0 +1,55 @@
+﻿processes=297
+pid=13092 aumid=MicrosoftWindows.Client.CBS_cw5n1h2txyewy!CrossDeviceResumeApp exe=C:\Windows\SystemApps\MicrosoftWindows.Client.CBS_cw5n1h2txyewy\CrossDeviceResume.exe
+    win=000000000003011a visible=0 cloaked=0 owned=0 tool=0 cls=CrossDeviceResumeWindowClass title=CrossDeviceResumeWindow
+    win=0000000000030128 visible=0 cloaked=0 owned=1 tool=0 cls=IME title=Default IME
+pid=13792 aumid=MicrosoftWindows.CrossDevice_cw5n1h2txyewy!App exe=C:\Program Files\WindowsApps\MicrosoftWindows.CrossDevice_1.26082.74.0_x64__cw5n1h2txyewy\CrossDeviceService.exe
+    win=0000000000010400 visible=0 cloaked=0 owned=0 tool=0 cls=.NET-BroadcastEventWindow.21af1a5.0 title=.NET-BroadcastEventWindow.21af1a5.0
+    win=0000000000010402 visible=0 cloaked=0 owned=1 tool=0 cls=IME title=Default IME
+pid=15836 aumid=MicrosoftWindows.Client.WebExperience_cw5n1h2txyewy!Global.WidgetBoard exe=C:\Program Files\WindowsApps\MicrosoftWindows.Client.WebExperience_526.21100.40.0_x64__cw5n1h2txyewy\WidgetBoard.exe
+pid=16176 aumid=MicrosoftWindows.Client.CBS_cw5n1h2txyewy!runtimebroker07f4358a809ac99a64a67c1 exe=C:\Windows\System32\RuntimeBroker.exe
+    win=000000000005004a visible=0 cloaked=0 owned=0 tool=0 cls=WorkerW title=
+    win=0000000000020282 visible=0 cloaked=0 owned=1 tool=0 cls=IME title=Default IME
+pid=19320 aumid=MicrosoftWindows.CrossDevice_cw5n1h2txyewy!runtimebroker07f4358a809ac99a64a67c1 exe=C:\Windows\System32\RuntimeBroker.exe
+pid=19492 aumid=Microsoft.WidgetsPlatformRuntime_8wekyb3d8bbwe!App exe=C:\Program Files\WindowsApps\Microsoft.WidgetsPlatformRuntime_1.6.19.0_x64__8wekyb3d8bbwe\WidgetService\WidgetService.exe
+pid=27080 aumid=Microsoft.StartExperiencesApp_8wekyb3d8bbwe!MicrosoftStart exe=C:\Program Files\WindowsApps\Microsoft.StartExperiencesApp_1.398.2.0_x64__8wekyb3d8bbwe\MicrosoftStartFeedProvider\MicrosoftStartFeedProvider.exe
+    win=00000000000208ec visible=0 cloaked=0 owned=0 tool=1 cls=Wnd_StartFeed title=
+    win=00000000000208f0 visible=0 cloaked=0 owned=1 tool=0 cls=IME title=Default IME
+pid=14464 aumid=AppUp.IntelGraphicsExperience_8j3eq9eme6ctt!App exe=C:\Program Files\WindowsApps\AppUp.IntelGraphicsExperience_1.100.5688.0_x64__8j3eq9eme6ctt\IGCC.exe
+pid=2564 aumid=MicrosoftWindows.Client.CBS_cw5n1h2txyewy!ActionRuntime exe=C:\Windows\SystemApps\MicrosoftWindows.Client.CBS_cw5n1h2txyewy\AppActions.exe
+pid=12640 aumid=windows.immersivecontrolpanel_cw5n1h2txyewy!microsoft.windows.immersivecontrolpanel exe=C:\Windows\ImmersiveControlPanel\SystemSettings.exe
+    win=00000000000304f8 visible=0 cloaked=0 owned=0 tool=0 cls=PersonalizationThemeChangeListener title=
+    win=0000000000050114 visible=0 cloaked=0 owned=0 tool=0 cls=WorkerW title=
+    win=000000000004046a visible=1 cloaked=1 owned=0 tool=0 cls=Windows.UI.Core.CoreWindow title=设置
+    win=0000000000030512 visible=0 cloaked=0 owned=1 tool=0 cls=IME title=Default IME
+    win=000000000003050e visible=0 cloaked=0 owned=1 tool=0 cls=IME title=Default IME
+    win=00000000000304f2 visible=0 cloaked=1 owned=1 tool=0 cls=IME title=Default IME
+pid=8200 aumid=Microsoft.YourPhone_8wekyb3d8bbwe!App exe=C:\Program Files\WindowsApps\Microsoft.YourPhone_1.26082.121.0_x64__8wekyb3d8bbwe\PhoneExperienceHost.exe
+    win=00000000000e025a visible=0 cloaked=0 owned=0 tool=0 cls=.NET-BroadcastEventWindow.bf7771.0 title=.NET-BroadcastEventWindow.bf7771.0
+    win=0000000000300d92 visible=0 cloaked=0 owned=1 tool=0 cls=IME title=Default IME
+pid=21348 aumid=MicrosoftWindows.Client.CBS_cw5n1h2txyewy!InputApp exe=C:\Windows\SystemApps\MicrosoftWindows.Client.CBS_cw5n1h2txyewy\TextInputHost.exe
+    win=00000000000204c8 visible=1 cloaked=1 owned=0 tool=0 cls=Windows.UI.Core.CoreWindow title=Windows 输入体验
+    win=00000000000204c6 visible=0 cloaked=1 owned=1 tool=0 cls=IME title=Default IME
+pid=25556 aumid=MicrosoftWindows.Client.CBS_cw5n1h2txyewy!CortanaUI exe=C:\Windows\SystemApps\MicrosoftWindows.Client.CBS_cw5n1h2txyewy\SearchHost.exe
+pid=8580 aumid=Microsoft.Windows.StartMenuExperienceHost_cw5n1h2txyewy!FullTrustApp exe=C:\Windows\SystemApps\Microsoft.Windows.StartMenuExperienceHost_cw5n1h2txyewy\StartMenuExperienceHost.exe
+pid=26340 aumid=Microsoft.Windows.ShellExperienceHost_cw5n1h2txyewy!App exe=C:\Windows\SystemApps\ShellExperienceHost_cw5n1h2txyewy\ShellExperienceHost.exe
+    win=000000000002019a visible=1 cloaked=1 owned=0 tool=0 cls=Windows.UI.Core.CoreWindow title=Windows Shell Experience 主机
+    win=00000000000201a0 visible=0 cloaked=1 owned=1 tool=0 cls=IME title=Default IME
+pid=30484 aumid=MicrosoftWindows.Client.CBS_cw5n1h2txyewy!CortanaUI exe=C:\Program Files (x86)\Microsoft\EdgeWebView\Application\155.0.4283.62\msedgewebview2.exe
+pid=21132 aumid=MicrosoftWindows.Client.CBS_cw5n1h2txyewy!CortanaUI exe=C:\Program Files (x86)\Microsoft\EdgeWebView\Application\155.0.4283.62\msedgewebview2.exe
+pid=34272 aumid=MicrosoftWindows.Client.CBS_cw5n1h2txyewy!CortanaUI exe=C:\Program Files (x86)\Microsoft\EdgeWebView\Application\155.0.4283.62\msedgewebview2.exe
+pid=6520 aumid=MicrosoftWindows.Client.CBS_cw5n1h2txyewy!CortanaUI exe=C:\Program Files (x86)\Microsoft\EdgeWebView\Application\155.0.4283.62\msedgewebview2.exe
+pid=16368 aumid=MicrosoftWindows.Client.CBS_cw5n1h2txyewy!CortanaUI exe=C:\Program Files (x86)\Microsoft\EdgeWebView\Application\155.0.4283.62\msedgewebview2.exe
+pid=20620 aumid=MicrosoftWindows.Client.CBS_cw5n1h2txyewy!CortanaUI exe=C:\Program Files (x86)\Microsoft\EdgeWebView\Application\155.0.4283.62\msedgewebview2.exe
+pid=16088 aumid=Microsoft.WindowsNotepad_8wekyb3d8bbwe!App exe=C:\Program Files\WindowsApps\Microsoft.WindowsNotepad_11.2607.14.0_x64__8wekyb3d8bbwe\Notepad\Notepad.exe
+    win=0000000000440344 visible=1 cloaked=0 owned=0 tool=0 cls=Notepad title=*班级排名.txt - Notepad
+    win=0000000000470794 visible=0 cloaked=0 owned=0 tool=0 cls=GDI+ Hook Window Class title=GDI+ Window (Notepad.exe)
+    win=00000000005307c0 visible=0 cloaked=0 owned=1 tool=0 cls=MSCTFIME UI title=MSCTFIME UI
+    win=00000000003a0252 visible=0 cloaked=0 owned=1 tool=0 cls=IME title=Default IME
+    win=00000000003a0012 visible=0 cloaked=0 owned=1 tool=0 cls=MSCTFIME UI title=MSCTFIME UI
+    win=0000000000070826 visible=0 cloaked=0 owned=1 tool=0 cls=IME title=Default IME
+    win=000000000024044a visible=0 cloaked=0 owned=1 tool=0 cls=IME title=Default IME
+pid=17292 aumid=Microsoft.WindowsCalculator_8wekyb3d8bbwe!App exe=C:\Program Files\WindowsApps\Microsoft.WindowsCalculator_11.2607.0.0_x64__8wekyb3d8bbwe\CalculatorApp.exe
+    win=00000000004c04fc visible=0 cloaked=0 owned=1 tool=0 cls=MSCTFIME UI title=MSCTFIME UI
+    win=0000000000dc01c0 visible=0 cloaked=0 owned=1 tool=0 cls=IME title=Default IME
+pid=19760 aumid=Microsoft.WindowsCalculator_8wekyb3d8bbwe!runtimebroker07f4358a809ac99a64a67c1 exe=C:\Windows\System32\RuntimeBroker.exe
+processes_with_aumid=24

@@ -1,0 +1,8 @@
+dock=1510x213 scale=2.002 tile=0 click=(823,1748)
+clicks=20 requested=20
+action_activated=9
+action_launched=1
+action_minimized=10
+latency_ms avg=1.92 p50=1.31 p95=2.45 p99=9.89 max=9.89
+budget_ms=16.7 over_budget=0
+verdict=WITHIN_BUDGET

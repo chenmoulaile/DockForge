@@ -1,0 +1,9 @@
+dock=(1193,1595) 494x213 pid=29152
+target tile=1 scale=2.002 window=246.8dip origin=43.4dip click=(1440,1748)
+window_from_point=True (3736218)
+foreground_before=Notepad pid=16088 cls=Notepad title=*班级排名.txt - Notepad
+foreground_after=Notepad pid=16088 cls=Notepad title=*班级排名.txt - Notepad
+foreground_changed=False
+foreground_second=ApplicationFrameHost pid=16276 cls=ApplicationFrameWindow title=计算器
+foreground_second_changed=True
+previous_foreground_iconic=False

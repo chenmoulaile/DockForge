@@ -1,0 +1,9 @@
+dock=(685,1595) 1510x213 pid=12652
+target tile=4 scale=2.002 window=754.3dip origin=45.1dip click=(1272,1748)
+window_from_point=True (1182162)
+foreground_before=Notepad pid=16088 cls=Notepad title=*班级排名.txt - Notepad
+foreground_after=hh pid=34760 cls=HH Parent title=AutoHotkey Help
+foreground_changed=True
+foreground_second=hh pid=31056 cls=HH Parent title=AutoHotkey Help
+foreground_second_changed=True
+previous_foreground_iconic=False

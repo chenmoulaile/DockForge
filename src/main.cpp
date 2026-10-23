@@ -21,6 +21,8 @@
 #include "shell/app_resolver.h"
 #include "shell/icon_cache.h"
 #include "shell/start_menu.h"
+#include "shell/window_actions.h"
+#include "shell/window_registry.h"
 
 #include <d2d1helper.h>
 #include <dwmapi.h>
@@ -223,6 +225,44 @@ constexpr int kDockTileLimit = 12;
 // each, evidence/T-006) and still be softer than a 256px source.
 constexpr int kDockIconPx = 256;
 
+// DOCKFORGE_PIN_APPS=<substring>[,<substring>...] restricts the dock to entries whose
+// display name or identity contains one of the substrings, ignoring case.
+//
+// A verification hook, not a product feature: the dock shows the first 12 apps
+// alphabetically, which on this machine contains no packaged app, so the UWP click
+// path could not be exercised end to end without it. Keeping it environment-only
+// means it cannot leak into a shipped configuration file.
+std::vector<std::wstring> PinnedAppsFromEnvironment() {
+    wchar_t buffer[512]{};
+    const DWORD n = GetEnvironmentVariableW(L"DOCKFORGE_PIN_APPS", buffer, ARRAYSIZE(buffer));
+    if (n == 0 || n >= ARRAYSIZE(buffer)) return {};
+
+    std::vector<std::wstring> pins;
+    std::wstring current;
+    for (DWORD i = 0; i < n; ++i) {
+        if (buffer[i] == L',') {
+            if (!current.empty()) pins.push_back(current);
+            current.clear();
+            continue;
+        }
+        current.push_back(static_cast<wchar_t>(std::towlower(buffer[i])));
+    }
+    if (!current.empty()) pins.push_back(current);
+    return pins;
+}
+
+bool MatchesAnyPin(const shell::AppEntry& app, const std::vector<std::wstring>& pins) {
+    if (pins.empty()) return true;
+    std::wstring haystack = app.display_name + L"\n" + app.aumid + L"\n" + app.namespace_parsing +
+                            L"\n" + app.target_path;
+    std::transform(haystack.begin(), haystack.end(), haystack.begin(),
+                   [](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
+    for (const auto& pin : pins) {
+        if (haystack.find(pin) != std::wstring::npos) return true;
+    }
+    return false;
+}
+
 }  // namespace
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
@@ -271,10 +311,22 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     // calls the shell: a cold GetImage is 60-190ms (evidence/T-006) and would
     // stall the frame loop. The warm-up above already populated the cache, so this
     // is a map lookup per tile.
+    const std::vector<std::wstring> pins = PinnedAppsFromEnvironment();
+    std::vector<shell::AppEntry> dock_apps;
+    if (pins.empty()) {
+        dock_apps = scan.entries;
+    } else {
+        for (const auto& entry : scan.entries) {
+            if (MatchesAnyPin(entry, pins)) dock_apps.push_back(entry);
+        }
+        DF_INFO("app", "DOCKFORGE_PIN_APPS kept %zu of %zu apps", dock_apps.size(),
+                scan.entries.size());
+    }
+
     const std::vector<dock::DockTile> tiles =
-        dock::BuildTiles(scan.entries, icons, kDockTileLimit, kDockIconPx);
+        dock::BuildTiles(dock_apps, icons, kDockTileLimit, kDockIconPx);
     DF_INFO("app", "dock tiles: %zu of %zu apps (limit=%d icon=%dpx)", tiles.size(),
-            scan.entries.size(), kDockTileLimit, kDockIconPx);
+            dock_apps.size(), kDockTileLimit, kDockIconPx);
     // Logged per tile because a tile with no icon still occupies a slot: the plate
     // draws a placeholder ring, and without this line that ring looks like a
     // rendering bug rather than a shell item the shell could not produce an icon
@@ -761,6 +813,47 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                 tracking_mouse = false;
                 dock_hover.active = false;
                 InvalidateRect(hwnd, nullptr, FALSE);
+                out = 0;
+                return true;
+            }
+            case WM_LBUTTONDOWN: {
+                // The click handler is the ONLY place with foreground rights. Windows
+                // grants them to the process that received the click; from a timer or
+                // hotkey SetForegroundWindow is refused outright, and AttachThreadInput
+                // does not help (measured, evidence/T-011/fg_plain.txt). Doing this
+                // work here rather than deferring it to the tick is what makes raising
+                // a window work without the synthetic-ALT fallback.
+                const float scale = window.Scale() > 0.0f ? window.Scale() : 1.0f;
+                const float x_dip = static_cast<float>(GET_X_LPARAM(lp)) / scale;
+
+                // Hit test against a layout recomputed for the current pointer, not
+                // the last painted frame. The two normally agree, but a click that
+                // arrives between a move and the next tick would otherwise be tested
+                // against the previous pointer position - a 16ms window in which the
+                // icon under the cursor is not the icon being aimed at. The call is
+                // O(n) with no allocation, so it is cheap enough for a click path.
+                layout_now();
+                const int index = dock_painter.HitTest(x_dip, scale);
+                if (index < 0 || index >= static_cast<int>(tiles.size())) {
+                    DF_DEBUG("dock", "click at %.1f dip hit no tile", x_dip);
+                    out = 0;
+                    return true;
+                }
+
+                const shell::AppEntry& app = tiles[static_cast<std::size_t>(index)].app;
+                // Enumerate once per click rather than caching: the window set changes
+                // without notice (apps close, dialogs open) and EnumWindows costs
+                // ~1ms, which is affordable on a click and not on a frame.
+                const shell::ActionResult result = shell::ActivateOrMinimizeTimed(app);
+                DF_INFO("dock", "tile[%d] %s -> %s (%s, pid=%lu, %.2fms)",
+                        index, core::WideToUtf8(app.display_name).c_str(),
+                        shell::ToString(result.action), result.route,
+                        static_cast<unsigned long>(result.process_id), result.elapsed_ms);
+                // Split out because the two halves have different fixes: enumeration
+                // scales with the desktop, the action is one window call. Both are
+                // needed to keep the click path inside the 16.7ms frame budget.
+                DF_DEBUG("dock", "click cost: enumerate=%.2fms total=%.2fms", result.enumerate_ms,
+                         result.elapsed_ms);
                 out = 0;
                 return true;
             }

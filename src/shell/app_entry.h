@@ -27,9 +27,9 @@ struct AppEntry {
     std::wstring display_name;
 
     // Executable to start. Empty for UWP entries. Environment variables are
-    // already expanded here: IShellLinkW::GetPath returns "%windir%\system32\
-    // control.exe" for several real Start-menu shortcuts, and both CreateProcess
-    // and SHCreateItemFromParsingName reject that form.
+    // already expanded here: IShellLinkW::GetPath returns
+    // "%windir%\system32\control.exe" for several real Start-menu shortcuts, and
+    // both CreateProcess and SHCreateItemFromParsingName reject that form.
     std::wstring target_path;
 
     // Command line arguments exactly as stored in the .lnk (may be empty).

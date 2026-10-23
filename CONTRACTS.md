@@ -340,3 +340,101 @@ bool AdvanceHover(DockHover& hover, double delta_ms);
 
 - `region_probe.ps1` 的 `window_from_point` 是 Windows 自己的命中测试结果，比 `PtInRegion` 更接近真实点击；但两者都不是真实点击，端到端点击验证只在 spike 的双窗口场景做过。
 - 点击穿透只在 spike 场景验证机制，未在真实第三方应用上验证点击确实落到目标控件。
+
+## C-13 窗口注册与点击行为（T-011 冻结）
+
+Dock 的点击语义是「一个槽位三种结局」，判据必须来自实时窗口状态，不能来自启动时的快照。
+
+| 状态 | 判据 | 动作 | `route` |
+|---|---|---|---|
+| 无窗口 | `FindAppWindow` 未命中 | `shell::Launch` | `launch` |
+| 窗口在前台且未最小化 | `GetForegroundWindow()==hwnd && !IsIconic(hwnd)` | `ShowWindowAsync(SW_MINIMIZE)` | `minimize` |
+| 其余 | — | `ShowWindowAsync(SW_RESTORE)`（若最小化）+ `SetForegroundWindow` | `restore` / `raise` |
+
+### C-13a 应用窗口筛选（五条全部必要）
+
+`EnumerateAppWindows` 只返回同时满足以下条件的顶层窗口：
+
+1. `IsWindowVisible(hwnd) != FALSE`
+2. `GetWindow(hwnd, GW_OWNER) == nullptr`（owned 窗口是对话框与提示，最小化它等于无操作）
+3. `(GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) == 0`
+4. `DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, ...) == 0`（cloaked 窗口报 visible，是 shell 用来把窗口停到别的虚拟桌面的手段）
+5. `GetWindowTextW` 非空
+
+实测基线（`evidence/T-011/enum.txt`）：空闲桌面 `total_windows=198`、`app_windows=0`；开一个 Notepad 后 `app_windows=1`。`IsWindowVisible` 单独用会把 `ApplicationFrameWindow`、`DummyDWMListenerWindow`、`ForegroundStaging`、`tooltips_class32` 全部放进来。
+
+### C-13b 打包应用的窗口归属
+
+打包应用的可见顶层窗口属于 `ApplicationFrameHost.exe`，不属于应用自己。
+
+- `GetApplicationUserModelId(OpenProcess(frame_pid))` 返回 `0x00003D57`（`ERROR_NOT_FOUND`）——拿不到 AUMID。
+- 真实应用进程只能通过 `EnumChildWindows` 找到：frame 窗口下存在一个跨进程子窗口（`class=Windows.UI.Core.CoreWindow`），它的 pid 才是应用 pid。
+- 未运行的 frame 窗口（`cloaked=1`）没有跨进程子窗口。
+- **因此 `app_pid` 与 `pid` 必须分开存**：`pid` 是顶层窗口所有者（可能是 frame host），`app_pid` 是真正运行应用的进程。
+
+实测（`evidence/T-011/frame.txt`）：Calculator 的 `frame pid=16276`（`ApplicationFrameHost.exe`），跨进程子窗口 `pid=17292`（`CalculatorApp.exe`），后者才报 `Microsoft.WindowsCalculator_8wekyb3d8bbwe!App`。
+
+### C-13c 身份匹配顺序（不可交换）
+
+1. entry 有 `aumid` → **只按 AUMID 匹配**，`window.aumid` 为空即不匹配。
+2. entry 无 `aumid` 但有 `target_path` → 按文件身份匹配。
+3. 都没有 → 不匹配。
+
+第 1 条不能退化成路径匹配：所有打包应用共享 `ApplicationFrameHost.exe` 这一个路径，退化成路径匹配会让计算器与设置解析到同一个窗口，Dock 会激活错误的应用。
+
+### C-13d 文件身份匹配（不是字符串比较）
+
+`SameExecutable` 先做大小写不敏感字符串比较，不等时再比较 `GetFileInformationByHandle` 的 `dwVolumeSerialNumber` + `nFileIndexHigh` + `nFileIndexLow`。
+
+理由（实测，`evidence/T-011/path_mismatch.txt`）：AppsFolder 里 7-Zip 的条目路径是
+`C:\Users\chenk\scoop\apps\7zip\current\7zFM.exe`，
+而运行中的进程报
+`C:\Users\chenk\scoop\apps\7zip\26.00\7zFM.exe`。
+差一个 scoop 版本 junction。字符串比较永远不等，点击每次都会再启动一个副本而不是激活已有的。
+
+### C-13e 前台权限
+
+- `SetForegroundWindow` 从后台进程调用**被拒绝**（返回 0）。
+- `AttachThreadInput(our_tid, fg_tid, TRUE)` 之后仍然**被拒绝**。
+- 合成 ALT 按下+抬起之后再调 → **成功**。
+- 在 `WS_EX_NOACTIVATE|WS_EX_TOOLWINDOW|WS_EX_TOPMOST` 窗口的 `WM_LBUTTONDOWN` 里调用 → **成功，无需任何技巧**。
+
+结论：点击处理函数**本身持有前台权限**，`ActivateOrMinimize` 只能从点击路径调用。`alt=1` 出现在正常会话里就是缺陷信号，不是细节——说明点击路径已经失去了前台权限。
+
+### C-13f 异步窗口操作（帧预算）
+
+`ShowWindow(SW_RESTORE|SW_MINIMIZE)` 会**发送并等待**目标应用的消message loop，忙碌的应用会把 Dock 的 UI 线程拖住任意长时间。`ShowWindowAsync` 投递同样请求后立即返回。
+
+实测（`evidence/T-011/click_bench.txt`，20 次点击，预算 16.7ms）：
+
+| 实现 | avg | p50 | p95 | p99 | max | 超预算 |
+|---|---|---|---|---|---|---|
+| 同步 `ShowWindow` | 41.29 | 14.11 | 91.10 | 494.59 | 494.59 | 10/20 |
+| `ShowWindowAsync` | **1.92** | 1.31 | 2.45 | **9.89** | 9.89 | **0/20** |
+
+`SetForegroundWindow` 保持同步：它是快速跨进程请求，不等应用处理，而且是唯一真正需要点击前台权限的调用。
+
+### C-13g 命中测试
+
+`DockPainter::HitTest(x_dip, scale)` 读**当前悬停状态的布局**，不读空闲布局。
+
+- 用空闲布局会让抬起的图标点不到、被它推开的邻居反而可点——指针下的图标正是瞄准的那个，这是最坏的取舍。
+- 垂直边界不检查：`SetWindowRgn` 已经把窗口裁成「板 + 放大行」，能进到处理函数的点击一定在可见 Dock 内。
+- 点击路径先调 `layout_now()` 再 `HitTest`：移动与下一 tick 之间到达的点击否则会按上一个指针位置判定（16ms 窗口）。
+
+### 验证手段
+
+| 断言 | 工具 | 判据 |
+|---|---|---|
+| 窗口筛选 | `spikes/t011_click --mode=enum` | 空闲桌面 `app_windows=0`，开一个应用后 `+1` |
+| 打包应用归属 | `spikes/t011_click --mode=frame` | frame 窗口存在跨进程子窗口，`real_pid` = 应用 pid |
+| 身份匹配 | `spikes/t011_click --mode=aumid` | frame host 的 `aumid_hr=0x00003D57` |
+| 点击三分支 | `tools/click_probe.ps1` | `foreground_changed=True`，第二次点击 `previous_foreground_iconic=True` |
+| 点击延迟 | `tools/click_bench.ps1` | `p99 < 16.7ms`，`verdict=WITHIN_BUDGET` |
+| 空闲开销 | `tools/idle_stats.ps1` | `verdict_cpu=PASS`、`verdict_rss=PASS`、`verdict_handles=PASS` |
+
+### 诚实边界
+
+- 单显示器主机：`restore` 与 `minimize` 都在同一屏幕上验证，跨屏激活未测。
+- UWP 分支用「计算器」验证（`DOCKFORGE_PIN_APPS=calculator`），未覆盖所有打包应用；某些应用可能拒绝 `SetForegroundWindow` 而落到 ALT 回退路径。
+- `route` 的 `restore`/`raise` 区分依赖动作前的 `IsIconic` 采样，采样与动作之间若被第三方最小化会标错，不影响行为。

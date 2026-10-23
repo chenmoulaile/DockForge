@@ -2,13 +2,13 @@
     "project":  "DockForge",
     "schema":  1,
     "milestone":  "M1",
-    "last_task":  "T-010",
+    "last_task":  "T-011",
     "last_commit":  "pending",
     "current_module":  "dock",
-    "current_task":  null,
+    "current_task":  "T-012",
     "counters":  {
                      "total":  16,
-                     "done":  10,
+                     "done":  11,
                      "partial":  0,
                      "blocked":  0
                  },
@@ -77,7 +77,14 @@
                           "每条 WM_MOUSEMOVE 都 InvalidateRect 会使 p99 到 18.2ms；必须由 tick 合并成每帧一次",
                           "每帧 SetWindowRgn 触发 DWM 往返，p99 17.3ms；region 只应有空闲/悬停两态",
                           "region 用上一帧布局会裁掉正在放大的图标；必须按当前悬停现算",
-                          "GetWindowRgnBox 返回 int（0=ERROR 1=NULLREGION 2=SIMPLEREGION 3=COMPLEXREGION）；PtInRegion 在 gdi32.dll 不是 user32"
+                          "GetWindowRgnBox 返回 int（0=ERROR 1=NULLREGION 2=SIMPLEREGION 3=COMPLEXREGION）；PtInRegion 在 gdi32.dll 不是 user32",
+                          "UWP 顶层窗口属于 ApplicationFrameHost.exe，GetApplicationUserModelId 对它返回 0x00003D57；必须 EnumChildWindows 找跨进程子窗口",
+                          "AUMID 与路径不能或匹配：所有打包应用共享 frame host 路径，会串味到错误应用",
+                          "scoop 的 current junction 让条目路径与进程路径字符串永不相等，必须比 GetFileInformationByHandle 的文件身份",
+                          "ShowWindow 同步等待目标应用消息循环，实测 p99 494.59ms；必须用 ShowWindowAsync",
+                          "SetForegroundWindow 从后台被拒、AttachThreadInput 无效；WM_LBUTTONDOWN 内直接调用成功",
+                          "Catch2 CHECK(result.route == \"launch\") 是指针比较，必须包 std::string",
+                          "EnumerateAppWindows 断言必须先 IsWindow(hwnd)==FALSE 跳过已销毁句柄，否则并发关窗随机失败"
                       ],
-    "updated_at":  "2026-10-24T02:50:00+08:00"
+    "updated_at":  "2026-10-24T03:05:00+08:00"
 }

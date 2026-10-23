@@ -131,6 +131,10 @@ const LayoutSummary& DockPainter::UpdateLayout(const DockGeometry& geometry,
     const int count = std::max(tile_count, 0);
     if (count == 0) {
         last_ = LayoutSummary{};
+        // Cleared so HitTest cannot report a slot that Paint would not draw after the
+        // dock loses its last tile.
+        scratch_.clear();
+        row_origin_dip_ = 0.0f;
         return last_;
     }
 
@@ -140,11 +144,28 @@ const LayoutSummary& DockPainter::UpdateLayout(const DockGeometry& geometry,
 
     const float row_origin_dip =
         (geometry.window_width_dip - geometry.content_width_dip) * 0.5f;
+    row_origin_dip_ = row_origin_dip;
     scratch_.resize(static_cast<std::size_t>(count));
     const float mouse_px = (hover.mouse_x_dip - row_origin_dip) * geometry.scale;
     LayoutDock(params, count, mouse_px, hover.active && intensity > 0.0f, scratch_.data(),
                scratch_.size(), &last_);
     return last_;
+}
+
+int DockPainter::HitTest(float x_dip, float scale) const {
+    if (scratch_.empty() || !(scale > 0.0f)) return -1;
+    for (std::size_t i = 0; i < scratch_.size(); ++i) {
+        const IconLayout& icon = scratch_[i];
+        const float half_dip = icon.width / scale * 0.5f;
+        // Same conversion Paint uses: the layout is dock-local device pixels, the
+        // click is dock-local DIPs. Adding the row origin here rather than in the
+        // caller keeps the two from disagreeing about where the row starts.
+        const float center_dip = row_origin_dip_ + icon.center / scale;
+        if (x_dip >= center_dip - half_dip && x_dip <= center_dip + half_dip) {
+            return static_cast<int>(i);
+        }
+    }
+    return -1;
 }
 
 bool DockPainter::Paint(ID2D1DeviceContext& dc, render::IRenderBackend& backend,
@@ -177,7 +198,7 @@ bool DockPainter::Paint(ID2D1DeviceContext& dc, render::IRenderBackend& backend,
     if (count == 0) {
         // An empty dock still shows its plate, otherwise the window looks like a
         // rendering failure instead of an empty dock.
-        last_ = LayoutSummary{};
+        UpdateLayout(geometry, input.hover, 0);
         return true;
     }
 

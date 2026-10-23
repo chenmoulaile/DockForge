@@ -1,0 +1,16 @@
+﻿total_windows=198
+app_windows=0
+--- rejected samples ---
+  hwnd=0000000000020480 pid=19632 visible=0 cloaked=0 owned=0 tool=0 app=0 cls=GDI+ Hook Window Class title=GDI+ Window (TabTip.exe)
+  hwnd=00000000000104a0 pid=19632 visible=0 cloaked=0 owned=0 tool=1 app=0 cls=ShellHandwritingCanvas {18E91349-E229-4995-8049-7437243BBCC3} title=Shell Handwriting Canvas
+  hwnd=00000000000a07dc pid=14276 visible=0 cloaked=0 owned=0 tool=1 app=0 cls=ForegroundStaging title=
+  hwnd=00000000000301c8 pid=14276 visible=0 cloaked=0 owned=0 tool=1 app=0 cls=ForegroundStaging title=
+  hwnd=00000000003e09a0 pid=14276 visible=0 cloaked=0 owned=1 tool=1 app=0 cls=tooltips_class32 title=
+  hwnd=00000000000205c2 pid=14276 visible=1 cloaked=0 owned=0 tool=1 app=0 cls=Shell_TrayWnd title=
+  hwnd=0000000000020542 pid=14276 visible=0 cloaked=0 owned=0 tool=1 app=0 cls=tooltips_class32 title=
+  hwnd=00000000000a0c50 pid=14276 visible=0 cloaked=0 owned=0 tool=1 app=0 cls=TopLevelWindowForOverflowXamlIsland title=系统托盘溢出窗口。
+  hwnd=000000000003020a pid=14276 visible=0 cloaked=0 owned=0 tool=1 app=0 cls=SystemTray_Main title=电池指示器
+  hwnd=0000000000030212 pid=14276 visible=0 cloaked=0 owned=0 tool=1 app=0 cls=ATL:00007FFD0CE8B050 title=
+  hwnd=00000000004300a2 pid=32976 visible=0 cloaked=0 owned=0 tool=0 app=0 cls=ConsoleWindowClass title=C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe
+  hwnd=000000000004006c pid=19756 visible=0 cloaked=0 owned=0 tool=0 app=0 cls=Chrome_WidgetWin_1 title=WorkBuddy AI
+--- accepted ---

@@ -1,0 +1,6 @@
+dock=(685,1595) 1510x213 pid=15316
+target tile=0 scale=2.002 window=754.3dip origin=45.1dip click=(823,1748)
+window_from_point=True (3605136)
+foreground_before=Notepad pid=16088 cls=Notepad title=*班级排名.txt - Notepad
+foreground_after=7zFM pid=6572 cls=7-Zip::FM title=D:\BaiduNetdiskDownload\
+foreground_changed=True

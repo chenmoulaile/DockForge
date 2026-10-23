@@ -126,9 +126,26 @@ class DockPainter {
 
     const LayoutSummary& LastLayout() const { return last_; }
 
+    // Which tile covers `x_dip`, or -1 for a miss.
+    //
+    // Reads the layout produced by the last UpdateLayout, so the click target is the
+    // icon the user actually sees rather than the idle slot it would occupy. Hit
+    // testing the idle geometry would make the lifted icon under the cursor
+    // unclickable and its pushed-aside neighbour clickable - the worst possible
+    // trade, because the icon under the pointer is the one being aimed at.
+    //
+    // Vertical bounds are not checked: SetWindowRgn already trims the window to the
+    // plate plus the magnified row, so a click that reaches this handler is inside
+    // the visible dock.
+    int HitTest(float x_dip, float scale) const;
+
   private:
     std::vector<IconLayout> scratch_;
     LayoutSummary last_{};
+    // Where the row starts inside the window, in DIP. Stored by UpdateLayout because
+    // HitTest needs the same origin Paint used, and recomputing it from the geometry
+    // in two places is how the two drift apart.
+    float row_origin_dip_ = 0.0f;
 };
 
 }  // namespace dockforge::dock

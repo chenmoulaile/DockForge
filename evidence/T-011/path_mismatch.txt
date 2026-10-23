@@ -1,0 +1,10 @@
+apps_folder_entry = C:\Users\chenk\scoop\apps\7zip\current\7zFM.exe
+exists_entry       = True
+running_process    = C:\Users\chenk\scoop\apps\7zip\26.00\7zFM.exe
+exists_running     = True
+string_equal       = False
+final_path_entry   = 
+length_entry       = 999424
+length_running     = 999424
+same_length        = True
+verdict            = PATH_STRING_DIFFERS_FILE_IDENTITY_SAME

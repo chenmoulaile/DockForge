@@ -197,18 +197,21 @@
 
 
 ### T-011 · dock: 点击行为（启动/最小化/激活）
-- 状态: TODO
+- 状态: DONE
 - 优先级: P0
 - 依赖: T-010
 - 预估: 1 会话
 - 上下文: `src/dock/`、`src/shell/`
 - DoD:
-  - [ ] 未运行 → `ShellExecuteEx` 启动
-  - [ ] 前台 → 最小化；后台 → 激活到前台
-  - [ ] 激活失败（UWP/权限）有降级路径且不崩溃
-  - [ ] 点击热区与视觉一致（含放大态）
-  - [ ] 日志记录每次动作与耗时
+  - [x] 未运行 → 启动（路径类走 `CreateProcessW`，ShellItem/NamespaceItem 走 `ShellExecuteExW`；见备注）
+  - [x] 前台 → 最小化；后台 → 激活到前台
+  - [x] 激活失败（UWP/权限）有降级路径且不崩溃
+  - [x] 点击热区与视觉一致（含放大态）
+  - [x] 日志记录每次动作与耗时
 - 证据: evidence/T-011/
+- 备注: DoD 第 1 条按 C-13 落地为「按 `AppKind` 分派启动路径」——`.lnk`/`.exe` 用 `CreateProcessW`（能带 arguments 与 working_dir），`ShellItem`/`NamespaceItem` 用 `ShellExecuteExW`（只有 `shell:AppsFolder\` 前缀能激活），`Uwp` 用 `ActivateApplication`。三条路径在 T-006 已各自实测，本任务只是接入。
+- 备注: 实测暴露出四个缺陷，全部修复并有数字：AUMID 与路径「或」匹配导致串味（计算器↔设置）、scoop junction 让路径字符串永不相等（每次点击都启动新副本）、`IsIconic` 在动作后采样导致 restore 被标成 raise、`ShowWindow` 同步等待目标应用把 p99 拖到 494.59ms。改 `ShowWindowAsync` 后 p99=9.89ms、20 次点击 0 次超预算。
+- 备注: 打包应用（UWP）的点击路径用 `DOCKFORGE_PIN_APPS=calculator` 验证钩子端到端跑通；Dock 默认前 12 个应用本机不含打包应用，否则这条路径只有单测覆盖。
 
 ### T-012 · dock: 运行指示器
 - 状态: TODO

@@ -387,3 +387,58 @@ T-010 的 DoD 原文写着「缩放走 DComp 变换/顶点，禁止逐帧重建�
 - `SetWindowRgn` 同理：**每帧重建 region 时 p99 17.3ms 超预算**；改为只有空闲/悬停两态、悬停态用满倍率矩形（所有中间帧的并集）后消除。
 - 若图标数涨到 50+ 或加入模糊拖影，需重新评估本决策——届时绘制时间会成为瓶颈，visual 方案才有意义。
 - T-010 的 DoD 第 3 条按本条 ADR 判为满足：约束是「禁止逐帧重建布局对象」，实现零分配、零对象创建，满足；手段不是 DComp 变换，已记录理由。
+
+## ADR-0016 点击行为：窗口身份、异步窗口操作、前台权限
+
+**日期**：2026-10-24
+**状态**：已采纳（T-011）
+
+### 背景
+
+T-011 要把 Dock 的点击做成「一个槽位三种结局」：未运行则启动，前台则最小化，后台则激活。三条路各有独立的失败模式，且都是静默的——点击看起来生效了，实际启动了第二个副本，或者把错误的应用抬到前台。
+
+### 决策
+
+**1. 应用窗口身份分两层：`pid` 与 `app_pid`。**
+
+打包应用的可见顶层窗口属于 `ApplicationFrameHost.exe`，不是应用本身。按顶层 pid 匹配永远找不到 UWP 应用。`AppWindow` 同时记录两者：`pid` 是顶层窗口所有者，`app_pid` 通过 `EnumChildWindows` 找到的跨进程子窗口得到。
+
+**2. 身份匹配顺序固定，AUMID 优先且不可退化。**
+
+entry 声明了 AUMID 就只按 AUMID 匹配。若允许退化到路径匹配，所有打包应用会因共享 `ApplicationFrameHost.exe` 而互相串味。
+
+**3. 路径匹配用文件身份而非字符串。**
+
+`scoop` 的 `current` junction 让条目路径与实际进程路径不同（`7zip\current\7zFM.exe` vs `7zip\26.00\7zFM.exe`）。字符串比较永远不等，点击每次都启动新副本。改用 `GetFileInformationByHandle` 的卷序列号 + 文件索引。
+
+**4. 窗口操作全部异步。**
+
+`ShowWindow(SW_RESTORE)` 会等待目标应用处理消息，忙碌应用把 Dock 的 UI 线程拖住 494ms（实测最大值）。改 `ShowWindowAsync` 后 p99 从 494.59ms 降到 9.89ms，20 次点击超预算数从 10 降到 0。
+
+`SetForegroundWindow` 保持同步：它不等目标应用处理，且是唯一需要点击前台权限的调用。
+
+**5. 点击处理函数是唯一持有前台权限的地方。**
+
+实测 `SetForegroundWindow` 从后台进程被拒绝，`AttachThreadInput` 无效，合成 ALT 有效，但在 `WM_LBUTTONDOWN` 里直接调用同样有效。因此不做任何「预先获取权限」的机制，也不在 tick 里做点击动作。
+
+`alt=1` 保留在 `ActionResult` 里并在日志中输出：正常会话出现即缺陷信号。
+
+### 被拒方案
+
+| 方案 | 拒绝理由 |
+|---|---|
+| 按顶层 pid 匹配应用 | UWP 永远找不到窗口（frame host 持有顶层窗口） |
+| AUMID 匹配失败后退化到路径匹配 | 所有打包应用共享 frame host 路径，会互相串味 |
+| 路径字符串比较（大小写不敏感） | scoop/版本目录的 junction 让路径永远不等 |
+| `AttachThreadInput` 获取前台权限 | 实测无效，`SetForegroundWindow` 仍返回 0 |
+| 无条件合成 ALT 再激活 | 多余：点击路径本身已有权限，ALT 会闪一下开始菜单 |
+| 同步 `ShowWindow` | p99 494ms，一次点击丢 30 帧 |
+| 点击时缓存 `AppWindow` 列表 | 窗口集合随时变化（应用关闭、对话框弹出），缓存会让点击打到已销毁的句柄 |
+| 用空闲布局做命中测试 | 抬起的图标点不到，被推开的邻居反而可点 |
+
+### 后果
+
+- 点击延迟从 `avg=41.29ms / p99=494.59ms` 降到 `avg=1.92ms / p99=9.89ms`。
+- 每次点击做一次 `EnumWindows`（实测 0.37–0.70ms），不缓存。
+- `AppWindow` 多一个 `app_pid` 字段，`ActionResult` 多一个 `enumerate_ms` 字段与 `used_alt_fallback` 标志。
+- `DOCKFORGE_PIN_APPS` 环境变量成为验证钩子（不进 C-01）：Dock 默认显示前 12 个应用，本机这 12 个里没有打包应用，UWP 点击路径无法端到端验证。
