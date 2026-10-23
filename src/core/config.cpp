@@ -23,9 +23,65 @@ using json = nlohmann::json;
 // Keys owned by the schema. Anything else survives a save round-trip.
 const std::unordered_set<std::string> kDockKeys = {
     "icon_size", "gap", "magnification", "hover_falloff",
-    "influence_radius", "falloff_sharpness", "position"};
+    "influence_radius", "falloff_sharpness", "position", "tiles", "hidden"};
 const std::unordered_set<std::string> kAppearanceKeys = {"material", "corner_radius"};
 const std::unordered_set<std::string> kBehaviorKeys = {"autostart", "hide_taskbar"};
+
+// Upper bound on the persisted tile list.
+//
+// The dock shows at most a dozen tiles today, but the config is user-editable and
+// a hand-written file must not be able to make the dock allocate unbounded memory
+// or paint for minutes. 256 is far above any plausible curated dock and low enough
+// that a corrupt file is harmless.
+constexpr std::size_t kMaxTileListEntries = 256;
+constexpr std::size_t kMaxIdentityLength = 512;
+
+// Reads a string array of identities, trimming over-long or non-string entries.
+// Returns true when the array was present but needed cleaning (caller rewrites).
+bool ReadIdentityList(const json& node, const char* key, std::vector<std::string>& out) {
+    if (!node.contains(key)) return false;
+    const auto& value = node.at(key);
+    if (!value.is_array()) {
+        DF_WARN("core", "config %s has non-array type, keeping default", key);
+        return true;
+    }
+    bool dirty = false;
+    std::vector<std::string> parsed;
+    parsed.reserve(std::min(value.size(), kMaxTileListEntries));
+    for (const auto& item : value) {
+        if (parsed.size() >= kMaxTileListEntries) {
+            DF_WARN("core", "config %s has more than %zu entries, extra entries dropped", key,
+                    kMaxTileListEntries);
+            dirty = true;
+            break;
+        }
+        if (!item.is_string()) {
+            DF_WARN("core", "config %s contains a non-string entry, dropped", key);
+            dirty = true;
+            continue;
+        }
+        std::string text = item.get<std::string>();
+        if (text.empty()) {
+            dirty = true;
+            continue;
+        }
+        if (text.size() > kMaxIdentityLength) {
+            DF_WARN("core", "config %s entry longer than %zu bytes, dropped", key,
+                    kMaxIdentityLength);
+            dirty = true;
+            continue;
+        }
+        parsed.push_back(std::move(text));
+    }
+    out = std::move(parsed);
+    return dirty;
+}
+
+void WriteIdentityList(json& node, const char* key, const std::vector<std::string>& values) {
+    json array = json::array();
+    for (const auto& value : values) array.push_back(value);
+    node[key] = std::move(array);
+}
 
 int ClampInt(int value, IntRange range, const char* name) {
     const int clamped = std::clamp(value, range.min, range.max);
@@ -278,6 +334,8 @@ bool ParseConfig(const std::string& json_text, Config& out, std::string* error) 
         bad_value |= ReadNumber(node, "falloff_sharpness", parsed.dock.falloff_sharpness);
         bad_value |= ReadEnum(node, "hover_falloff", ParseFalloff, parsed.dock.hover_falloff);
         bad_value |= ReadEnum(node, "position", ParsePosition, parsed.dock.position);
+        bad_value |= ReadIdentityList(node, "tiles", parsed.dock.tiles);
+        bad_value |= ReadIdentityList(node, "hidden", parsed.dock.hidden);
     }
     if (document.contains("appearance") && document["appearance"].is_object()) {
         const auto& node = document["appearance"];
@@ -323,6 +381,15 @@ std::string SerializeConfig(const Config& config) {
         {"falloff_sharpness", RoundForJson(config.dock.falloff_sharpness)},
         {"position", ToString(config.dock.position)},
     };
+    // Written only when the user has actually curated the dock. An empty array in
+    // every default file would suggest a feature nobody used and add two lines of
+    // noise to the first thing a new user opens.
+    if (!config.dock.tiles.empty()) {
+        WriteIdentityList(document["dock"], "tiles", config.dock.tiles);
+    }
+    if (!config.dock.hidden.empty()) {
+        WriteIdentityList(document["dock"], "hidden", config.dock.hidden);
+    }
     document["appearance"] = {
         {"material", ToString(config.appearance.material)},
         {"corner_radius", config.appearance.corner_radius},

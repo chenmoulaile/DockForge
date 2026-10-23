@@ -1,0 +1,13 @@
+dock=(685,1595) 1510x213 pid=29140
+drag scale=2.002 window=754.3dip origin=45.1dip from=(823,1748) to=(1272,1748) eject=False
+log_press=True
+press_line=2026-10-24T03:50:41.094+08:00 DEBUG [dock] drag press tile=0 capture=1 match=1 err=0
+log_reorder=True
+log_remove=False
+log_cancel=False
+reorder_line=2026-10-24T03:50:41.959+08:00 INFO [dock] reordered tile[0] -> [4]
+reorder_indices from=0 to=4 expected_from=0 expected_to=4
+verdict=REORDERED
+config_tiles=12 config_hidden=0
+config_tile_0={6d809377-6af0-444b-8957-a3773f02200e}\huawei\personal center\wisdomdispatch.exe
+config_tile_1=com.zhipuai.autoclaw

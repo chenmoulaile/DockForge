@@ -11,7 +11,9 @@
 #include "core/log.h"
 #include "core/paths.h"
 #include "dock/dock_view.h"
+#include "dock/drag_controller.h"
 #include "dock/running_tracker.h"
+#include "dock/tile_order.h"
 #include "platform/composition.h"
 #include "platform/display.h"
 #include "platform/hit_region.h"
@@ -342,8 +344,24 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     // Non-const: RunningTracker writes each tile's run_state in place. Keeping the
     // state on the tile rather than in a parallel array means the two cannot fall
     // out of step if the tile list is ever rebuilt.
-    std::vector<dock::DockTile> tiles =
-        dock::BuildTiles(dock_apps, icons, kDockTileLimit, kDockIconPx);
+    //
+    // The curated order from config is applied here rather than inside BuildTiles:
+    // ordering is a user decision, icon extraction is a shell detail, and keeping
+    // them in one function would make the order untestable without a live shell.
+    // DOCKFORGE_PIN_APPS deliberately bypasses the curated order - it exists to hold
+    // a fixed subset for measurement, and a saved arrangement would fight it.
+    std::vector<dock::DockTile> tiles;
+    if (pins.empty()) {
+        const std::vector<shell::AppEntry> ordered = dock::ApplyOrder(
+            dock_apps, config.dock.tiles, config.dock.hidden, kDockTileLimit);
+        tiles = dock::BuildTiles(ordered, icons, kDockTileLimit, kDockIconPx);
+        if (!config.dock.tiles.empty()) {
+            DF_INFO("dock", "curated order: %zu names -> %zu visible of %zu scanned",
+                    config.dock.tiles.size(), tiles.size(), dock_apps.size());
+        }
+    } else {
+        tiles = dock::BuildTiles(dock_apps, icons, kDockTileLimit, kDockIconPx);
+    }
     DF_INFO("app", "dock tiles: %zu of %zu apps (limit=%d icon=%dpx)", tiles.size(),
             dock_apps.size(), kDockTileLimit, kDockIconPx);
     // Logged per tile because a tile with no icon still occupies a slot: the plate
@@ -582,6 +600,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     // the frame rate, so the tick is the only place a repaint may be requested.
     bool hover_moved = false;
 
+    // Reorder gesture (T-013). Lives next to the hover state because both are driven
+    // by the same pointer stream and must agree about where the row is: the drag
+    // reads the centres the painter last laid out, so the insertion slot always
+    // matches the icons on screen.
+    dock::DragController drag;
+    bool drag_moved = false;  // set by WM_MOUSEMOVE, consumed by the tick
+
     // Paint cost, measured separately from the frame interval: the frame clock only
     // says a deadline was missed, this says whether the miss was drawing or present.
     core::FrameClock paint_clock;
@@ -602,6 +627,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                 input.dpi = dpi;
                 input.geometry = geometry;
                 input.hover = dock_hover;
+                // Non-null only while a drag is in flight: the painter draws the
+                // ghost and the insertion line, and skips the source slot. Passing
+                // the controller's own state (not a copy) keeps the ghost and the
+                // insertion slot from disagreeing mid-gesture.
+                input.drag = drag.Active() ? &drag.State() : nullptr;
                 if (!dock_painter.Paint(dc, *render_backend, plate, input)) {
                     DF_WARN("dock", "dock paint failed at %.0f dpi", dpi);
                 }
@@ -659,7 +689,19 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         // not.
         RECT row{};
         bool include_row = false;
-        if (region_hovered) {
+        // During a drag the ghost follows the pointer and the icons push aside, so
+        // the window must be fully clickable and fully drawn: a region trimmed to
+        // the plate would clip the lifted ghost the moment it leaves the dock, and
+        // clipping composition content is exactly what SetWindowRgn does (T-010
+        // spike conclusion 3). A drag is a transient state, so paying for a full
+        // window region here does not affect the idle path.
+        if (drag.Active()) {
+            row.left = 0;
+            row.top = 0;
+            row.right = plate.right;
+            row.bottom = plate.bottom;
+            include_row = true;
+        } else if (region_hovered) {
             dock::DockHover full;
             full.active = true;
             full.intensity = 1.0f;
@@ -699,6 +741,31 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     };
     apply_region();
 
+    // One tile's click action, factored out because it now runs on button release
+    // rather than on press: the press may become a drag, and only the release knows
+    // which it was.
+    auto ActivateTile = [&](int index) {
+        if (index < 0 || index >= static_cast<int>(tiles.size())) return;
+        const shell::AppEntry& app = tiles[static_cast<std::size_t>(index)].app;
+        // Enumerate once per click rather than caching: the window set changes
+        // without notice (apps close, dialogs open) and EnumWindows costs ~1ms, which
+        // is affordable on a click and not on a frame.
+        const shell::ActionResult result = shell::ActivateOrMinimizeTimed(app);
+        DF_INFO("dock", "tile[%d] %s -> %s (%s, pid=%lu, %.2fms)", index,
+                core::WideToUtf8(app.display_name).c_str(), shell::ToString(result.action),
+                result.route, static_cast<unsigned long>(result.process_id),
+                result.elapsed_ms);
+        // Split out because the two halves have different fixes: enumeration scales
+        // with the desktop, the action is one window call. Both are needed to keep
+        // the click path inside the 16.7ms frame budget.
+        DF_DEBUG("dock", "click cost: enumerate=%.2fms total=%.2fms", result.enumerate_ms,
+                 result.elapsed_ms);
+        // Force the next tick to re-enumerate so the new window's indicator appears
+        // immediately instead of up to 300ms later. Without this a launch looks like
+        // it failed for a quarter second.
+        running_tracker.Invalidate();
+    };
+
     core::EventBus bus;
     core::AppLoop loop;
     loop.SetTargetIntervalMs(16);  // 60 FPS target (PERFORMANCE.md)
@@ -729,6 +796,21 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         region_hovered = dock_hover.active;
         if (hover_moved) {
             hover_moved = false;
+            dirty = true;
+        }
+        // Same coalescing for the drag: mouse moves arrive far faster than 60 Hz, and
+        // a reorder frame that repainted per message would spend the budget on
+        // duplicates. The controller's state is already current, so skipping
+        // intermediate paints loses nothing.
+        if (drag_moved) {
+            drag_moved = false;
+            dirty = true;
+        }
+        // The eject confirmation is time-based, so it has to advance on the tick: the
+        // pointer can be held perfectly still outside the dock, and Move only fires on
+        // motion. Without this the hold would never complete for a user who stops
+        // moving, which is exactly what "hold to confirm" invites them to do.
+        if (drag.Tick(delta_ms)) {
             dirty = true;
         }
         if (dock::AdvanceHover(dock_hover, delta_ms) || region_hovered != was_hovered) {
@@ -840,7 +922,27 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                 // unscaled client coordinates, so the value has to be divided by the
                 // window scale before it means anything to the DIP-based layout.
                 const float scale = window.Scale();
-                const float x = static_cast<float>(GET_X_LPARAM(lp)) / (scale > 0.0f ? scale : 1.0f);
+                const float safe_scale = scale > 0.0f ? scale : 1.0f;
+                const float x = static_cast<float>(GET_X_LPARAM(lp)) / safe_scale;
+                const float y = static_cast<float>(GET_Y_LPARAM(lp)) / safe_scale;
+
+                // A drag in flight consumes the move whether or not the pointer is
+                // over an icon: the ghost follows the pointer past the dock's edge,
+                // and SetCapture is what keeps those messages coming (spike
+                // conclusion 1: 3 moves outside the window arrived only with capture).
+                if (drag.State().phase != dock::DragPhase::Idle) {
+                    // Idle centres, not the magnified ones: the insertion slot must be a
+                    // function of the pointer alone. Feeding the magnified row back in
+                    // makes the slot depend on which icon is currently under the pointer,
+                    // and the same gesture then lands in different places depending on
+                    // where it started (measured: 0 -> 4 reported 0 -> 3).
+                    drag.Move(x, y, dock_painter.IdleCentersDip(safe_scale),
+                              geometry.window_width_dip, geometry.window_height_dip);
+                    drag_moved = true;
+                    out = 0;
+                    return true;
+                }
+
                 if (x != dock_hover.mouse_x_dip || !dock_hover.active) {
                     dock_hover.mouse_x_dip = x;
                     dock_hover.active = true;
@@ -856,7 +958,16 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
             }
             case WM_MOUSELEAVE: {
                 tracking_mouse = false;
-                dock_hover.active = false;
+                // A drag suppresses WM_MOUSELEAVE for its whole duration (measured:
+                // the leave only arrives when no button is held), so this cannot
+                // cancel a gesture by accident. Kept as an assertion rather than a
+                // guard because if that ever changes, silently clearing the hover
+                // would strand the ramp mid-way with no way to finish it.
+                if (drag.State().phase != dock::DragPhase::Idle) {
+                    DF_WARN("dock", "WM_MOUSELEAVE arrived during a drag; ignoring hover reset");
+                } else {
+                    dock_hover.active = false;
+                }
                 InvalidateRect(hwnd, nullptr, FALSE);
                 out = 0;
                 return true;
@@ -870,6 +981,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                 // a window work without the synthetic-ALT fallback.
                 const float scale = window.Scale() > 0.0f ? window.Scale() : 1.0f;
                 const float x_dip = static_cast<float>(GET_X_LPARAM(lp)) / scale;
+                const float y_dip = static_cast<float>(GET_Y_LPARAM(lp)) / scale;
 
                 // Hit test against a layout recomputed for the current pointer, not
                 // the last painted frame. The two normally agree, but a click that
@@ -885,26 +997,84 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                     return true;
                 }
 
-                const shell::AppEntry& app = tiles[static_cast<std::size_t>(index)].app;
-                // Enumerate once per click rather than caching: the window set changes
-                // without notice (apps close, dialogs open) and EnumWindows costs
-                // ~1ms, which is affordable on a click and not on a frame.
-                const shell::ActionResult result = shell::ActivateOrMinimizeTimed(app);
-                DF_INFO("dock", "tile[%d] %s -> %s (%s, pid=%lu, %.2fms)",
-                        index, core::WideToUtf8(app.display_name).c_str(),
-                        shell::ToString(result.action), result.route,
-                        static_cast<unsigned long>(result.process_id), result.elapsed_ms);
-                // Split out because the two halves have different fixes: enumeration
-                // scales with the desktop, the action is one window call. Both are
-                // needed to keep the click path inside the 16.7ms frame budget.
-                DF_DEBUG("dock", "click cost: enumerate=%.2fms total=%.2fms", result.enumerate_ms,
-                         result.elapsed_ms);
-                // Force the next tick to re-enumerate so the new window's indicator
-                // appears immediately instead of up to 300ms later. Without this a
-                // launch looks like it failed for a quarter second.
-                running_tracker.Invalidate();
+                // The press does not act yet: it might become a drag. The action runs
+                // on release, when the gesture has resolved into click, reorder, or
+                // removal. Capture is taken now so the pointer can leave the window
+                // without ending the gesture.
+                drag.Begin(index, x_dip, y_dip);
+                SetCapture(hwnd);
+                // The region has to widen to the whole window the moment the drag
+                // starts, not on the next hover transition. It is trimmed to the plate
+                // and the magnified row while idle, and the ghost follows the pointer
+                // out of both - SetWindowRgn clips composition content (T-010 spike
+                // conclusion 3), so leaving the old region in place cut the ghost off
+                // at the plate's top edge.
+                apply_region();
+                // Capture is what makes the gesture survive the pointer leaving the
+                // window, so a silent failure here would look like a working drag that
+                // mysteriously stops tracking. Logged rather than assumed.
+                {
+                    const HWND captured = GetCapture();
+                    DF_DEBUG("dock", "drag press tile=%d capture=%d match=%d err=%lu", index,
+                             captured != nullptr, captured == hwnd, GetLastError());
+                }
                 out = 0;
                 return true;
+            }
+            case WM_LBUTTONUP: {
+                if (drag.State().phase == dock::DragPhase::Idle) return false;
+                ReleaseCapture();
+                const dock::DragController::Result result = drag.End();
+                apply_region();
+                drag_moved = true;
+                switch (result.kind) {
+                    case dock::DragController::Result::Kind::Click:
+                        ActivateTile(result.source_index);
+                        break;
+                    case dock::DragController::Result::Kind::Reorder:
+                        dock::MoveTile(tiles, result.source_index, result.insert_index);
+                        DF_INFO("dock", "reordered tile[%d] -> [%d]", result.source_index,
+                                result.insert_index);
+                        // Persisted immediately, not on exit: a crash between the
+                        // gesture and the shutdown would lose the arrangement the
+                        // user just made, and it cannot be reconstructed from the
+                        // scan.
+                        dock::CommitOrder(config, tiles, std::string());
+                        break;
+                    case dock::DragController::Result::Kind::Remove: {
+                        const std::string identity = dock::IdentityOf(
+                            tiles[static_cast<std::size_t>(result.source_index)].app);
+                        const std::string name = core::WideToUtf8(
+                            tiles[static_cast<std::size_t>(result.source_index)].app.display_name);
+                        if (dock::RemoveTile(tiles, result.source_index)) {
+                            DF_INFO("dock", "removed tile[%d] %s", result.source_index,
+                                    name.c_str());
+                            dock::CommitOrder(config, tiles, identity);
+                        }
+                        break;
+                    }
+                    case dock::DragController::Result::Kind::None:
+                    case dock::DragController::Result::Kind::Cancel:
+                        break;
+                }
+                // The window shrinks when a tile is removed, and the row moves when
+                // the order changes: both need a re-place, not just a repaint.
+                apply_placement();
+                InvalidateRect(hwnd, nullptr, FALSE);
+                out = 0;
+                return true;
+            }
+            case WM_CANCELMODE: {
+                // The system took the capture away (a modal dialog, a switch to
+                // another desktop). The user's intent is unknowable, so the gesture
+                // is dropped rather than resolved into a click or a reorder.
+                if (drag.State().phase != dock::DragPhase::Idle) {
+                    drag.Cancel();
+                    apply_region();
+                    InvalidateRect(hwnd, nullptr, FALSE);
+                    DF_INFO("dock", "drag cancelled by the system");
+                }
+                return false;
             }
             case WM_KEYDOWN:
                 if (wp == 'Q' && (GetKeyState(VK_CONTROL) & 0x8000)) {

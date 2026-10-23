@@ -21,11 +21,15 @@
 | appearance.corner_radius | int | 22 | 0..40 | px@100%DPI |
 | behavior.autostart | bool | false | - | - |
 | behavior.hide_taskbar | bool | false | - | - |
+| dock.tiles | array\<string\> | []（非托管） | ≤256 项，每项 ≤512 字符 | - |
+| dock.hidden | array\<string\> | [] | ≤256 项，每项 ≤512 字符 | - |
 
 **实现约束**
 - 未知键：忽略但保留（写回时不得丢失）。
 - 越界值：钳制到范围并在日志 WARN，不抛异常。
 - 解析失败：整份回退默认值，保留损坏文件为 `config.json.bad`。
+- `dock.tiles` / `dock.hidden` 存的是**身份字符串**，不是显示名（见 C-15a）。空数组在序列化时省略，默认配置文件不出现这两个键。
+- 列表内的条目校验：非字符串、空串、超长一律丢弃并置 `needs_rewrite`（触发一次自愈回写），不是整份回退默认值——一个坏条目不该抹掉用户的排列。
 
 ## C-02 主题包
 
@@ -517,3 +521,97 @@ Dock 的点击语义是「一个槽位三种结局」，判据必须来自实时
 - 单显示器主机，跨屏时指示器跟随未验证。
 - 同一进程多窗口时只高亮第一个命中窗口；逐窗口指示依赖 T-015 的窗口列表。
 - 帧预算判 WATCH 而非 PASS，理由见 `evidence/T-012/ab_tracker_cost.md`。
+
+## C-15 Dock 拖拽与排列（T-013 冻结）
+
+### C-15a 身份字符串（不是显示名）
+
+`dock.tiles` / `dock.hidden` 里存的是 `dock::IdentityOf(AppEntry)` 的输出，取值优先级：
+
+1. `aumid`（打包应用 / 裸桌面 id）
+2. `namespace_parsing`（`{GUID}\name` 形态）
+3. `target_path`（完整路径，**不是文件名**）
+4. `display_name`（最后兜底）
+
+全部经 `LowerAscii`（只转 A-Z，不做 locale 折叠）后存储。选择路径而不是文件名，是因为同一目录下不同子目录的同名 exe 是常见布局（`7zip\current\7zFM.exe` vs `7zip\26.00\7zFM.exe`），文件名会撞键。
+
+**身份必须在扫描后重新计算，不可从旧配置反查**：配置里存的是上一次的身份，条目可能已被卸载或换了安装路径。
+
+### C-15b 非托管 / 托管两种模式
+
+| `dock.tiles` | 行为 |
+|---|---|
+| 空 | **非托管**：按 AppsFolder 扫描顺序自动填充前 `kDockTileLimit`（12）项，跳过 `dock.hidden` |
+| 非空 | **托管**：只显示列表里点名的条目，**不自动补位** |
+
+托管模式不自动补位是刻意的：删掉一个 tile 后立刻由扫描序下一个顶上，用户会读成"删除没生效"。代价是列表比可用条目长时 Dock 会变短，这是可接受的——变短是用户能看见并理解的结果。
+
+`dock.hidden` 在两种模式下都生效，且**优先于** `dock.tiles`（同一身份同时出现在两处 = 隐藏）。
+
+### C-15c 重排语义
+
+`MoveTile(tiles, from, to)` 是 **erase + insert**，不是 swap。把第 1 个拖到第 4 个，中间三个要左移一位；swap 会让另外两个 tile 出现在用户没预期的位置。
+
+插入槽由 `InsertionIndexFor(pointer_x, centers, source_index)` 决定：
+
+- 数严格小于指针的 centre 个数，再减去源槽自身（源槽在指针左侧时才减）。
+- 比较用 `>=`：指针恰好落在某槽中心 = 正压在那个图标上，拖到图标上就该占它的位置。用 `>` 会让目标永远差一槽（合成指针从不停在中心，所以只对真人才暴露）。
+- 结果 `clamp(0, count-1)`。
+- **centres 必须是静止栅格**（`DockPainter::IdleCentersDip`），不是放大后的中心。放大后的中心是鼠标位置的函数，喂回去会形成反馈环：向右移 → 放大右侧 → 中心更靠右 → 改变"已越过哪个槽"。实测该环让 `0 -> 4` 的拖拽报成 `0 -> 3`。
+
+### C-15d 手势状态机
+
+`DragPhase{Idle, Pending, Dragging, Ejecting}`，阈值 `kDragThresholdDip = 4.0f`。
+
+- 阈值从**按下点**测量，不是上一帧。从上一帧测量会让慢速拖拽每帧都不足 4 DIP，永远不启动。
+- `Pending` 期间释放 = `Click`（走正常激活/最小化），不是 `Reorder`。
+- `Dragging` 期间 `insert_index == source_index` 时释放也判 `Click`：拖出去又拖回原位不该重写配置。
+
+### C-15e 移除需要长按确认
+
+`kDragEjectDip = 48.0f`，`kEjectConfirmMs = 550.0`。
+
+- 只判**上、左、右**，不判下方。Dock 贴工作区底边，向下滑落是最容易的误操作，判成移除会在误点时删 tile。
+- 窗口尺寸 ≤0 时 `IsEjectPosition` 恒 false（启动期几何未定）。
+- 进入 eject 区后**不立即移除**：`DragState::eject_hold_ms` 由 `DragController::Tick(delta_ms)` 累加，达到 550ms 才在 `End()` 报 `Remove`，否则报 `Cancel`。
+- `Tick` 必须由帧循环调用，**不能挂在 `Move` 上**：用户被要求"按住"时最自然的动作就是停下不动，而 `Move` 只在移动时触发。
+- 进出 eject 区时 `eject_hold_ms` / `eject_progress` 归零。跨一次滑出滑入累计会让一次抖动删掉 tile，这正是确认要防的事。
+- `Tick` 在进度满额后返回 false，停止请求重绘——否则一直按住会空转帧循环。
+- 唯一的反馈是 ghost 随 `eject_progress` 淡出（`kDragGhostOpacity * (1 - 0.65 * progress)`）。Dock 是 `WS_EX_NOACTIVATE`，弹确认框会抢焦点，比误删更糟。
+
+### C-15f 拖拽期间的 region 与重绘
+
+- 按下即调 `apply_region()` 把 region 扩到**整个窗口**。`SetWindowRgn` 会裁剪合成内容（C-12），不扩则 ghost 一离开板顶就被切掉（实测被切在 `y=317`，板顶）。
+- 拖拽期间 `apply_region` 不再走 hover 两态逻辑；释放后恢复。
+- `WM_MOUSEMOVE` 只更新 `DragController` 状态并置 `drag_moved`，由 tick 合并成每帧最多一次重绘。
+- `WM_MOUSEMOVE` 在拖拽态**提前 return**，不再更新 `dock_hover.mouse_x_dip`：拖拽期间行放大围绕按下点保持不动，行不随指针横移而重排。这不是遗漏，是让插入线可读——行跟着指针跑的话，插入线永远在指针正下方，看不出要插到哪。
+
+### C-15g 持久化时机
+
+`CommitOrder(config, tiles, removed_identity)` 在**手势结束时立即** `core::SaveConfig`，不等退出。手势结束后崩溃会丢掉用户刚做的排列，而排列无法从扫描结果重建。
+
+`dock.hidden` 只增不剪：临时缺失的应用（U 盘、未挂载的网络盘）会丢掉删除记录。重复移除同一身份不重复追加。
+
+### C-15h 测试隔离
+
+`core::ConfigPath()` 支持 `DOCKFORGE_CONFIG_PATH` 覆盖。`tests/main_test.cpp` 的 `ConfigIsolation` 在静态初始化期把它指向 `%TEMP%\dockforge-tests-<pid>\config.json`。
+
+**任何调用 `SaveConfig` 的测试都必须依赖这个隔离**：`CommitOrder` 的用例曾经把 `tiles:["alpha.app"]` 写进开发机真实配置，下次启动 Dock 只剩 1 个 tile。测试跑完必须验证真实配置未被触碰。
+
+### C-15i 验证手段
+
+| 断言 | 手段 | 判据 |
+|---|---|---|
+| 重排生效且索引正确 | `tools/drag_probe.ps1` 读 app 日志 | `reordered tile[a] -> [b]`，a/b 与注入的起止槽一致 |
+| 移除生效 | 同上 + 配置回读 | `removed tile[n]` + `dock.hidden` 含该身份 |
+| 提前释放不删除 | `-EjectAbort` | 无 `removed` 行，配置字节不变 |
+| 捕获真的建立 | app 自报 `drag press ... capture=1 match=1` | 不读探针进程的 `GetCapture()` |
+| ghost + 插入线画出 | `tools/drag_visual.ps1` 差分 | 拖拽帧 vs 悬停控制帧：ghost 变化像素聚集在指针周围，插入线是 ≤10px 宽的亮列 |
+| 拖拽帧率 | `tools/drag_bench.ps1` | `fps_min >= 55` 且 p99 窗口超预算数 = 0 |
+
+### C-15j 诚实边界
+
+1. **`GetCapture()` 不能跨进程断言**。它返回调用线程的捕获窗口，探针进程读永远是 0。第一版探针据此报 `capture_taken=False`，差点被当成"捕获没建立"去改设计。断言必须来自 app 自己打的日志。
+2. **拖拽视觉验证需要控制帧**，且控制帧必须停在**按下点**而不是释放点。拖拽期间行放大围绕按下点保持（C-15f），停在释放点的控制帧会放大另一个图标，差分结果全是图标横移，证明不了 ghost。
+3. **单显示器主机无法验证跨屏拖拽**。拖到副屏需要两个物理屏；本机只有一块 2880x1920，跨屏行为未测。
+4. **`drag_bench.ps1` 必须先等 `frames=1000`**。`FrameClock` 是 1000 样本滚动窗，启动期的大样本（首帧 309ms）要在 1000 个新样本后才滚出；不等就测，会把启动成本算成拖拽成本（实测报 p99=91.36ms / OVER_BUDGET，而稳态每窗 16.56–16.66ms）。

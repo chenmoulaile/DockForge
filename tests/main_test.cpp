@@ -9,7 +9,32 @@
 #include <windows.h>
 #include <objbase.h>
 
+#include <string>
+
 namespace {
+
+// Points the config at a throwaway file before anything can read the real one.
+//
+// ConfigPath() caches on first use, so this has to run during static initialization -
+// setting it inside a TEST_CASE would be too late for any test that ran earlier.
+// The reason it exists at all: a test that exercises the order serializer called
+// SaveConfig, which wrote `tiles: ["alpha.app"]` into the developer's real
+// %APPDATA%\DockForge\config.json, and the next launch of the app came up with a
+// single tile. Test isolation is not a nicety here; the test binary shares a profile
+// with the product.
+struct ConfigIsolation {
+    ConfigIsolation() {
+        wchar_t dir[MAX_PATH] = {};
+        const DWORD written = GetTempPathW(MAX_PATH, dir);
+        if (written == 0 || written >= MAX_PATH) return;
+        const std::wstring path =
+            std::wstring(dir, written) + L"dockforge-tests-" +
+            std::to_wstring(GetCurrentProcessId()) + L"\\config.json";
+        SetEnvironmentVariableW(L"DOCKFORGE_CONFIG_PATH", path.c_str());
+    }
+};
+
+ConfigIsolation g_config_isolation;
 
 struct ComApartment {
     HRESULT hr = E_FAIL;

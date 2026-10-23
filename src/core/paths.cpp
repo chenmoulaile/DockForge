@@ -4,6 +4,7 @@
 #include "platform/win_common.h"
 
 #include <shlobj.h>
+#include <iterator>
 #include <vector>
 
 namespace dockforge::core {
@@ -31,7 +32,22 @@ std::wstring ConfigDir() {
     return cached;
 }
 
-std::wstring ConfigPath() { return ConfigDir() + L"\\config.json"; }
+std::wstring ConfigPath() {
+    static const std::wstring cached = [] {
+        // Environment override first. Tests and evidence probes need a config they can
+        // freely overwrite; without this, a unit test that exercises the serializer
+        // writes the developer's real dock order (measured, see paths.h).
+        wchar_t override_path[1024] = {};
+        const DWORD written = GetEnvironmentVariableW(L"DOCKFORGE_CONFIG_PATH", override_path,
+                                                      static_cast<DWORD>(std::size(override_path)));
+        if (written > 0 && written < std::size(override_path)) {
+            return std::wstring(override_path, written);
+        }
+        return ConfigDir() + L"\\config.json";
+    }();
+    return cached;
+}
+
 
 std::wstring ThemesDir() { return ConfigDir() + L"\\themes"; }
 

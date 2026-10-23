@@ -9,6 +9,12 @@ namespace dockforge::core {
 std::wstring ConfigDir();
 
 // %APPDATA%\DockForge\config.json
+//
+// Overridable with DOCKFORGE_CONFIG_PATH so the test binary and the evidence probes
+// cannot write into the real profile. Without it, running dockforge_tests.exe on a
+// developer machine rewrites the live dock arrangement - measured: a test case that
+// exercises the order serializer left `tiles: ["alpha.app"]` in the user's config and
+// the next launch came up with a single tile.
 std::wstring ConfigPath();
 
 // %APPDATA%\DockForge\themes

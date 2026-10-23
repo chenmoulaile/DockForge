@@ -18,6 +18,24 @@ struct DockConfig {
     float influence_radius = 3.0f;  // 1.0..5.0 icon widths
     float falloff_sharpness = 2.0f; // 0.5..4.0 exponent
     DockPosition position = DockPosition::Bottom;
+
+    // Curated tile order, as lowercased identity strings (C-01 tiles/hidden).
+    //
+    // Empty means "unmanaged": the dock shows the first N apps in scan order and
+    // the user has never reordered anything. The first reorder or removal writes
+    // the visible identities here, which is what makes the order survive a
+    // restart. Only the visible tiles are listed - the tail of the AppsFolder scan
+    // is re-appended in scan order on every load, so a list of 12 stays a list of
+    // 12 no matter how many apps are installed.
+    std::vector<std::string> tiles;
+
+    // Identities the user removed by dragging them off the dock.
+    //
+    // A separate list from `tiles` because the two answer different questions:
+    // `tiles` is order, `hidden` is exclusion. Without it, "append whatever the
+    // order does not mention" would resurrect every removed tile on the next
+    // launch - the app is still in AppsFolder, so the scan finds it again.
+    std::vector<std::string> hidden;
 };
 
 struct AppearanceConfig {

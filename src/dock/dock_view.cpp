@@ -134,6 +134,8 @@ bool AdvanceHover(DockHover& hover, double delta_ms) {
 const LayoutSummary& DockPainter::UpdateLayout(const DockGeometry& geometry,
                                               const DockHover& hover, int tile_count) {
     const int count = std::max(tile_count, 0);
+    baseline_dip_ = geometry.baseline_dip;
+    geometry_ = geometry;
     if (count == 0) {
         last_ = LayoutSummary{};
         // Cleared so HitTest cannot report a slot that Paint would not draw after the
@@ -171,6 +173,33 @@ int DockPainter::HitTest(float x_dip, float scale) const {
         }
     }
     return -1;
+}
+
+std::vector<float> DockPainter::IconCentersDip(float scale) const {
+    std::vector<float> centers;
+    if (!(scale > 0.0f)) return centers;
+    centers.reserve(scratch_.size());
+    for (const IconLayout& icon : scratch_) {
+        centers.push_back(row_origin_dip_ + icon.center / scale);
+    }
+    return centers;
+}
+
+std::vector<float> DockPainter::IdleCentersDip(float scale) const {
+    // Analytic, not a layout run: at rest every icon has scale 1 and zero shift, so the
+    // centres are just a fixed pitch. Computing them from geometry_ rather than from
+    // scratch_ is the whole point - scratch_ holds the magnified row.
+    std::vector<float> centers;
+    if (!(scale > 0.0f)) return centers;
+    const int count = static_cast<int>(scratch_.size());
+    centers.reserve(static_cast<std::size_t>(count));
+    const float pitch_px =
+        static_cast<float>(geometry_.params.icon_size + geometry_.params.gap);
+    const float half_px = static_cast<float>(geometry_.params.icon_size) * 0.5f;
+    for (int i = 0; i < count; ++i) {
+        centers.push_back(row_origin_dip_ + (i * pitch_px + half_px) / scale);
+    }
+    return centers;
 }
 
 bool DockPainter::Paint(ID2D1DeviceContext& dc, render::IRenderBackend& backend,
@@ -221,6 +250,23 @@ bool DockPainter::Paint(ID2D1DeviceContext& dc, render::IRenderBackend& backend,
     // baseline comes from the geometry so the indicator pass below lands on the same
     // line without recomputing it.
     const float baseline_dip = geometry.baseline_dip;
+
+    // A tile being dragged is drawn as a ghost at the pointer instead of in its slot,
+    // and its slot is left empty so the row reads as "picked up". Drawing it twice
+    // (in the slot and at the pointer) would look like a duplicate, and drawing it in
+    // the slot only would make the drag invisible until release.
+    const DragState* drag = input.drag;
+    const bool dragging = drag != nullptr && drag->source_index >= 0 &&
+                          drag->source_index < count &&
+                          (drag->phase == DragPhase::Dragging ||
+                           drag->phase == DragPhase::Ejecting);
+    const int drag_source = dragging ? drag->source_index : -1;
+    const int drag_insert = dragging ? drag->insert_index : -1;
+
+    // Edges of the slot the insertion line attaches to, filled in during the loop.
+    float insert_left_dip = 0.0f;
+    float insert_right_dip = 0.0f;
+
     for (int i = 0; i < count; ++i) {
         const IconLayout& icon = scratch_[static_cast<std::size_t>(i)];
         const DockTile& tile = (*input.tiles)[static_cast<std::size_t>(i)];
@@ -229,16 +275,22 @@ bool DockPainter::Paint(ID2D1DeviceContext& dc, render::IRenderBackend& backend,
         const float half_dip = icon.width / scale * 0.5f;
         const render::RectF slot{center_x_dip - half_dip, baseline_dip - icon.width / scale,
                                  center_x_dip + half_dip, baseline_dip};
+        if (i == drag_insert) {
+            insert_left_dip = slot.left;
+            insert_right_dip = slot.right;
+        }
 
-        if (tile.icon.valid()) {
-            const render::BitmapView view{tile.icon.width, tile.icon.height,
-                                          tile.icon.pixels.data()};
-            backend.DrawBitmap(tile.icon_key, view, slot, 1.0f);
-        } else {
-            // Placeholder: a faint ring where the icon would be. Silence here would
-            // read as a broken dock rather than a missing shell icon.
-            backend.StrokeRoundedRect(slot, half_dip, render::ColorF{0.62f, 0.66f, 0.74f, 0.35f},
-                                      1.5f);
+        if (i != drag_source) {
+            if (tile.icon.valid()) {
+                const render::BitmapView view{tile.icon.width, tile.icon.height,
+                                              tile.icon.pixels.data()};
+                backend.DrawBitmap(tile.icon_key, view, slot, 1.0f);
+            } else {
+                // Placeholder: a faint ring where the icon would be. Silence here
+                // would read as a broken dock rather than a missing shell icon.
+                backend.StrokeRoundedRect(
+                    slot, half_dip, render::ColorF{0.62f, 0.66f, 0.74f, 0.35f}, 1.5f);
+            }
         }
 
         // Running indicator, centred in the plate's bottom padding.
@@ -246,7 +298,9 @@ bool DockPainter::Paint(ID2D1DeviceContext& dc, render::IRenderBackend& backend,
         // Drawn inside the padding rather than below the plate because the plate's
         // bottom edge is the window's bottom edge: anything lower would fall outside
         // both the plate and the window region, and SetWindowRgn would clip it.
-        if (tile.run_state != TileRunState::Idle) {
+        // Suppressed for the dragged tile: a dot hanging under an empty slot reads as
+        // a running app with no icon.
+        if (tile.run_state != TileRunState::Idle && i != drag_source) {
             const bool front = tile.run_state == TileRunState::Foreground;
             const float dot = kIndicatorDotDip;
             // Vertically centred in the 10 DIP padding that sits under the icons.
@@ -262,6 +316,54 @@ bool DockPainter::Paint(ID2D1DeviceContext& dc, render::IRenderBackend& backend,
                                     render::ColorF{0.92f, 0.94f, 0.98f, alpha});
         }
     }
+
+    if (!dragging) return true;
+
+    // Insertion line: a short vertical caret at the edge of the destination slot.
+    //
+    // Placed on the side the tile is arriving from (left edge when moving left, right
+    // edge when moving right) so the line sits where the tile's leading edge will
+    // land. Drawing it on a fixed side would put it one slot away from the icon that
+    // is about to move.
+    if (drag_insert != drag_source && drag_insert >= 0 && drag_insert < count) {
+        const float x = drag_insert < drag_source ? insert_left_dip : insert_right_dip;
+        const float icon_dip = static_cast<float>(std::max(config.dock.icon_size, 1));
+        const float half = icon_dip * kDropLineHeightFactor * 0.5f;
+        const float mid = baseline_dip - icon_dip * 0.5f;
+        const render::RectF line{x - kDropLineWidthDip * 0.5f, mid - half,
+                                 x + kDropLineWidthDip * 0.5f, mid + half};
+        // Only drawn while the tile would actually move. A line at the source slot
+        // would claim a reorder that release will not perform (End() reports Click
+        // when insert == source).
+        backend.FillRoundedRect(line, kDropLineWidthDip * 0.5f,
+                                render::ColorF{0.92f, 0.94f, 0.98f, 0.85f});
+    }
+
+    // Ghost: the lifted tile, centred on the pointer.
+    //
+    // Uses the idle icon size rather than the magnified one. The magnified size
+    // belongs to the slot the icon sits in, and the ghost is no longer in a slot;
+    // keeping it at 1x also makes it visibly smaller than the row it came from, which
+    // is what tells the user it has been detached.
+    const DockTile& source = (*input.tiles)[static_cast<std::size_t>(drag_source)];
+    if (source.icon.valid()) {
+        const float icon_dip = static_cast<float>(std::max(config.dock.icon_size, 1));
+        const float half = icon_dip * 0.5f;
+        const render::RectF ghost{drag->pointer_x_dip - half, drag->pointer_y_dip - half,
+                                  drag->pointer_x_dip + half, drag->pointer_y_dip + half};
+        const render::BitmapView view{source.icon.width, source.icon.height,
+                                      source.icon.pixels.data()};
+        // Fading with the eject hold is the only feedback the confirmation has. The
+        // dock never takes focus, so there is no dialog and no title-bar cue: if the
+        // ghost did not fade, "hold to remove" would be indistinguishable from "the
+        // dock has stopped responding". Fading to 35% leaves the artwork readable
+        // right up to the moment it disappears, so the user can still see which tile
+        // they are about to lose.
+        const float opacity =
+            kDragGhostOpacity * (1.0f - 0.65f * std::clamp(drag->eject_progress, 0.0f, 1.0f));
+        backend.DrawBitmap(source.icon_key, view, ghost, opacity);
+    }
+
     return true;
 }
 

@@ -10,6 +10,9 @@
 
 #include <catch_amalgamated.hpp>
 
+#include <cmath>
+#include <cstddef>
+
 using namespace dockforge;
 
 namespace {
@@ -224,4 +227,57 @@ TEST_CASE("an empty row does not widen the region", "[dock][region]") {
     CHECK(PtInRegion(region, 350, 90));
     CHECK_FALSE(PtInRegion(region, 350, 20));
     DeleteObject(region);
+}
+
+TEST_CASE("idle slot centres do not move when the row magnifies", "[dock][drag]") {
+    // This is the regression test for the feedback loop that made drags land in the
+    // wrong slot: the insertion index was derived from the magnified centres, so
+    // moving the pointer right magnified the icons on the right, which pushed their
+    // centres further right, which changed which slot the pointer had "passed".
+    // Measured on a real drag: 0 -> 4 reported 0 -> 3, and the answer depended on
+    // where the drag started.
+    //
+    // The idle grid is a pure function of the config, so it must be identical no
+    // matter what the last layout happened to be.
+    core::Config config;
+    config.dock.icon_size = 48;
+    config.dock.gap = 8;
+    config.dock.magnification = 1.8f;
+
+    const auto geometry = dock::ComputeGeometry(config, 5, 1.0f);
+    dock::DockPainter painter;
+
+    dock::DockHover idle;
+    painter.UpdateLayout(geometry, idle, 5);
+    const auto at_rest = painter.IdleCentersDip(1.0f);
+
+    dock::DockHover hovering;
+    hovering.active = true;
+    hovering.intensity = 1.0f;
+    hovering.mouse_x_dip = 300.0f;
+    painter.UpdateLayout(geometry, hovering, 5);
+    const auto while_hovering = painter.IdleCentersDip(1.0f);
+
+    REQUIRE(at_rest.size() == 5);
+    REQUIRE(while_hovering.size() == at_rest.size());
+    for (std::size_t i = 0; i < at_rest.size(); ++i) {
+        CHECK(while_hovering[i] == Catch::Approx(at_rest[i]));
+    }
+
+    // And they must be the idle pitch: icon 48 + gap 8 = 56 apart, first centre half
+    // an icon in from the row origin.
+    const float pitch = 56.0f;
+    for (std::size_t i = 1; i < at_rest.size(); ++i) {
+        CHECK(at_rest[i] - at_rest[i - 1] == Catch::Approx(pitch));
+    }
+
+    // The magnified centres, by contrast, must differ - otherwise this test would
+    // pass on a build where magnification never ran and prove nothing.
+    const auto magnified = painter.IconCentersDip(1.0f);
+    REQUIRE(magnified.size() == at_rest.size());
+    bool any_difference = false;
+    for (std::size_t i = 0; i < at_rest.size(); ++i) {
+        if (std::abs(magnified[i] - at_rest[i]) > 0.5f) any_difference = true;
+    }
+    CHECK(any_difference);
 }

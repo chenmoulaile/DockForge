@@ -1,0 +1,14 @@
+dock=(685,1595) 1510x213 pid=17724
+drag scale=2.002 window=754.3dip origin=45.1dip from=(1048,1748) to=(1048,1355) eject=True
+holding in the eject zone for 900 ms
+log_press=True
+press_line=2026-10-24T03:50:31.598+08:00 DEBUG [dock] drag press tile=2 capture=1 match=1 err=0
+log_reorder=False
+log_remove=True
+log_cancel=False
+remove_line=2026-10-24T03:50:33.418+08:00 INFO [dock] removed tile[2] AutoClaw
+verdict=REMOVED
+config_tiles=11 config_hidden=1
+config_tile_0=autohotkey.ahk2exe
+config_tile_1={6d809377-6af0-444b-8957-a3773f02200e}\huawei\personal center\wisdomdispatch.exe
+config_hidden_0=com.zhipuai.autoclaw

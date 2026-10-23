@@ -8,6 +8,7 @@
 #pragma once
 
 #include "core/config.h"
+#include "dock/drag_controller.h"
 #include "dock/layout.h"
 #include "platform/win_common.h"
 #include "render/backend.h"
@@ -142,7 +143,24 @@ struct DockPaintInput {
     int backdrop_h = 0;
     float dpi = 96.0f;
     DockHover hover{};
+    // Live reorder gesture, or nullptr. The painter reads it but never writes: the
+    // controller owns the gesture, and two owners would let the ghost and the
+    // insertion slot disagree.
+    const DragState* drag = nullptr;
 };
+
+// Opacity of the lifted tile's ghost while dragging.
+//
+// Not 1.0: the ghost has to read as "held", not as "the icon grew and stopped
+// tracking the row". Not far below either - at 0.7 the artwork washes out against a
+// bright backdrop and the user loses track of what they are moving.
+inline constexpr float kDragGhostOpacity = 0.82f;
+
+// Thickness of the insertion line, in DIP.
+inline constexpr float kDropLineWidthDip = 3.0f;
+// Height of the insertion line as a fraction of the icon size. A full-height line
+// competes with the icons; a short one reads as a caret marking a text position.
+inline constexpr float kDropLineHeightFactor = 0.62f;
 
 // Owns the per-frame scratch layout so painting does not allocate. A Dock is
 // repainted on every hover frame, and C-05a rule 3 forbids heap traffic there.
@@ -176,6 +194,30 @@ class DockPainter {
     // the visible dock.
     int HitTest(float x_dip, float scale) const;
 
+    // Slot centres in window DIP, in tile order, from the last UpdateLayout.
+    //
+    // The drag controller needs them to decide the insertion slot, and they must be
+    // the same numbers Paint used - recomputing them from the geometry in a second
+    // place is how the ghost and the insertion line drift apart.
+    std::vector<float> IconCentersDip(float scale) const;
+
+    // Slot centres of the UNMAGNIFIED row, in window DIP.
+    //
+    // This, not IconCentersDip, is what the insertion slot is computed from. The
+    // magnified row is a function of the pointer position, so deciding the slot from
+    // it closes a feedback loop: moving right magnifies the icons on the right, which
+    // pushes their centres further right, which changes which slot the pointer is
+    // "past". Measured consequence: dragging the first tile onto the visual centre of
+    // the fifth reported slot 3, and the answer moved when the drag was replayed from a
+    // different starting slot. The idle grid is fixed, so the same gesture always lands
+    // in the same place.
+    std::vector<float> IdleCentersDip(float scale) const;
+
+    // Where the row's bottom edge sits, in window DIP. Exposed so the drag ghost can
+    // be aligned to the same baseline as the icons without duplicating the geometry
+    // lookup.
+    float BaselineDip() const { return baseline_dip_; }
+
   private:
     std::vector<IconLayout> scratch_;
     LayoutSummary last_{};
@@ -183,6 +225,12 @@ class DockPainter {
     // HitTest needs the same origin Paint used, and recomputing it from the geometry
     // in two places is how the two drift apart.
     float row_origin_dip_ = 0.0f;
+    // Baseline in window DIP, cached by UpdateLayout for the same reason.
+    float baseline_dip_ = 0.0f;
+    // Last geometry seen by UpdateLayout. Cached so IdleCentersDip can rebuild the
+    // rest-state grid without another layout pass and without trusting that the last
+    // paint happened to be a resting one.
+    DockGeometry geometry_{};
 };
 
 }  // namespace dockforge::dock

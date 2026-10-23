@@ -1,0 +1,28 @@
+dock=(685,1595) 1510x213 pid=16348
+drag scale=2.002 window=754.3dip origin=45.1dip grab=(1048,1748)
+warmup frames=1000
+sweeps=5 seconds=15 sweep_ms=16
+--- summary over 14 one-second windows ---
+avg_mean=16ms
+p99_mean=16.578ms
+p99_max=16.69ms
+fps_mean=62.5
+fps_min=62.5
+p99_over_budget_windows=0
+dod_fps_min=62.5 dod_fps_verdict=PASS
+p99_verdict=PASS
+verdict=PASS
+2026-10-24T03:48:07.885+08:00 DEBUG [loop] frames=1000 avg=16.00ms p50=16.00ms p99=16.69ms fps=62.5 | paint n=31 avg=15.55ms p99=389.42ms | capture=0/0 avg=0.0ms | run polls=61 avg=0.49ms max=0.75ms fg=1
+2026-10-24T03:48:08.893+08:00 DEBUG [loop] frames=1000 avg=16.00ms p50=16.00ms p99=16.67ms fps=62.5 | paint n=44 avg=11.87ms p99=389.42ms | capture=0/0 avg=0.0ms | run polls=64 avg=0.49ms max=0.75ms fg=1
+2026-10-24T03:48:09.901+08:00 DEBUG [loop] frames=1000 avg=16.00ms p50=16.01ms p99=16.60ms fps=62.5 | paint n=57 avg=9.86ms p99=389.42ms | capture=0/0 avg=0.0ms | run polls=67 avg=0.49ms max=0.75ms fg=1
+2026-10-24T03:48:10.909+08:00 DEBUG [loop] frames=1000 avg=16.00ms p50=16.00ms p99=16.60ms fps=62.5 | paint n=70 avg=8.62ms p99=389.42ms | capture=0/0 avg=0.0ms | run polls=71 avg=0.49ms max=0.75ms fg=1
+2026-10-24T03:48:11.917+08:00 DEBUG [loop] frames=1000 avg=16.00ms p50=16.00ms p99=16.57ms fps=62.5 | paint n=83 avg=7.68ms p99=389.42ms | capture=0/0 avg=0.0ms | run polls=74 avg=0.48ms max=0.75ms fg=1
+2026-10-24T03:48:12.925+08:00 DEBUG [loop] frames=1000 avg=16.00ms p50=16.01ms p99=16.57ms fps=62.5 | paint n=96 avg=6.98ms p99=389.42ms | capture=0/0 avg=0.0ms | run polls=77 avg=0.48ms max=0.75ms fg=1
+2026-10-24T03:48:13.933+08:00 DEBUG [loop] frames=1000 avg=16.00ms p50=16.01ms p99=16.54ms fps=62.5 | paint n=109 avg=6.45ms p99=5.72ms | capture=0/0 avg=0.0ms | run polls=81 avg=0.47ms max=0.75ms fg=1
+2026-10-24T03:48:14.941+08:00 DEBUG [loop] frames=1000 avg=16.00ms p50=16.01ms p99=16.54ms fps=62.5 | paint n=122 avg=6.03ms p99=5.72ms | capture=0/0 avg=0.0ms | run polls=84 avg=0.47ms max=0.75ms fg=1
+2026-10-24T03:48:15.949+08:00 DEBUG [loop] frames=1000 avg=16.00ms p50=16.01ms p99=16.54ms fps=62.5 | paint n=134 avg=5.72ms p99=5.72ms | capture=0/0 avg=0.0ms | run polls=87 avg=0.47ms max=0.75ms fg=1
+2026-10-24T03:48:16.957+08:00 DEBUG [loop] frames=1000 avg=16.00ms p50=16.01ms p99=16.57ms fps=62.5 | paint n=147 avg=5.48ms p99=5.72ms | capture=0/0 avg=0.0ms | run polls=91 avg=0.47ms max=0.75ms fg=1
+2026-10-24T03:48:17.965+08:00 DEBUG [loop] frames=1000 avg=16.00ms p50=16.01ms p99=16.54ms fps=62.5 | paint n=160 avg=5.30ms p99=5.72ms | capture=0/0 avg=0.0ms | run polls=94 avg=0.47ms max=0.75ms fg=1
+2026-10-24T03:48:18.973+08:00 DEBUG [loop] frames=1000 avg=16.00ms p50=16.01ms p99=16.57ms fps=62.5 | paint n=173 avg=5.11ms p99=5.72ms | capture=0/0 avg=0.0ms | run polls=97 avg=0.47ms max=0.75ms fg=1
+2026-10-24T03:48:19.981+08:00 DEBUG [loop] frames=1000 avg=16.00ms p50=16.01ms p99=16.54ms fps=62.5 | paint n=186 avg=4.98ms p99=5.72ms | capture=0/0 avg=0.0ms | run polls=101 avg=0.47ms max=0.75ms fg=1
+2026-10-24T03:48:20.989+08:00 DEBUG [loop] frames=1000 avg=16.00ms p50=16.01ms p99=16.55ms fps=62.5 | paint n=199 avg=4.84ms p99=5.72ms | capture=0/0 avg=0.0ms | run polls=104 avg=0.46ms max=0.75ms fg=1

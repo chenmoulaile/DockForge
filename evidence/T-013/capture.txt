@@ -1,0 +1,19 @@
+window=400,400 600x200
+region=none
+capture=on
+--- counters ---
+left_button_downs=1
+captures=1
+releases=1
+moves_inside=2
+moves_outside=3
+moves_captured_outside=3
+leaves=0
+leave_while_captured=0
+cancels=0
+track_arms=1
+track_failures=0 last_error=0
+q1_capture_outside_window=YES
+q2_region_allows_captured_moves=YES
+q3_no_leave_during_drag=YES
+verdict=DRAG_CAPTURE_OK

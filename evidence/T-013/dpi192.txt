@@ -1,0 +1,15 @@
+dock=(685,1595) 1510x213 pid=23856
+drag scale=2.002 window=754.3dip origin=45.1dip from=(1048,1748) to=(1552,1624) eject=False
+hover_shot=D:\MacDock\evidence\T-013\drag_hover_192.png
+shot=D:\MacDock\evidence\T-013\drag_mid_192.png
+log_press=True
+press_line=2026-10-24T03:47:18.478+08:00 DEBUG [dock] drag press tile=2 capture=1 match=1 err=0
+log_reorder=True
+log_remove=False
+log_cancel=False
+reorder_line=2026-10-24T03:47:19.393+08:00 INFO [dock] reordered tile[2] -> [6]
+reorder_indices from=2 to=6 expected_from=2 expected_to=6
+verdict=REORDERED
+config_tiles=12 config_hidden=0
+config_tile_0=autohotkey.ahk2exe
+config_tile_1={6d809377-6af0-444b-8957-a3773f02200e}\huawei\personal center\wisdomdispatch.exe

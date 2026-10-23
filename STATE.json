@@ -2,13 +2,13 @@
     "project":  "DockForge",
     "schema":  1,
     "milestone":  "M1",
-    "last_task":  "T-012",
+    "last_task":  "T-013",
     "last_commit":  "2bed0dc",
     "current_module":  "dock",
-    "current_task":  "T-013",
+    "current_task":  "T-014",
     "counters":  {
                      "total":  16,
-                     "done":  12,
+                     "done":  13,
                      "partial":  0,
                      "blocked":  0
                  },
@@ -90,7 +90,14 @@
                           "click_probe.ps1 默认退出即杀进程，测量后截图会「进程不存在」——需要 -KeepRunning",
                           "RunningTracker 的 Update 返回「可见状态是否可能变化」而非「是否轮询了」，窗口集合未变时必须 false",
                           "文档类 AppsFolder 条目（.chm）点击后运行 hh.exe，路径匹配必然失败，指示器按真实归属不亮",
-                          "帧预算归因必须交替 A/B：同配置运行间波动 0.018ms 与待测差值同量级，单次对比无法归因"
+                          "帧预算归因必须交替 A/B：同配置运行间波动 0.018ms 与待测差值同量级，单次对比无法归因",
+                          "GetCapture() 返回调用线程的捕获窗口，跨进程断言恒为 0；判断 Dock 是否 SetCapture 必须读 app 自报日志",
+                          "拖拽插入槽不能用放大后的槽中心：放大布局是鼠标位置的函数，喂回去形成反馈环，实测让 0->4 报成 0->3；必须用解析式静止栅格 IdleCentersDip",
+                          "core::FrameClock 是 1000 样本滚动窗，启动期首帧 309ms 会污染前 16 秒的 p99；bench 必须等日志出现 frames=1000 再取基线",
+                          "拖拽视觉的控制帧必须停在按下点：拖拽期间 WM_MOUSEMOVE 提前 return，hover 位置不更新，行放大围绕按下点保持",
+                          "插入槽边界必须用 >= 而非 >：指针落在槽中心等于正压在那个图标上，严格大于会让目标永远差一槽",
+                          "测试写配置必须隔离：CommitOrder 用例曾写进开发机真实 config.json；ConfigPath() 支持 DOCKFORGE_CONFIG_PATH 覆盖，测试静态初始化期指向 %TEMP%",
+                          "ghost 一出板顶就被 SetWindowRgn 裁掉；WM_LBUTTONDOWN 里 drag.Begin 之后必须立刻 apply_region() 扩到整窗"
                       ],
-    "updated_at":  "2026-10-24T03:12:00+08:00"
+    "updated_at":  "2026-10-24T04:20:00+08:00"
 }

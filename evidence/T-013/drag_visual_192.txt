@@ -1,0 +1,11 @@
+idle=D:\MacDock\evidence\T-013\drag_hover_192.png
+drag=D:\MacDock\evidence\T-013\drag_mid_192.png
+size=1510x453 plate_top=317 line_band=355..415 diff_tolerance=18
+ghost changed_pixels=10560 bbox=276,260..914,316 size=639x57
+ghost near_pointer=4318 within=48px of (867,269)
+ghost thresholds width>=48 height>=38 near_pointer>=691
+ghost_verdict=DRAWN_AT_POINTER
+bright_runs total=1 narrow=1 wide=0 min_rows=30 of 61
+  narrow_run x=927 width=5 peak_rows=58
+line_verdict=DRAWN
+verdict=BOTH_DRAWN
