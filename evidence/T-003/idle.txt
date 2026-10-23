@@ -1,0 +1,6 @@
+﻿idle window: 60s
+cpu seconds used : 0.109s
+cpu percent      : 0.1823%
+rss start/end    : 11.55MB / 11.47MB
+handles start/end: 142 / 142
+threads          : 1

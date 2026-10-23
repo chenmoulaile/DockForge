@@ -1,5 +1,10 @@
-// DockForge entry point (T-001 skeleton, T-002 config wiring).
+// DockForge entry point.
+//
+// T-001 skeleton window, T-002 config wiring, T-003 frame-driven app loop.
+#include "core/app_loop.h"
 #include "core/config.h"
+#include "core/event_bus.h"
+#include "core/frame_clock.h"
 #include "core/log.h"
 #include "core/paths.h"
 #include "platform/window.h"
@@ -36,8 +41,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     using namespace dockforge;
     core::Logger::Instance().Init(L"app");
     DF_INFO("app", "DockForge %s starting", "0.1.0");
-    DF_INFO("app", "config path = %s",
-            core::WideToUtf8(core::ConfigPath()).c_str());
+    DF_INFO("app", "config path = %s", core::WideToUtf8(core::ConfigPath()).c_str());
 
     core::Config config = core::LoadConfig();
     DF_INFO("app", "config: icon_size=%d gap=%d mag=%.2f falloff=%s material=%s corner=%d",
@@ -70,9 +74,29 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     }
     EnableDarkTitleBar(window.Handle());
 
-    // T-001 skeleton: prove the window lives, can be painted, and quits cleanly.
-    // The real composition surface lands in T-004/T-005.
-    window.SetMessageHook([&config](HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, LRESULT& out) {
+    core::EventBus bus;
+    core::AppLoop loop;
+    loop.SetTargetIntervalMs(16);  // 60 FPS target (PERFORMANCE.md)
+
+    // T-003 wiring: the loop drives repaints only when something asked for one,
+    // so an idle Dock stays at ~0% CPU. Later milestones publish layout/animation
+    // events here instead of invalidating unconditionally.
+    loop.SetTickHandler([hwnd = window.Handle()](double delta_ms) {
+        // Animation work lands here in T-010. For now the tick only proves the
+        // cadence: a repaint request is issued when a frame budget was missed,
+        // which keeps idle CPU at zero while still exercising the path.
+        if (delta_ms > 100.0) {
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
+    });
+    loop.SetStatsHandler([](const core::FrameClock& clock) {
+        DF_DEBUG("loop", "frames=%zu avg=%.2fms p50=%.2fms p99=%.2fms fps=%.1f",
+                 clock.SampleCount(), clock.AverageMs(), clock.Percentile(50.0),
+                 clock.Percentile(99.0), clock.AverageFps());
+    });
+
+    window.SetMessageHook([&config, &loop](HWND hwnd, UINT msg, WPARAM wp, LPARAM lp,
+                                          LRESULT& out) {
         switch (msg) {
             case WM_PAINT: {
                 PAINTSTRUCT ps{};
@@ -84,8 +108,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                 DeleteObject(brush);
                 SetBkMode(dc, TRANSPARENT);
                 SetTextColor(dc, RGB(236, 240, 248));
-                wchar_t text[160];
-                swprintf_s(text, L"DockForge \u00b7 icon %d px \u00b7 gap %d \u00b7 mag %.1fx \u00b7 %s",
+                wchar_t text[192];
+                swprintf_s(text,
+                           L"DockForge \u00b7 icon %d px \u00b7 gap %d \u00b7 mag %.1fx \u00b7 %s",
                            config.dock.icon_size, config.dock.gap,
                            static_cast<double>(config.dock.magnification),
                            core::ToString(config.dock.hover_falloff));
@@ -103,6 +128,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                 return false;
             case WM_CLOSE:
                 DestroyWindow(hwnd);
+                loop.Quit(0);
+                out = 0;
+                return true;
+            case WM_DESTROY:
+                loop.Quit(0);
                 out = 0;
                 return true;
             default:
@@ -126,8 +156,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                      SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
     }
 
-    const int code = platform::Window::RunMessageLoop();
-    DF_INFO("app", "message loop exited with code %d", code);
+    const int code = loop.Run();
+    DF_INFO("app", "app loop exited with code %d", code);
+    bus.Clear();
     core::Logger::Instance().Shutdown();
     return code;
 }

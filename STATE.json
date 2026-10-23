@@ -2,13 +2,13 @@
   "project": "DockForge",
   "schema": 1,
   "milestone": "M0",
-  "last_task": "T-001",
-  "last_commit": "01ceefa1ef07e57601cbf4ab223b05545dff95a5",
-  "current_module": "core",
+  "last_task": "T-003",
+  "last_commit": "pending",
+  "current_module": "platform",
   "current_task": null,
   "counters": {
     "total": 15,
-    "done": 1,
+    "done": 3,
     "partial": 0,
     "blocked": 0
   },
@@ -37,7 +37,12 @@
     "WS_EX_NOREDIRECTIONBITMAP 下 GDI 绘制不可见，必须走 DComp（T-001 实测）",
     "wWinMain 需 -municode；Catch2 需 DO_NOT_USE_WMAIN",
     "FOLDERID_* 需链接 -luuid",
-    "日志句柄用 _wfsopen(_SH_DENYWR) 否则外部无法 tail"
+    "日志句柄用 _wfsopen(_SH_DENYWR) 否则外部无法 tail",
+    "MsgWaitForMultipleObjectsEx 的 timeout 被系统定时器粒度(~15.6ms)量化；帧节奏必须用 CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 等待定时器（ADR-0006）",
+    "截止时间必须固定步进推进（next += interval）并落后重同步，否则抖动累积成漂移",
+    "MinGW std::ifstream 不收 wstring 路径，文件 IO 统一走 Win32 API",
+    "PowerShell 传 -Wl,--whole-archive 需用 cmd /c 包裹",
+    "新增源文件必须先跑 cmake configure，否则 GLOB mismatch"
   ],
-  "updated_at": "2026-10-23T23:20:00+08:00"
+  "updated_at": "2026-10-23T23:36:00+08:00"
 }

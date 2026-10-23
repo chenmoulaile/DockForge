@@ -1,0 +1,6 @@
+﻿2026-10-23T23:31:17.102+08:00 DEBUG [loop] frames=126 avg=16.00ms p50=16.00ms p99=16.49ms fps=62.5
+2026-10-23T23:31:18.111+08:00 DEBUG [loop] frames=189 avg=16.00ms p50=16.01ms p99=16.66ms fps=62.5
+2026-10-23T23:31:19.118+08:00 DEBUG [loop] frames=252 avg=16.00ms p50=16.00ms p99=16.50ms fps=62.5
+2026-10-23T23:31:20.126+08:00 DEBUG [loop] frames=315 avg=16.00ms p50=16.00ms p99=16.52ms fps=62.5
+2026-10-23T23:31:21.135+08:00 DEBUG [loop] frames=378 avg=16.00ms p50=16.00ms p99=16.56ms fps=62.5
+2026-10-23T23:31:22.142+08:00 DEBUG [loop] frames=441 avg=16.00ms p50=16.01ms p99=16.59ms fps=62.5

@@ -61,12 +61,21 @@ const char* LogLevelName(LogLevel level) {
 }
 
 bool ParseLogLevel(std::string_view name, LogLevel& out) {
-    if (name == "TRACE") { out = LogLevel::Trace; return true; }
-    if (name == "DEBUG") { out = LogLevel::Debug; return true; }
-    if (name == "INFO") { out = LogLevel::Info; return true; }
-    if (name == "WARN") { out = LogLevel::Warn; return true; }
-    if (name == "ERROR") { out = LogLevel::Error; return true; }
-    if (name == "FATAL") { out = LogLevel::Fatal; return true; }
+    // Case-insensitive: DOCKFORGE_LOG_LEVEL is set by hand in shells and CI.
+    char upper[16]{};
+    const std::size_t n = name.size() < sizeof(upper) - 1 ? name.size() : sizeof(upper) - 1;
+    for (std::size_t i = 0; i < n; ++i) {
+        const char c = name[i];
+        upper[i] = (c >= 'a' && c <= 'z') ? static_cast<char>(c - 'a' + 'A') : c;
+    }
+    const std::string_view key(upper, n);
+
+    if (key == "TRACE") { out = LogLevel::Trace; return true; }
+    if (key == "DEBUG") { out = LogLevel::Debug; return true; }
+    if (key == "INFO") { out = LogLevel::Info; return true; }
+    if (key == "WARN" || key == "WARNING") { out = LogLevel::Warn; return true; }
+    if (key == "ERROR") { out = LogLevel::Error; return true; }
+    if (key == "FATAL") { out = LogLevel::Fatal; return true; }
     return false;
 }
 
@@ -90,6 +99,17 @@ void Logger::Init(std::wstring_view module) {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (initialized_) return;
+
+        // DOCKFORGE_LOG_LEVEL=trace|debug|info|warn|error lets a session raise
+        // verbosity without a rebuild (used to capture frame stats evidence).
+        wchar_t level_buffer[16]{};
+        if (GetEnvironmentVariableW(L"DOCKFORGE_LOG_LEVEL", level_buffer, 16) > 0) {
+            LogLevel parsed{};
+            const std::string narrow = WideToUtf8(level_buffer);
+            if (ParseLogLevel(narrow, parsed)) {
+                min_level_ = parsed;
+            }
+        }
 
         log_dir_ = LogsDir();
         if (!EnsureDirectory(log_dir_)) {
