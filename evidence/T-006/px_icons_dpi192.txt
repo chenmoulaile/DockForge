@@ -1,0 +1,6 @@
+﻿source=image evidence\T-006\icons_dpi192.png rect=(0,0) size=1056x304
+center         (528,152) rgba=(236,240,248,255)
+top_mid        (528,24) rgba=(14,15,20,255)
+left           (80,152) rgba=(236,240,248,255)
+corner         (6,6) rgba=(8,4,21,255)
+right          (1049,297) rgba=(105,66,172,255)

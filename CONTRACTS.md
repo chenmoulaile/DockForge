@@ -106,3 +106,68 @@ x_i = base_i + Σ_{j} (s_j - 1) * w * 0.5 * sign(i - j)
 例：2026-01-01T12:00:00.123+08:00 INFO  [core] config loaded from ...
 ```
 LEVEL ∈ TRACE/DEBUG/INFO/WARN/ERROR/FATAL。文件按天切分，保留 7 天。
+
+## C-08 shell 应用解析契约（T-006 冻结）
+
+### 身份五形态
+
+`AppsFolder` 里能枚举到的每一项，其 `SHGDN_FORPARSING` 字符串必属下列之一。分类函数是
+`shell::ClassifyParsingName`，它是扫描器唯一入口，任何新增来源都必须先过它。
+
+| ParsingKind | 形态 | 样例 | 启动方式 |
+|---|---|---|---|
+| `ShortcutPath` | `.lnk` 绝对路径 | `C:\...\AutoHotkey Dash.lnk` | `IShellLinkW` 解析 → `CreateProcessW` |
+| `FilePath` | 可执行文件绝对路径 | `C:\msys64\mingw64.exe` | `CreateProcessW` |
+| `PackagedAppId` | 打包应用 AUMID（含 `!`） | `Microsoft.WindowsCalculator_8wekyb3d8bbwe!App` | `IApplicationActivationManager::ActivateApplication` |
+| `DesktopAppId` | 无 `!` 的裸应用 id | `Anysphere.Cursor`、`Chrome` | `ShellExecuteExW("shell:AppsFolder\<id>")` |
+| `NamespacePath` | `{GUID}\name` 命名空间子项 | `{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\cmd.exe` | `ShellExecuteExW("shell:AppsFolder\{GUID}\name")` |
+
+对应 `AppKind`：`Shortcut` / `Executable` / `Uwp` / `ShellItem` / `NamespaceItem`（+`Unknown`）。
+
+### 三条实测硬约束（违反即失败）
+
+1. **命名空间子项必须先加 `shell:AppsFolder\` 前缀**。裸 `{GUID}\name` 走
+   `SHCreateItemFromParsingName` / `SHParseDisplayName` / `ShellExecuteExW` 全部
+   `0x80070002`；加前缀后图标与启动都成功。前缀拼接统一走
+   `shell::ShellNamespacePath()`，它用 `_wcsnicmp` 防重复（重复前缀返回 `E_INVALIDARG`）。
+2. **裸 `DesktopAppId` 不能用 `ActivateApplication`**（返回 `0x80070057 E_INVALIDARG`），
+   必须 `ShellExecuteExW`。
+3. **`IContextMenu::InvokeCommand` 只能按菜单序号调用**（`lpVerb = MAKEINTRESOURCEA(index - 1)`）；
+   verb 字符串 + `CMIC_MASK_UNICODE` 返回 `E_INVALIDARG`。
+
+### 图标来源解析顺序（`shell::IconSourceFor`）
+
+`icon_source` 非空 → `Uwp`/`ShellItem` 用 `ShellNamespacePath(aumid)` →
+`NamespaceItem` 用 `ShellNamespacePath(namespace_parsing)` → `icon_path` → `target_path`。
+`icon_source` 一律是可传给 `SHCreateItemFromParsingName` 的完整 parsing name。
+
+### 图标缓存
+
+- 键：`FNV-1a(UTF-16 source) + size_px`，落盘文件名 `%016llx_%d.png`。
+- 目录：`%LOCALAPPDATA%\DockForge\icons`（`core::IconCacheDir()`）。
+- 三级查找：内存 → 磁盘 PNG → `IShellItemImageFactory::GetImage` 提取。
+- 读盘时校验尺寸必须等于请求尺寸，否则视为 miss 重新提取（防键碰撞与篡改）。
+- 落盘失败不阻断绘制；`Get()` 返回 false 只表示这一张取不到。
+- 统计口径：`memory_hits`/`disk_hits`/`extractions`/`failures` 互斥计数，
+  `average_extract_ms` 只对 `extractions` 求平均。
+
+### 启动结果
+
+`shell::Launch(const AppEntry&)` 返回 `LaunchResult{error, process_id, route}`。
+`route` ∈ `"CreateProcess"` / `"ShellExecuteEx"` / `"ActivateApplication"` / `"none"`，
+写入日志后即可从一行日志判断走了哪条路径。失败必须返回 `LaunchError` 而非抛异常或崩溃。
+
+## C-09 状态文件编码（T-006 冻结）
+
+所有 `*.md` / `*.json` 状态文件必须是**无 BOM 的合法 UTF-8**。
+
+写入方式（PowerShell 5.1 默认 ANSI，禁止 `Set-Content` / `Add-Content` / `Out-File`）：
+
+```powershell
+[System.IO.File]::WriteAllText(, , (New-Object System.Text.UTF8Encoding(False)))
+```
+
+校验：`tools/fix_encoding.ps1 -Check`，退出码非零即任务未完成。
+修复：`tools/fix_encoding.ps1 -Repair`（按首个非法字节的行边界切分，前半 UTF-8、后半 ANSI 解码后拼接）。
+
+理由见 ADR-0011：混合编码的状态文件会让冷启动协议在第一步就失败，而失败是静默的。

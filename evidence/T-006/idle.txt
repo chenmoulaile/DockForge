@@ -1,0 +1,11 @@
+﻿T-006 idle soak (solid tier, no capture)
+duration_s=90
+cpu_total_s=0.031 cpu_pct=0.0019
+rss_mb=88.57 -> 88.52
+handles=371 -> 371
+threads=6
+frame_samples:
+2026-10-24T01:17:59.826+08:00 DEBUG [loop] frames=1000 avg=16.00ms p50=16.01ms p99=16.67ms fps=62.5 | capture=0/0 avg=0.0ms
+2026-10-24T01:18:00.834+08:00 DEBUG [loop] frames=1000 avg=16.00ms p50=16.01ms p99=17.08ms fps=62.5 | capture=0/0 avg=0.0ms
+2026-10-24T01:18:01.842+08:00 DEBUG [loop] frames=1000 avg=16.00ms p50=16.01ms p99=17.08ms fps=62.5 | capture=0/0 avg=0.0ms
+2026-10-24T01:18:02.850+08:00 DEBUG [loop] frames=1000 avg=16.00ms p50=16.01ms p99=17.08ms fps=62.5 | capture=0/0 avg=0.0ms

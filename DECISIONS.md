@@ -130,54 +130,115 @@ T-003 首版把帧间隔直接作为 `MsgWaitForMultipleObjectsEx` 的 `dwMillis
 - 主工程窗口创建统一走 `WindowDesc.composition_surface = true`。
 - 拖拽 ghost 若需要半透明跟随鼠标，仍可用 DComp 自身实现，不必回到 `WS_EX_LAYERED`。
 
-## ADR-0008 �� �������Ի�ĥɰ��ʵ�֣�ϵͳ���ʽ�����ѡ�׳�
+## ADR-0008 · 材质由自绘磨砂板实现，系统材质仅作可选底衬
 
-**״̬**��Accepted��2026-10-24��T-005 spike + ������ʵ�⣩
+**状态**：Accepted（2026-10-24，T-005 spike + 主工程实测）
 
-**����**
-`spikes/t005_material` ��ϵͳ�����������ؼ����գ�8px ���̸񱳾� + 24px Բ�� DComp ��壬`tools/pattern_contrast.ps1` �������������Ȳ��
+**背景**
+`spikes/t005_material` 对系统材质做了像素级对照（8px 棋盘格背景 + 24px 圆角 DComp 面板，`tools/pattern_contrast.ps1` 测相邻像素亮度差）：
 
-| ���� | adjacent_contrast | Բ���� (4,4) |
+| 材质 | adjacent_contrast | 圆角外 (4,4) |
 |---|---|---|
-| �޲��ʣ����գ� | 9.055 | ����ɫ |
-| `ACCENT_ENABLE_ACRYLICBLURBEHIND` | 0.188 | **����ɫ 4,6,8** |
-| `ACCENT_ENABLE_BLURBEHIND` | 0.205 | **����ɫ 2,5,9** |
-| `DWMSBT_MAINWINDOW`��Mica�� | 0.003 | **����ɫ 243,243,243** |
+| 无材质（对照） | 9.055 | 背景色 |
+| `ACCENT_ENABLE_ACRYLICBLURBEHIND` | 0.188 | **材质色 4,6,8** |
+| `ACCENT_ENABLE_BLURBEHIND` | 0.205 | **材质色 2,5,9** |
+| `DWMSBT_MAINWINDOW`（Mica） | 0.003 | **材质色 243,243,243** |
 
-ϵͳ����ȷʵģ����������ӲԼ��ʹ���޷�ֱ������ Dock��
-1. **���������� alpha**��DComp surface �� alpha 0.0 ȫ͸����ʱ�����ڲ����� `243,243,243`�����������������ھ��Ρ�
-2. **���� `SetWindowRgn`**��`--round-region` �벻�� region ���������ͬ�����ʲ��� region ֮�ϣ���
-3. **`DWMWCP_ROUND` �뾶������**������ 24px ʱ `(2,2)` ���á�`(6,6)` δ���ã������� `appearance.corner_radius`��Ĭ�� 22����Χ 0..40����
+系统材质确实模糊，但三条硬约束使其无法直接用于 Dock：
+1. **无视逐像素 alpha**：DComp surface 画 alpha 0.0 全透明板时窗口内部仍是 `243,243,243`，材质铺满整个窗口矩形。
+2. **无视 `SetWindowRgn`**：`--round-region` 与不加 region 采样逐点相同（材质层在 region 之上）。
+3. **`DWMWCP_ROUND` 半径不可配**：请求 24px 时 `(2,2)` 被裁、`(6,6)` 未被裁，不服从 `appearance.corner_radius`（默认 22，范围 0..40）。
 
-**����**
-1. `MaterialLevel` ���� = **�屾����ģ��ǿ���벻͸���ȵ�λ**������"���ĸ�ϵͳ����"��
-2. ��·�� = **�Ի�ĥɰ��**�������߳� `BitBlt` ץ���ڱ������Ļ���� �� D2D `CLSID_D2D1GaussianBlur`��sigma 18 DIP���� `PushLayer` Բ�ǲü� �� tint �� ��ߡ�
-3. ϵͳ���ʱ���Ϊ**��ѡ�׳�**��`PlateStyle::use_system_backdrop`�������� `corner_radius == 0` ʱ���ã�����Բ��ʱǿ�ƹرղ���¼����ԭ��
-4. ��������뿪 UI �̣߳�`BackdropCapture` �����߳� + ˫���巢��������Ϊ `BitBlt` ���ϳ������ǹ̶� ~78ms �ĺϳ����������������С�޹أ�160x60 �� 2560x480 ��ʱ���� 77�C79ms�������� UI �߳�ÿ֡·����Ȼ���� 16.7ms Ԥ�㡣
-5. Dock ���ڱ��� `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)`�����򲶻�����Լ�����һ֡��ģ���Ե��Լ���������ݹ�Խ��Խ����
-6. `IDXGIOutput1::DuplicateOutput` �ڱ������� `E_ACCESSDENIED`������������ʾ����������������ΪΨһ����·����GPU ���񽵼�Ϊ��ѡ���١�
-7. ĥɰ bitmap ������ `D2D1::BitmapProperties1` ����֡ DPI������ 144 DPI ��˪�㱻�Ŵ� 1.5 ����
+**决策**
+1. `MaterialLevel` 语义 = **板本身的模糊强度与不透明度档位**，不是"用哪个系统材质"。
+2. 主路径 = **自绘磨砂板**：工作线程 `BitBlt` 抓窗口背后的屏幕像素 → D2D `CLSID_D2D1GaussianBlur`（sigma 18 DIP）→ `PushLayer` 圆角裁剪 → tint → 描边。
+3. 系统材质保留为**可选底衬**（`PlateStyle::use_system_backdrop`），仅在 `corner_radius == 0` 时启用；非零圆角时强制关闭并记录降级原因。
+4. 捕获必须离开 UI 线程（`BackdropCapture` 工作线程 + 双缓冲发布），因为 `BitBlt` 读合成桌面是固定 ~78ms 的合成器往返，与区域大小无关（160x60 到 2560x480 耗时均在 77–79ms）。放在 UI 线程每帧路径必然击穿 16.7ms 预算。
+5. Dock 窗口必须 `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)`，否则捕获读回自己的上一帧，模糊吃掉自己的输出，递归越糊越糊。
+6. `IDXGIOutput1::DuplicateOutput` 在本机返回 `E_ACCESSDENIED`（存在虚拟显示适配器），不能作为唯一捕获路径；GPU 捕获降级为可选加速。
+7. 磨砂 bitmap 必须用 `D2D1::BitmapProperties1` 打上帧 DPI，否则 144 DPI 下霜层被放大 1.5 倍。
 
-**���**
-- Բ�ǡ�͸���ȡ�ģ���뾶ȫ���� DockForge �Լ����ƣ��� Win10/Win11 ����һ�¡�
-- �����߳��� 78ms �ϳ����������������� 200ms����̬ʵ��֡ʱ�� `avg=16.00ms p50=16.01ms p99=16.50ms fps=62.5`��δ��Ӱ�졣
-- ĥɰ����֡�ɱ��ߣ�D2D bitmap ���� + ģ�� shader ���룬spike ʵ�� 620ms��������Ԥ�ȣ����ܼ�����̬��
-- ����ģʽ��`DOCKFORGE_FREEZE_BACKDROP=1`���ǲ���֤�ݽ�ͼ��Ψһ����·����`WDA_EXCLUDEFROMCAPTURE` ��Ч�� `PrintWindow` �ɵ�ȫ�ڣ�ֻ����ץһ֡�ٽ���ų����ܼ��ĵ��Լ��ֱ���˪����ȷ��
+**后果**
+- 圆角、透明度、模糊半径全部由 DockForge 自己控制，跨 Win10/Win11 表现一致。
+- 新增线程与 78ms 合成器往返；捕获周期 200ms，稳态实测帧时间 `avg=16.00ms p50=16.01ms p99=16.50ms fps=62.5`，未受影响。
+- 磨砂层首帧成本高（D2D bitmap 分配 + 模糊 shader 编译，spike 实测 620ms），必须预热，不能计入稳态。
+- 冻结模式（`DOCKFORGE_FREEZE_BACKDROP=1`）是产出证据截图的唯一可行路径：`WDA_EXCLUDEFROMCAPTURE` 生效后 `PrintWindow` 采到全黑，只有先抓一帧再解除排除才能既拍到自己又保持霜层正确。
 
-## ADR-0009 �� ���� D2D ����ʱ���븴�ϵ��÷����еı任����
+## ADR-0009 · 绘制 D2D 内容时必须复合调用方已有的变换矩阵
 
-**״̬**��Accepted��2026-10-24��T-005 ʵ���޸���
+**状态**：Accepted（2026-10-24，T-005 实测修复）
 
-**����**
-`IDCompositionSurface::BeginDraw` ���ص� `offset` �� surface �ںϳ�ͼ���ڵ���������ƫ�ƣ�`CompositionSurface::Paint` �Ѱ�������� DIP д�� `SetTransform`��ADR-0007 �� 4 ������
-`PlateRenderer::Draw` Ϊ�˰�ģ��ͼ�㶨λ�����ԭ�㣬ֱ�ӵ����� `dc.SetTransform(Translation(rect.left, rect.top))`��**����**�����ƫ�ơ�
+**背景**
+`IDCompositionSurface::BeginDraw` 返回的 `offset` 是 surface 在合成图集内的物理像素偏移，`CompositionSurface::Paint` 已把它换算成 DIP 写进 `SetTransform`（ADR-0007 第 4 条）。
+`PlateRenderer::Draw` 为了把模糊图层定位到面板原点，直接调用了 `dc.SetTransform(Translation(rect.left, rect.top))`，**覆盖**了这个偏移。
 
-**֢״**
-96 / 144 DPI �� `tools/alpha_probe.ps1` �� `painted=0 transparent=6`���������ƫ�Ƴ�������������ȫ������������192 DPI ������������Ϊ�Ǵ� surface ǡ������ͼ��ƫ����㡣��� bug ֻ���ض� DPI ���֣����ױ�"ĳ���ֱ��ʿ���û����"�ڸǡ�
+**症状**
+96 / 144 DPI 下 `tools/alpha_probe.ps1` 报 `painted=0 transparent=6`（面板整体偏移出可视区，采样全读到背景）；192 DPI 侥幸正常，因为那次 surface 恰好落在图集偏移零点。这个 bug 只在特定 DPI 出现，极易被"某个分辨率看着没问题"掩盖。
 
-**����**
-�κ��� `CompositionSurface::Paint` �ص��ڵ��� `SetTransform` �Ĵ��룬������ `GetTransform(&base)`���� `Translation(...) * base` ���ϣ������� `SetTransform(base)` ��ԭ������д `Identity`��
+**决策**
+任何在 `CompositionSurface::Paint` 回调内调用 `SetTransform` 的代码，必须先 `GetTransform(&base)`，用 `Translation(...) * base` 复合，结束后 `SetTransform(base)` 还原，不得写 `Identity`。
 
-**���**
-- ���� DPI �����ָ� `painted=2 transparent=4`��`evidence/T-005/alpha{96,144,192}.txt`����
-- ��Լ����д�� `CONTRACTS.md` C-04�������κ�����ͼ����ƶ�����ͬһ����
+**后果**
+- 三档 DPI 采样恢复 `painted=2 transparent=4`（`evidence/T-005/alpha{96,144,192}.txt`）。
+- 契约化：写入 `CONTRACTS.md` C-04，后续任何新增图层绘制都遵守同一规则。
+
+## ADR-0010 · 应用身份按 AppsFolder 五形态分类，不按文件系统路径
+
+**状态**：Accepted（2026-10-24，T-006 spike 实测）
+
+**背景**
+最初假设 AppsFolder 里每一项都能落到一个可执行文件路径，因此把解析失败的一律计入
+`skipped`。实测 216 项里 `skipped=124`，看上去像是枚举写错了。逐项打印 parsing name 后发现
+它们分属四类不同身份，只有 1 项是真正的坏条目（`D:\Beautiful\.tools\innosetup\Examples`，目录不存在）。
+
+| 形态 | 数量 | 是否可执行文件路径 | 启动 API |
+|---|---|---|---|
+| 打包应用 AUMID（含 `!`） | 43 | 否 | `ActivateApplication` |
+| 盘符路径 | 49 | 是 | `CreateProcess` |
+| 命名空间子项 `{GUID}\name` | 54 | 否（`SHGetPathFromIDListW` 0/54） | `ShellExecuteEx` |
+| 裸桌面 id（无 `!`） | 69 | 否 | `ShellExecuteEx` |
+
+**决策**
+1. 分类依据是 parsing name 的**字符串形态**，函数 `shell::ClassifyParsingName` 是唯一入口，
+   任何新增来源必须先过它。五种 `ParsingKind` 见 `CONTRACTS.md` C-08。
+2. 命名空间子项的启动与图标身份统一为 `shell:AppsFolder\{GUID}\name`。裸形式
+   （`SHCreateItemFromParsingName` / `SHParseDisplayName` / `ShellExecuteEx`）实测全部
+   `0x80070002`，加前缀后图标与启动都成功。
+3. 裸桌面 id 不能用 `ActivateApplication`（`0x80070057 E_INVALIDARG`），必须
+   `ShellExecuteEx`。这意味着"打包应用用激活器、其余用 shell 执行"是硬分支，不是回退策略。
+4. 未解析出的条目必须进 `skipped` 并打日志（`DF_DEBUG("shell", "skip %ls (%s): %s")`），
+   不允许静默丢弃——上一版正是静默丢弃掩盖了分类错误。
+
+**拒绝的方案**
+- **只保留有可执行文件路径的条目**：会丢掉 43 个 UWP 与 123 个无路径应用，Dock 上就只剩
+  49 个快捷方式，与"启动器"的定位相悖。
+- **用 `SHGetFileInfo` 反查图标**：对命名空间子项 `GetUIObjectOf(IID_IExtractIconW)` 实测
+  `0x80004005 E_FAIL`，不可用。
+
+**后果**
+- AppsFolder 扫描 215 项耗时 450–495ms，占冷启动 642ms 的主要部分。已记入后续优化（磁盘缓存
+  parsing name → 启动描述映射），不阻塞当前里程碑。
+- `AppKind` 从四值扩到六值，`AppEntry` 新增 `namespace_parsing` 字段，均已写入 C-08。
+
+## ADR-0011 · 状态文件必须显式以 UTF-8 写入，禁止依赖 PowerShell 默认编码
+
+**状态**：Accepted（2026-10-24，T-006 事故修复）
+
+**背景**
+`DECISIONS.md` / `PERFORMANCE.md` / `PROGRESS.md` 三个文件在本轮被发现中文尾部变成
+GBK 字节、头部仍是 UTF-8，任何严格 UTF-8 读取器都会在中间报错。成因是 PowerShell 5.1 的
+`Set-Content` / `Out-File` 默认使用 ANSI 代码页（本机 936），而 `Get-Content -Raw` 读入时
+已按 UTF-8 解码成 .NET 字符串——写回时编码降级，中文就变成了 GBK 字节。
+
+**决策**
+1. 追加或改写 Markdown / JSON 状态文件一律走
+   `[System.IO.File]::WriteAllText(path, text, (New-Object System.Text.UTF8Encoding(False)))`，
+   不用 `Set-Content` / `Add-Content` / `Out-File`。
+2. `tools/fix_encoding.ps1` 常驻：`-Check` 校验全部 `*.md` / `*.json` 是合法 UTF-8，
+   `-Repair` 按首个非法字节所在行边界切分，前半 UTF-8 解码、后半 ANSI 解码后拼接重写。
+3. 每个任务收尾（REPORT 步骤）跑一次 `-Check`，非零退出即视为任务未完成。
+
+**后果**
+- 三个文件已修复（`DECISIONS.md` 11751→12581B、`PERFORMANCE.md` 2500→2679B、
+  `PROGRESS.md` 5383→5553B），内容人工核对无乱码。
+- 此规则写进 `CONTRACTS.md` C-09，后续所有状态文件写入都受约束。

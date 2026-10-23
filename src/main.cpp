@@ -1,7 +1,8 @@
 // DockForge entry point.
 //
 // T-001 skeleton window, T-002 config wiring, T-003 frame-driven app loop,
-// T-004 DirectComposition surface, T-005 render backend + material tiers.
+// T-004 DirectComposition surface, T-005 render backend + material tiers,
+// T-006 shell app resolution + icon cache.
 #include "core/app_loop.h"
 #include "core/config.h"
 #include "core/event_bus.h"
@@ -13,6 +14,9 @@
 #include "render/backend.h"
 #include "render/backdrop_capture.h"
 #include "render/material.h"
+#include "shell/app_resolver.h"
+#include "shell/icon_cache.h"
+#include "shell/start_menu.h"
 
 #include <d2d1helper.h>
 #include <dwmapi.h>
@@ -75,6 +79,55 @@ bool EnableDarkTitleBar(HWND hwnd) {
     BOOL dark = TRUE;
     return SUCCEEDED(
         DwmSetWindowAttribute(hwnd, kDwmwaUseImmersiveDarkMode, &dark, sizeof(dark)));
+}
+
+// Number of icons warmed during startup. The Dock will eventually show ~20 tiles,
+// but warming all 216 Start-menu entries would add minutes to a cold start; the
+// cap keeps the measured number honest instead of hiding a slow path.
+constexpr int kIconWarmupLimit = 24;
+
+struct ShellScanReport {
+    std::size_t app_count = 0;
+    int shortcut_count = 0;
+    int uwp_count = 0;
+    int desktop_id_count = 0;
+    int namespace_count = 0;
+    int skipped = 0;
+    int icons_ready = 0;
+    int icons_failed = 0;
+    double scan_ms = 0.0;
+    double icons_ms = 0.0;
+};
+
+// Resolves the Start-menu app list and warms the icon cache. Runs before the window
+// is shown so the first frame never blocks on the shell: a cold GetImage call costs
+// 60-190 ms, which would blow the 800 ms cold-start budget on its own.
+ShellScanReport ScanAndWarmIcons(shell::IconCache& icons) {
+    ShellScanReport report;
+
+    std::int64_t start = core::QueryPerformanceTicks();
+    shell::StartMenuScan scan = shell::ScanAppsFolder();
+    report.scan_ms = core::QpcToMilliseconds(core::QueryPerformanceTicks() - start);
+    report.app_count = scan.entries.size();
+    report.shortcut_count = scan.shortcut_count;
+    report.uwp_count = scan.uwp_count;
+    report.desktop_id_count = scan.desktop_id_count;
+    report.namespace_count = scan.namespace_count;
+    report.skipped = scan.skipped;
+
+    start = core::QueryPerformanceTicks();
+    for (std::size_t i = 0; i < scan.entries.size() &&
+                            static_cast<int>(i) < kIconWarmupLimit;
+         ++i) {
+        shell::IconBitmap bitmap;
+        if (icons.Get(shell::IconSourceFor(scan.entries[i]), 256, bitmap)) {
+            ++report.icons_ready;
+        } else {
+            ++report.icons_failed;
+        }
+    }
+    report.icons_ms = core::QpcToMilliseconds(core::QueryPerformanceTicks() - start);
+    return report;
 }
 
 // Excludes (or re-includes) this window in screen captures. The frost reads the
@@ -153,6 +206,21 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
             static_cast<double>(config.dock.magnification),
             core::ToString(config.dock.hover_falloff),
             core::ToString(config.appearance.material), config.appearance.corner_radius);
+
+    // ---- shell app list + icon cache (T-006) ----------------------------
+    // Resolved before the window exists so the first painted frame already has its
+    // icons and the cold-start timer measures real work rather than a queue.
+    shell::IconCache icons;
+    if (!icons.Initialize(core::IconCacheDir())) {
+        DF_WARN("shell", "icon cache disabled; every icon will be extracted per use");
+    }
+    const ShellScanReport scan = ScanAndWarmIcons(icons);
+    DF_INFO("app",
+            "apps: %zu (shortcut=%d uwp=%d desktop-id=%d namespace=%d skipped=%d) scan=%.1fms "
+            "icons=%d/%d in %.1fms",
+            scan.app_count, scan.shortcut_count, scan.uwp_count, scan.desktop_id_count,
+            scan.namespace_count, scan.skipped, scan.scan_ms, scan.icons_ready,
+            scan.icons_ready + scan.icons_failed, scan.icons_ms);
 
     // ---- material tier resolution (T-005) -------------------------------
     // The configured tier is a request, not a promise: Mica needs Win11 22000+
@@ -299,12 +367,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                            backdrop_h, dpi);
 
                 // The label proves DirectWrite goes through the backend contract
-                // rather than straight to the D2D context.
-                wchar_t label[192];
+                // rather than straight to the D2D context, and reports what the
+                // shell scan found so the running app is its own evidence.
+                wchar_t label[256];
                 swprintf_s(label,
-                           L"DockForge \u00b7 %s \u00b7 icon %d \u00b7 gap %d \u00b7 mag %.1fx",
-                           core::ToString(tier), config.dock.icon_size, config.dock.gap,
-                           static_cast<double>(config.dock.magnification));
+                           L"DockForge \u00b7 %s \u00b7 apps %zu \u00b7 uwp %d \u00b7 id %d \u00b7 "
+                           L"ns %d \u00b7 icons %d",
+                           core::ToString(tier), scan.app_count, scan.uwp_count,
+                           scan.desktop_id_count, scan.namespace_count, scan.icons_ready);
                 render_backend->DrawLabel(label, render::RectF{0.0f, 0.0f, info.width_dip,
                                                                info.height_dip},
                                           15.0f, render::ColorF{0.925f, 0.941f, 0.973f, 1.0f},

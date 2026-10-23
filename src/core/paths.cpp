@@ -50,6 +50,15 @@ std::wstring DumpsDir() {
     return base + L"\\DockForge\\dumps";
 }
 
+std::wstring IconCacheDir() {
+    static const std::wstring cached = [] {
+        std::wstring base = KnownFolder(FOLDERID_LocalAppData);
+        if (base.empty()) return std::wstring(L"DockForge\\icons");
+        return base + L"\\DockForge\\icons";
+    }();
+    return cached;
+}
+
 bool EnsureDirectory(const std::wstring& path) {
     if (path.empty()) return false;
     if (CreateDirectoryW(path.c_str(), nullptr)) return true;

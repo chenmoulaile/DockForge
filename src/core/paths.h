@@ -20,6 +20,9 @@ std::wstring LogsDir();
 // %LOCALAPPDATA%\DockForge\dumps
 std::wstring DumpsDir();
 
+// %LOCALAPPDATA%\DockForge\icons  (extracted icon PNG cache, CONTRACTS.md C-08)
+std::wstring IconCacheDir();
+
 // Creates a directory and its parents. Returns false on failure (already
 // existing directory counts as success).
 bool EnsureDirectory(const std::wstring& path);

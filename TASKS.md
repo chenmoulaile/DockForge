@@ -94,18 +94,34 @@
 - 备注: 实测系统材质无视逐像素 alpha / SetWindowRgn / 可配圆角，改为自绘磨砂板（ADR-0008）；修复 SetTransform 覆盖图集偏移（ADR-0009）。实时捕获 RSS 103MB，余量不足，T-015 前需优化。
 
 ### T-006 · shell: 图标提取 + .lnk/.exe/UWP 解析
-- 状态: TODO
+- 状态: DONE
 - 优先级: P0
 - 依赖: T-001
 - 预估: 1 会话
 - 上下文: `src/shell/`
 - DoD:
-  - [ ] `IShellItemImageFactory::GetImage` 提取 256px PNG 缓存
-  - [ ] `.lnk` 通过 `IShellLinkW` 解析目标与参数
-  - [ ] UWP 通过 `ApplicationUserModelID` 解析，回退到 `.lnk`
-  - [ ] 缓存命中率与耗时打点（冷/热）
-  - [ ] 单测：路径不存在返回明确错误码而非崩溃
+  - [x] `IShellItemImageFactory::GetImage` 提取 256px PNG 缓存
+  - [x] `.lnk` 通过 `IShellLinkW` 解析目标与参数
+  - [x] UWP 通过 `ApplicationUserModelID` 解析，回退到 `.lnk`
+  - [x] 缓存命中率与耗时打点（冷/热）
+  - [x] 单测：路径不存在返回明确错误码而非崩溃
 - 证据: evidence/T-006/
+- 备注: 实测 AppsFolder 五形态（shortcut=49 uwp=43 desktop-id=69 namespace=54 skipped=1）。
+  命名空间子项必须先加 `shell:AppsFolder\` 前缀；裸桌面 id 不能用 `ActivateApplication`。
+  冷/热图标预热 553.5ms → 30.8ms。冷启动 642ms。p99 尾延迟拆出 T-006a。
+
+### T-006a · core: 收紧帧循环尾延迟（p99 5/20 窗口 > 16.7ms）
+- 状态: TODO
+- 优先级: P1
+- 依赖: T-006
+- 预估: 1 会话
+- 上下文: `src/core/app_loop.cpp`
+- DoD:
+  - [ ] 定位 p99 尾延迟来源（高分辨率定时器抖动 / PeekMessage 批量派发 / DWM 提交阻塞）
+  - [ ] 20 个连续采样窗中 p99 > 16.7ms 的比例降到 0
+  - [ ] 空闲 CPU 不超过 0.1%
+  - [ ] 输出 evidence/T-006a/bench.txt
+- 证据: evidence/T-006a/
 
 ### T-007 · platform: 多显示器 + 高 DPI 管理
 - 状态: TODO

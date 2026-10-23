@@ -1,14 +1,14 @@
-﻿{
+{
     "project":  "DockForge",
     "schema":  1,
     "milestone":  "M1",
-    "last_task":  "T-005",
+    "last_task":  "T-006",
     "last_commit":  "pending",
-    "current_module":  "render",
+    "current_module":  "shell",
     "current_task":  null,
     "counters":  {
-                     "total":  15,
-                     "done":  5,
+                     "total":  16,
+                     "done":  6,
                      "partial":  0,
                      "blocked":  0
                  },
@@ -55,7 +55,11 @@
                           "CompositionSurface::Paint 回调内 SetTransform 必须先 GetTransform(\u0026base) 再 Translation(...)*base 复合，否则覆盖图集偏移，特定 DPI 下内容偏移出窗口（ADR-0009）",
                           "BitBlt 读合成桌面是固定 ~78-95ms 的合成器往返，与区域大小无关，必须放工作线程",
                           "WDA_EXCLUDEFROMCAPTURE 生效后 PrintWindow 采到全黑；要拍自己的霜层必须用 DOCKFORGE_FREEZE_BACKDROP 先抓帧再解除排除",
-                          "证据采样前必须用 tools/window_list.ps1 核对窗口真实矩形与 z 序，全屏窗口会污染背景测量"
+                          "证据采样前必须用 tools/window_list.ps1 核对窗口真实矩形与 z 序，全屏窗口会污染背景测量",
+                          "AppsFolder 五项形态（AUMID/盘符路径/命名空间子项/裸桌面 id/坏条目）不能按文件系统路径分类；命名空间子项必须加 shell:AppsFolder\\ 前缀，裸桌面 id 不能用 ActivateApplication（ADR-0010）",
+                          "IShellLinkW::GetPath(SLGP_RAWPATH) 返回未展开的 %windir% 形式，必须 ExpandEnvironmentStringsW 后才能解析或启动",
+                          "PowerShell 5.1 的 Set-Content/Out-File 默认 ANSI(936)，写中文会把 UTF-8 状态文件写坏；必须用 File::WriteAllText + UTF8Encoding(false)（ADR-0011）",
+                          "tools/sample_pixels.ps1 曾忽略 -Image 永远抓屏，报告与文件不符；采样已保存截图必须显式传 -Image"
                       ],
-    "updated_at":  "2026-10-24T00:41:42+08:00"
+    "updated_at":  "2026-10-24T01:22:00+08:00"
 }

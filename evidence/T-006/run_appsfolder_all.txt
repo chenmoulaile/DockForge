@@ -1,0 +1,221 @@
+﻿mode=appsfolder com=0x00000000
+SHGetKnownFolderIDList(AppsFolder)           hr=0x00000000 OK
+SHBindToObject(AppsFolder -> IShellFolder)   hr=0x00000000 OK
+IShellFolder::EnumObjects                    hr=0x00000000 OK
+  [lnk] namelen=6 codes=0054 0079 0070 006F 0072 0061 | name=Typora parsing=abnerworks.Typora
+  [lnk] namelen=8 codes=004F 0070 0065 006E 0043 006F 0064 0065 | name=OpenCode parsing=ai.opencode.desktop
+  [lnk] namelen=6 codes=0043 0075 0072 0073 006F 0072 | name=Cursor parsing=Anysphere.Cursor
+  [lnk] namelen=7 codes=0041 0068 006B 0032 0045 0078 0065 | name=Ahk2Exe parsing=AutoHotkey.Ahk2Exe
+  [lnk] namelen=15 codes=0041 0075 0074 006F 0048 006F 0074 006B | name=AutoHotkey Dash parsing=AutoHotkey.AutoHotkey
+  [lnk] namelen=21 codes=0041 0075 0074 006F 0048 006F 0074 006B | name=AutoHotkey Window Spy parsing=AutoHotkey.WindowSpy
+  [lnk] namelen=13 codes=004D 0053 0059 0053 0032 0020 0043 004C | name=MSYS2 CLANG64 parsing=C:\msys64\clang64.exe
+  [lnk] namelen=16 codes=004D 0053 0059 0053 0032 0020 0043 004C | name=MSYS2 CLANGARM64 parsing=C:\msys64\clangarm64.exe
+  [lnk] namelen=13 codes=004D 0053 0059 0053 0032 0020 004D 0049 | name=MSYS2 MINGW64 parsing=C:\msys64\mingw64.exe
+  [lnk] namelen=10 codes=004D 0053 0059 0053 0032 0020 004D 0053 | name=MSYS2 MSYS parsing=C:\msys64\msys2.exe
+  [lnk] namelen=12 codes=004D 0053 0059 0053 0032 0020 0055 0043 | name=MSYS2 UCRT64 parsing=C:\msys64\ucrt64.exe
+  [lnk] namelen=9 codes=0042 0065 0061 0075 0074 0069 0066 0075 | name=Beautiful parsing=C:\Users\chenk\AppData\Local\Programs\Beautiful\Beautiful.exe
+  [lnk] namelen=19 codes=0042 0065 0061 0075 0074 0069 0066 0075 | name=Beautiful uninstall parsing=C:\Users\chenk\AppData\Local\Programs\Beautiful\unins000.exe
+  [lnk] namelen=19 codes=0050 0079 0074 0068 006F 006E 0020 0033 | name=Python 3.14 Manuals parsing=C:\Users\chenk\AppData\Local\Python\pythoncore-3.14-64\Doc\html\index.html
+  [lnk] namelen=11 codes=0050 0079 0074 0068 006F 006E 0020 0033 | name=Python 3.14 parsing=C:\Users\chenk\AppData\Local\Python\pythoncore-3.14-64\python.exe
+  [lnk] namelen=5 codes=0037 002D 005A 0069 0070 | name=7-Zip parsing=C:\Users\chenk\scoop\apps\7zip\current\7zFM.exe
+  [lnk] namelen=13 codes=0047 006F 006F 0067 006C 0065 0020 0043 | name=Google Chrome parsing=Chrome
+  [lnk] namelen=5 codes=0051 006F 0064 0065 0072 | name=Qoder parsing=com.qoder.app
+  [lnk] namelen=6 codes=5C0F 9E45 901A 5B66 5458 7248 | name=小鹅通学员版 parsing=com.xet.client
+  [lnk] namelen=8 codes=0041 0075 0074 006F 0043 006C 0061 0077 | name=AutoClaw parsing=com.zhipuai.autoclaw
+  [lnk] namelen=7 codes=0057 0065 0062 0073 0069 0074 0065 | name=Website parsing=D:\AutoHotkey\AutoHotkey Website.url
+  [lnk] namelen=20 codes=0041 0075 0074 006F 0048 006F 0074 006B | name=AutoHotkey Help File parsing=D:\AutoHotkey\AutoHotkey.chm
+  [lnk] namelen=10 codes=0041 0075 0074 006F 0048 006F 0074 006B | name=AutoHotkey parsing=D:\AutoHotkey\AutoHotkey.exe
+  [lnk] namelen=16 codes=0041 0075 0074 006F 0048 006F 0074 006B | name=AutoHotkey Setup parsing=D:\AutoHotkey\Installer.ahk
+  [lnk] namelen=10 codes=0057 0069 006E 0064 006F 0077 0020 0053 | name=Window Spy parsing=D:\AutoHotkey\WindowSpy.ahk
+  [lnk] namelen=4 codes=767E 5EA6 7F51 76D8 | name=百度网盘 parsing=D:\BaiduNetdisk\BaiduNetdisk.exe
+  [lnk] namelen=26 codes=0049 006E 006E 006F 0020 0053 0065 0074 | name=Inno Setup Example Scripts parsing=D:\Beautiful\.tools\innosetup\Examples
+  [lnk] namelen=31 codes=0049 006E 006E 006F 0020 0053 0065 0074 | name=Inno Setup Documentation (Dark) parsing=D:\Beautiful\.tools\innosetup\ISetup-dark.chm
+  [lnk] namelen=24 codes=0049 006E 006E 006F 0020 0053 0065 0074 | name=Inno Setup Documentation parsing=D:\Beautiful\.tools\innosetup\ISetup.chm
+  [lnk] namelen=14 codes=0049 006E 006E 006F 0020 0053 0065 0074 | name=Inno Setup FAQ parsing=D:\Beautiful\.tools\innosetup\isfaq.url
+  [lnk] namelen=27 codes=0049 006E 006E 006F 0020 0053 0065 0074 | name=Inno Setup Revision History parsing=D:\Beautiful\.tools\innosetup\whatsnew.htm
+  [lnk] namelen=9 codes=0042 006F 006E 0067 006F 0020 0043 0061 | name=Bongo Cat parsing=D:\BongoCat\bongo-cat.exe
+  [lnk] namelen=5 codes=7F51 6613 4E91 97F3 4E50 | name=网易云音乐 parsing=D:\CloudMusic\cloudmusic.exe
+  [lnk] namelen=7 codes=5378 8F7D 7F51 6613 4E91 97F3 4E50 | name=卸载网易云音乐 parsing=D:\CloudMusic\UnInstall.exe
+  [lnk] namelen=17 codes=0043 004D 0061 006B 0065 0020 0028 0063 | name=CMake (cmake-gui) parsing=D:\CMake\bin\cmake-gui.exe
+  [lnk] namelen=19 codes=0043 004D 0061 006B 0065 0020 0044 006F | name=CMake Documentation parsing=D:\CMake\doc\cmake\html\index.html
+  [lnk] namelen=15 codes=0048 0061 0073 006C 0065 006F 0020 0045 | name=Hasleo EasyUEFI parsing=D:\EasyUEFI\bin\EasyUEFI.exe
+  [lnk] namelen=4 codes=0055 0055 8FDC 7A0B | name=UU远程 parsing=D:\GameViewer\GameViewer.exe
+  [lnk] namelen=7 codes=0047 0069 0074 0020 0047 0055 0049 | name=Git GUI parsing=D:\Git\cmd\git-gui.exe
+  [lnk] namelen=17 codes=0047 0069 0074 0020 0052 0065 006C 0065 | name=Git Release Notes parsing=D:\Git\ReleaseNotes.html
+  [lnk] namelen=6 codes=0047 006F 0070 0065 0065 0064 | name=Gopeed parsing=D:\gopeed\gopeed.exe
+  [lnk] namelen=21 codes=0049 006D 0061 0067 0065 004D 0061 0067 | name=ImageMagick Web Pages parsing=D:\ImageMagick-7.1.2-Q16-HDRI\index.html
+  [lnk] namelen=9 codes=004B 0065 0065 0050 0061 0073 0073 0058 | name=KeePassXC parsing=D:\KeePassXC\KeePassXC.exe
+  [lnk] namelen=27 codes=004B 0065 0065 0050 0061 0073 0073 0058 | name=KeePassXC - Getting Started parsing=D:\KeePassXC\share\docs\KeePassXC_GettingStarted.html
+  [lnk] namelen=22 codes=004B 0065 0065 0050 0061 0073 0073 0058 | name=KeePassXC - User Guide parsing=D:\KeePassXC\share\docs\KeePassXC_UserGuide.html
+  [lnk] namelen=7 codes=004D 0075 004D 0075 6A21 62DF 5668 | name=MuMu模拟器 parsing=D:\MuMuPlayer\nx_main\MuMuNxMain.exe
+  [lnk] namelen=2 codes=5378 8F7D | name=卸载 parsing=D:\MuMuPlayer\uninstall.exe
+  [lnk] namelen=5 codes=0055 0055 52A0 901F 5668 | name=UU加速器 parsing=D:\Netease\UU\uu_launcher.exe
+  [lnk] namelen=7 codes=004E 006F 0064 0065 002E 006A 0073 | name=Node.js parsing=D:\nodejs\node.exe
+  [lnk] namelen=10 codes=004F 0042 0053 0020 0053 0074 0075 0064 | name=OBS Studio parsing=D:\obs-studio\bin\64bit\obs64.exe
+  [lnk] namelen=12 codes=0053 0075 0062 006C 0069 006D 0065 0020 | name=Sublime Text parsing=D:\Sublime Text\sublime_text.exe
+  [lnk] namelen=7 codes=5378 8F7D 0020 817E 8BAF 4F1A 8BAE | name=卸载 腾讯会议 parsing=D:\Tenchent\WeMeet\3.46.11.413\WeMeetUninstall.exe
+  [lnk] namelen=4 codes=817E 8BAF 4F1A 8BAE | name=腾讯会议 parsing=D:\Tenchent\WeMeet\wemeetapp.exe
+  [lnk] namelen=18 codes=0056 0069 0073 0075 0061 006C 0020 0053 | name=Visual Studio Code parsing=D:\Visual Studio Code\Code.exe
+  [lnk] namelen=7 codes=865A 62DF 7F51 7EDC 7F16 8F91 5668 | name=虚拟网络编辑器 parsing=D:\VMware\VMware Workstation\vmnetcfg.exe
+  [lnk] namelen=4 codes=5378 8F7D 5FAE 4FE1 | name=卸载微信 parsing=D:\Weixin\Uninstall.exe
+  [lnk] namelen=2 codes=5FAE 4FE1 | name=微信 parsing=D:\Weixin\Weixin.exe
+  [lnk] namelen=4 codes=5378 8F7D 4F18 9177 | name=卸载优酷 parsing=D:\Youku\9.2.67.1001\uninstaller.exe
+  [lnk] namelen=2 codes=4F18 9177 | name=优酷 parsing=D:\Youku\9.2.67.1001\YOUKU.exe
+  [lnk] namelen=2 codes=592A 6781 | name=太极 parsing=D:\太极\太极.exe
+  [lnk] namelen=5 codes=005A 0043 006F 0064 0065 | name=ZCode parsing=dev.zcode.app
+  [lnk] namelen=16 codes=0044 0065 0065 0070 0053 0065 0065 006B | name=DeepSeek Harness parsing=electron.app.DeepSeek Harness
+  [lnk] namelen=10 codes=004F 0066 0066 0069 0063 0065 6FC0 6D3B | name=Office激活指导 parsing=https://consumer.huawei.com/cn/support/office2021-guide/
+  [lnk] namelen=32 codes=0050 0079 0074 0068 006F 006E 0020 0033 | name=Python 3.14 Online Documentation parsing=https://docs.python.org/3.14/
+  [lnk] namelen=37 codes=0047 0069 0074 0020 0046 0041 0051 0073 | name=Git FAQs (Frequently Asked Questions) parsing=https://gitforwindows.org/faq
+  [lnk] namelen=15 codes=004E 006F 0064 0065 002E 006A 0073 0020 | name=Node.js website parsing=https://nodejs.org/
+  [lnk] namelen=21 codes=004E 006F 0064 0065 002E 006A 0073 0020 | name=Node.js documentation parsing=https://nodejs.org/download/release/v24.15.0/docs/api/
+  [lnk] namelen=18 codes=0048 0061 0073 006C 0065 006F 0020 0045 | name=Hasleo EasyUEFI 网站 parsing=https://www.hasleo.com/
+  [lnk] namelen=4 codes=534E 4E3A 5546 57CE | name=华为商城 parsing=https://www.vmall.com/?cid=125903
+  [lnk] namelen=5 codes=534E 4E3A 6D4F 89C8 5668 | name=华为浏览器 parsing=HuaweiBrowser
+  [lnk] namelen=11 codes=0043 006C 0061 0073 0068 0020 0056 0065 | name=Clash Verge parsing=io.github.clash-verge-rev.clash-verge-rev
+  [lnk] namelen=19 codes=0049 006E 006E 006F 0020 0053 0065 0074 | name=Inno Setup Compiler parsing=JR.InnoSetup.IDE.6
+  [lnk] namelen=10 codes=0057 0050 0053 0020 004F 0066 0066 0069 | name=WPS Office parsing=Kingsoft.Office.KPrometheus
+  [lnk] namelen=4 codes=9177 72D7 97F3 4E50 | name=酷狗音乐 parsing=kugou
+  [lnk] namelen=17 codes=0055 006E 0069 006E 0073 0074 0061 006C | name=Uninstall Node.js parsing=Microsoft.AutoGenerated.{1D719D94-D041-5E2F-1BF6-98EEDE508FBF}
+  [lnk] namelen=9 codes=90E8 7F72 548C 6620 50CF 5DE5 5177 73AF | name=部署和映像工具环境 parsing=Microsoft.AutoGenerated.{29A7492B-732C-52DB-674E-0AD202F135CB}
+  [lnk] namelen=4 codes=706B 7ED2 65E5 5FD7 | name=火绒日志 parsing=Microsoft.AutoGenerated.{31493299-438F-6E68-8356-C0A75E9502DE}
+  [lnk] namelen=19 codes=0050 0079 0044 006F 0063 0020 0028 0050 | name=PyDoc (Python 3.14) parsing=Microsoft.AutoGenerated.{32943D35-E2C9-EFEE-9B96-423CF7D9BF0B}
+  [lnk] namelen=6 codes=534E 4E3A 5E94 7528 5E02 573A | name=华为应用市场 parsing=Microsoft.AutoGenerated.{40790463-9520-AE7B-E350-9AF3D9AD9296}
+  [lnk] namelen=5 codes=4E8B 4EF6 67E5 770B 5668 | name=事件查看器 parsing=Microsoft.AutoGenerated.{4AB0E8D6-94A9-84BA-B051-FE8D294BD68C}
+  [lnk] namelen=7 codes=0047 0069 0074 0020 0043 004D 0044 | name=Git CMD parsing=Microsoft.AutoGenerated.{50A36952-3E6C-752B-7195-60DE50688F88}
+  [lnk] namelen=15 codes=0055 006E 0069 006E 0073 0074 0061 006C | name=Uninstall CMake parsing=Microsoft.AutoGenerated.{5C17F807-835F-7B93-7B75-CE191E0F6FD4}
+  [lnk] namelen=5 codes=4EFB 52A1 7BA1 7406 5668 | name=任务管理器 parsing=Microsoft.AutoGenerated.{5E8FC15D-96C5-8C7D-B1AF-2757B67E4C6D}
+  [lnk] namelen=11 codes=0076 0063 0074 006C 0020 7684 547D 4EE4 | name=vctl 的命令提示符 parsing=Microsoft.AutoGenerated.{6074BD52-C2E8-7501-5AA7-4BC0E3A0EC92}
+  [lnk] namelen=5 codes=6027 80FD 76D1 89C6 5668 | name=性能监视器 parsing=Microsoft.AutoGenerated.{693A7C49-B19D-9E69-556A-06CB01C234C2}
+  [lnk] namelen=6 codes=4EFB 52A1 8BA1 5212 7A0B 5E8F | name=任务计划程序 parsing=Microsoft.AutoGenerated.{78016EAF-FAFF-4BD8-4884-2C8250D2671E}
+  [lnk] namelen=8 codes=0047 0069 0074 0020 0042 0061 0073 0068 | name=Git Bash parsing=Microsoft.AutoGenerated.{8B2B178D-788B-5D93-2D99-697D551FBBEC}
+  [lnk] namelen=5 codes=8D44 6E90 76D1 89C6 5668 | name=资源监视器 parsing=Microsoft.AutoGenerated.{8B5B34DF-CB74-294D-5DE2-53C565924C57}
+  [lnk] namelen=18 codes=0049 0044 004C 0045 0020 0028 0050 0079 | name=IDLE (Python 3.14) parsing=Microsoft.AutoGenerated.{8E788874-F59A-BC41-2F29-A543BF023999}
+  [lnk] namelen=5 codes=8BA1 7B97 673A 7BA1 7406 | name=计算机管理 parsing=Microsoft.AutoGenerated.{989E8F05-5DED-CDC3-299F-F21376A7DEAB}
+  [lnk] namelen=22 codes=004E 006F 0064 0065 002E 006A 0073 0020 | name=Node.js command prompt parsing=Microsoft.AutoGenerated.{9B34CBAF-622D-EDAD-8D04-F145C4E132EE}
+  [lnk] namelen=36 codes=0049 006E 0073 0074 0061 006C 006C 0020 | name=Install Additional Tools for Node.js parsing=Microsoft.AutoGenerated.{A9E3E8F7-0431-D17D-9F54-C48B9C12F820}
+  [lnk] namelen=6 codes=0055 0062 0075 006E 0074 0075 | name=Ubuntu parsing=Microsoft.AutoGenerated.{D0627C57-C4C8-E713-80CC-66E7AE57CA76}
+  [lnk] namelen=5 codes=0045 0078 0063 0065 006C | name=Excel parsing=Microsoft.Office.EXCEL.EXE.15
+  [lnk] namelen=7 codes=004F 006E 0065 004E 006F 0074 0065 | name=OneNote parsing=Microsoft.Office.ONENOTE.EXE.15
+  [lnk] namelen=18 codes=0053 0074 0069 0063 006B 0079 0020 004E | name=Sticky Notes (new) parsing=Microsoft.Office.OneNote.MemoryPreview
+  [lnk] namelen=10 codes=0050 006F 0077 0065 0072 0050 006F 0069 | name=PowerPoint parsing=Microsoft.Office.POWERPNT.EXE.15
+  [lnk] namelen=12 codes=004F 0066 0066 0069 0063 0065 0020 8BED | name=Office 语言首选项 parsing=Microsoft.Office.SETLANG.EXE.15
+  [lnk] namelen=4 codes=0057 006F 0072 0064 | name=Word parsing=Microsoft.Office.WINWORD.EXE.15
+  [lnk] namelen=19 codes=0050 006F 0077 0065 0072 0054 006F 0079 | name=PowerToys (Preview) parsing=Microsoft.PowerToysWin32
+  [lnk] namelen=8 codes=004F 006E 0065 0044 0072 0069 0076 0065 | name=OneDrive parsing=Microsoft.SkyDrive.Desktop
+  [lnk] namelen=18 codes=0056 0069 0073 0075 0061 006C 0020 0053 | name=Visual Studio Code parsing=Microsoft.VisualStudioCode
+  [lnk] namelen=10 codes=0057 0069 006E 0064 006F 0077 0073 0020 | name=Windows 工具 parsing=Microsoft.Windows.AdministrativeTools
+  [lnk] namelen=4 codes=63A7 5236 9762 677F | name=控制面板 parsing=Microsoft.Windows.ControlPanel
+  [lnk] namelen=7 codes=6587 4EF6 8D44 6E90 7BA1 7406 5668 | name=文件资源管理器 parsing=Microsoft.Windows.Explorer
+  [lnk] namelen=27 codes=0057 0069 006E 0064 006F 0077 0073 0020 | name=Windows Media Player Legacy parsing=Microsoft.Windows.MediaPlayer32
+  [lnk] namelen=6 codes=8FDC 7A0B 684C 9762 8FDE 63A5 | name=远程桌面连接 parsing=Microsoft.Windows.RemoteDesktop
+  [lnk] namelen=2 codes=8FD0 884C | name=运行 parsing=Microsoft.Windows.Shell.RunDialog
+  [lnk] namelen=3 codes=0057 0053 004C | name=WSL parsing=Microsoft.WSL
+  [lnk] namelen=14 codes=004D 0069 0063 0072 006F 0073 006F 0066 | name=Microsoft Edge parsing=MSEdge
+  [lnk] namelen=2 codes=0051 0051 | name=QQ parsing=QQ
+  [lnk] namelen=2 codes=5938 514B | name=夸克 parsing=Quark
+  [lnk] namelen=5 codes=0046 006F 006C 0069 0061 | name=Folia parsing=top.izuna.foliamajor
+  [lnk] namelen=28 codes=0056 004D 0077 0061 0072 0065 0020 0057 | name=VMware Workstation 17 Player parsing=VMware.Workstation.vmplayer
+  [lnk] namelen=22 codes=0056 004D 0077 0061 0072 0065 0020 0057 | name=VMware Workstation Pro parsing=VMware.Workstation.vmui
+  [lnk] namelen=3 codes=4E91 7A7A 95F4 | name=云空间 parsing=WindowsNotifications.DesktopToasts
+  [lnk] namelen=9 codes=0057 006F 0072 006B 0042 0075 0064 0064 | name=WorkBuddy parsing=WorkBuddy.WorkBuddy
+  [lnk] namelen=12 codes=0057 006F 0072 006B 0042 0075 0064 0064 | name=WorkBuddy AI parsing=WorkBuddy.WorkBuddyAI
+  [lnk] namelen=5 codes=5B57 7B26 6620 5C04 8868 | name=字符映射表 parsing={1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\charmap.exe
+  [lnk] namelen=4 codes=78C1 76D8 6E05 7406 | name=磁盘清理 parsing={1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\cleanmgr.exe
+  [lnk] namelen=5 codes=547D 4EE4 63D0 793A 7B26 | name=命令提示符 parsing={1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\cmd.exe
+  [lnk] namelen=4 codes=7EC4 4EF6 670D 52A1 | name=组件服务 parsing={1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\comexp.msc
+  [lnk] namelen=10 codes=788E 7247 6574 7406 548C 4F18 5316 9A71 | name=碎片整理和优化驱动器 parsing={1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\dfrgui.exe
+  [lnk] namelen=10 codes=0069 0053 0043 0053 0049 0020 53D1 8D77 | name=iSCSI 发起程序 parsing={1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\iscsicpl.exe
+  [lnk] namelen=4 codes=5B9E 65F6 5B57 5E55 | name=实时字幕 parsing={1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\LiveCaptions.exe
+  [lnk] namelen=3 codes=653E 5927 955C | name=放大镜 parsing={1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\magnify.exe
+  [lnk] namelen=12 codes=0057 0069 006E 0064 006F 0077 0073 0020 | name=Windows 内存诊断 parsing={1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\MdSched.exe
+  [lnk] namelen=4 codes=7CFB 7EDF 914D 7F6E | name=系统配置 parsing={1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\msconfig.exe
+  [lnk] namelen=4 codes=7CFB 7EDF 4FE1 606F | name=系统信息 parsing={1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\msinfo32.exe
+  [lnk] namelen=3 codes=8BB2 8FF0 4EBA | name=讲述人 parsing={1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\narrator.exe
+  [lnk] namelen=14 codes=004F 0044 0042 0043 0020 6570 636E 6E90 | name=ODBC 数据源(64 位) parsing={1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\odbcad32.exe
+  [lnk] namelen=4 codes=5C4F 5E55 952E 76D8 | name=屏幕键盘 parsing={1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\osk.exe
+  [lnk] namelen=5 codes=6B65 9AA4 8BB0 5F55 5668 | name=步骤记录器 parsing={1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\psr.exe
+  [lnk] namelen=5 codes=6062 590D 9A71 52A8 5668 | name=恢复驱动器 parsing={1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\RecoveryDrive.exe
+  [lnk] namelen=2 codes=670D 52A1 | name=服务 parsing={1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\services.msc
+  [lnk] namelen=4 codes=8BED 97F3 8BBF 95EE | name=语音访问 parsing={1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\voiceaccess.exe
+  [lnk] namelen=25 codes=9AD8 7EA7 5B89 5168 0020 0057 0069 006E | name=高级安全 Windows Defender 防火墙 parsing={1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WF.msc
+  [lnk] namelen=18 codes=0057 0069 006E 0064 006F 0077 0073 0020 | name=Windows PowerShell parsing={1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe
+  [lnk] namelen=22 codes=0057 0069 006E 0064 006F 0077 0073 0020 | name=Windows PowerShell ISE parsing={1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\PowerShell_ISE.exe
+  [lnk] namelen=9 codes=0042 0061 006E 0064 0069 0056 0069 0065 | name=BandiView parsing={6D809377-6AF0-444B-8957-A3773F02200E}\BandiView\BandiView.exe
+  [lnk] namelen=8 codes=0042 0061 006E 0064 0069 007A 0069 0070 | name=Bandizip parsing={6D809377-6AF0-444B-8957-A3773F02200E}\Bandizip\Bandizip.exe
+  [lnk] namelen=20 codes=0044 0069 0073 006B 0050 0061 0072 0074 | name=DiskPartitioningTool parsing={6D809377-6AF0-444B-8957-A3773F02200E}\Huawei\DeviceDetectTool\DiskPartitioningTool\DiskPartitioningTool.exe
+  [lnk] namelen=9 codes=0075 006E 0069 006E 0073 0074 0061 006C | name=uninstall parsing={6D809377-6AF0-444B-8957-A3773F02200E}\Huawei\DeviceDetectTool\DiskPartitioningTool\uninstall.exe
+  [lnk] namelen=11 codes=0048 004D 0053 0020 0043 006F 0072 0065 | name=HMS Core 设置 parsing={6D809377-6AF0-444B-8957-A3773F02200E}\Huawei\HMS Core\HMSCoreSettings.exe
+  [lnk] namelen=6 codes=534E 4E3A 63A7 5236 4E2D 5FC3 | name=华为控制中心 parsing={6D809377-6AF0-444B-8957-A3773F02200E}\Huawei\PCManager\HwMdcCenter.exe
+  [lnk] namelen=6 codes=534E 4E3A 7535 8111 7BA1 5BB6 | name=华为电脑管家 parsing={6D809377-6AF0-444B-8957-A3773F02200E}\Huawei\PCManager\PCManager.exe
+  [lnk] namelen=4 codes=4E2A 4EBA 4E2D 5FC3 | name=个人中心 parsing={6D809377-6AF0-444B-8957-A3773F02200E}\Huawei\Personal Center\PersonalCenterForWindowsCs.exe
+  [lnk] namelen=5 codes=0041 0049 0020 7A7A 95F4 | name=AI 空间 parsing={6D809377-6AF0-444B-8957-A3773F02200E}\Huawei\Personal Center\WisdomDispatch.exe
+  [lnk] namelen=9 codes=0055 006E 0069 006E 0073 0074 0061 006C | name=Uninstall parsing={6D809377-6AF0-444B-8957-A3773F02200E}\Huawei\RemoteClient\uninst.exe
+  [lnk] namelen=6 codes=706B 7ED2 5B89 5168 8F6F 4EF6 | name=火绒安全软件 parsing={6D809377-6AF0-444B-8957-A3773F02200E}\Huorong\Sysdiag\bin\HipsMain.exe
+  [lnk] namelen=4 codes=534E 4E3A 89C6 9891 | name=华为视频 parsing={6D809377-6AF0-444B-8957-A3773F02200E}\MobileAppEngine\app\com.huawei.himovie\launcher.exe
+  [lnk] namelen=2 codes=9605 8BFB | name=阅读 parsing={6D809377-6AF0-444B-8957-A3773F02200E}\MobileAppEngine\app\com.huawei.hwireader\launcher.exe
+  [lnk] namelen=8 codes=79FB 52A8 5E94 7528 5F15 64CE 5347 7EA7 | name=移动应用引擎升级 parsing={6D809377-6AF0-444B-8957-A3773F02200E}\MobileAppEngine\temp\update\MAE_20260817225011119_UpdateCache\qemu\windows-x86_64\MobileAppEngineUpdate.exe
+  [lnk] namelen=12 codes=63A7 5236 53F0 0020 0052 0041 0052 0020 | name=控制台 RAR 中文手册 parsing={6D809377-6AF0-444B-8957-A3773F02200E}\WinRAR\Rar.txt
+  [lnk] namelen=11 codes=6700 65B0 7248 672C 91CC 6709 54EA 4E9B | name=最新版本里有哪些新功能 parsing={6D809377-6AF0-444B-8957-A3773F02200E}\WinRAR\WhatsNew.txt
+  [lnk] namelen=11 codes=0057 0069 006E 0052 0041 0052 0020 4E2D | name=WinRAR 中文帮助 parsing={6D809377-6AF0-444B-8957-A3773F02200E}\WinRAR\WinRAR.chm
+  [lnk] namelen=6 codes=0057 0069 006E 0052 0041 0052 | name=WinRAR parsing={6D809377-6AF0-444B-8957-A3773F02200E}\WinRAR\WinRAR.exe
+  [lnk] namelen=12 codes=0057 0053 004C 0020 0053 0065 0074 0074 | name=WSL Settings parsing={6D809377-6AF0-444B-8957-A3773F02200E}\WSL\wslsettings\wslsettings.exe
+  [lnk] namelen=21 codes=0042 006C 0061 0063 006B 006D 0061 0067 | name=Blackmagic RAW Player parsing={7C5A40EF-A0FB-4BFC-874A-C0F2E0B9FA8E}\Blackmagic Design\Blackmagic RAW\Blackmagic RAW Player\BlackmagicRAWPlayer.exe
+  [lnk] namelen=25 codes=0042 006C 0061 0063 006B 006D 0061 0067 | name=Blackmagic RAW Speed Test parsing={7C5A40EF-A0FB-4BFC-874A-C0F2E0B9FA8E}\Blackmagic Design\Blackmagic RAW\Blackmagic RAW Speed Test\BlackmagicRAWSpeedTest.exe
+  [lnk] namelen=12 codes=0047 0072 0061 0062 0062 0065 0072 0020 | name=Grabber Help parsing={7C5A40EF-A0FB-4BFC-874A-C0F2E0B9FA8E}\Internet Download Manager\grabber.chm
+  [lnk] namelen=8 codes=0049 0044 004D 0020 0048 0065 006C 0070 | name=IDM Help parsing={7C5A40EF-A0FB-4BFC-874A-C0F2E0B9FA8E}\Internet Download Manager\idman.chm
+  [lnk] namelen=25 codes=0049 006E 0074 0065 0072 006E 0065 0074 | name=Internet Download Manager parsing={7C5A40EF-A0FB-4BFC-874A-C0F2E0B9FA8E}\Internet Download Manager\IDMan.exe
+  [lnk] namelen=7 codes=006C 0069 0063 0065 006E 0073 0065 | name=license parsing={7C5A40EF-A0FB-4BFC-874A-C0F2E0B9FA8E}\Internet Download Manager\license.txt
+  [lnk] namelen=9 codes=0054 0055 0054 004F 0052 0049 0041 004C | name=TUTORIALS parsing={7C5A40EF-A0FB-4BFC-874A-C0F2E0B9FA8E}\Internet Download Manager\tutor.chm
+  [lnk] namelen=13 codes=0055 006E 0069 006E 0073 0074 0061 006C | name=Uninstall IDM parsing={7C5A40EF-A0FB-4BFC-874A-C0F2E0B9FA8E}\Internet Download Manager\Uninstall.exe
+  [lnk] namelen=15 codes=0057 0069 006E 0064 006F 0077 0073 0020 | name=Windows 系统映像管理器 parsing={7C5A40EF-A0FB-4BFC-874A-C0F2E0B9FA8E}\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\WSIM\x86\imgmgr.exe
+  [lnk] namelen=4 codes=914D 7F6E 5DE5 5177 | name=配置工具 parsing={7C5A40EF-A0FB-4BFC-874A-C0F2E0B9FA8E}\WPS Office\12.1.0.29161\office6\ksomisc.exe
+  [lnk] namelen=14 codes=004F 0044 0042 0043 0020 6570 636E 6E90 | name=ODBC 数据源(32 位) parsing={D65231B0-B2F1-4857-A4CE-A8E7C6EA7D27}\odbcad32.exe
+  [lnk] namelen=24 codes=0057 0069 006E 0064 006F 0077 0073 0020 | name=Windows PowerShell (x86) parsing={D65231B0-B2F1-4857-A4CE-A8E7C6EA7D27}\WindowsPowerShell\v1.0\powershell.exe
+  [lnk] namelen=28 codes=0057 0069 006E 0064 006F 0077 0073 0020 | name=Windows PowerShell ISE (x86) parsing={D65231B0-B2F1-4857-A4CE-A8E7C6EA7D27}\WindowsPowerShell\v1.0\PowerShell_ISE.exe
+  [lnk] namelen=6 codes=6CE8 518C 8868 7F16 8F91 5668 | name=注册表编辑器 parsing={F38BF404-1D43-42F2-9305-67DE0B28FC23}\regedit.exe
+  [lnk] namelen=6 codes=5378 8F7D 767E 5EA6 7F51 76D8 | name=卸载百度网盘 parsing=卸载百度网盘
+  [uwp] namelen=2 codes=8BBE 7F6E | name=设置 parsing=windows.immersivecontrolpanel_cw5n1h2txyewy!microsoft.windows.immersivecontrolpanel
+  [uwp] namelen=4 codes=7535 8111 7BA1 5BB6 | name=电脑管家 parsing=Microsoft.MicrosoftPCManager_8wekyb3d8bbwe!App
+  [uwp] namelen=20 codes=004D 0069 0063 0072 006F 0073 006F 0066 | name=Microsoft Whiteboard parsing=Microsoft.Whiteboard_8wekyb3d8bbwe!Whiteboard
+  [uwp] namelen=18 codes=0044 0065 0076 0020 0048 006F 006D 0065 | name=Dev Home (Preview) parsing=Microsoft.Windows.DevHome_8wekyb3d8bbwe!App
+  [uwp] namelen=4 codes=5FEB 901F 52A9 624B | name=快速助手 parsing=MicrosoftCorporationII.QuickAssist_8wekyb3d8bbwe!App
+  [uwp] namelen=15 codes=004D 0069 0063 0072 006F 0073 006F 0066 | name=Microsoft Teams parsing=MSTeams_8wekyb3d8bbwe!MSTeams
+  [uwp] namelen=21 codes=0052 0065 0061 006C 0074 0065 006B 0020 | name=Realtek Audio Console parsing=RealtekSemiconductorCorp.RealtekAudioControl_dt26b99r8h8gj!App
+  [uwp] namelen=11 codes=82F1 7279 5C14 00AE 0020 663E 5361 63A7 | name=英特尔® 显卡控制中心 parsing=AppUp.IntelGraphicsExperience_8j3eq9eme6ctt!App
+  [uwp] namelen=4 codes=547D 4EE4 9762 677F | name=命令面板 parsing=Microsoft.CommandPalette_8wekyb3d8bbwe!App
+  [uwp] namelen=2 codes=65E5 8BB0 | name=日记 parsing=Microsoft.MicrosoftJournal_8wekyb3d8bbwe!App
+  [uwp] namelen=2 codes=4FBF 7B3A | name=便笺 parsing=Microsoft.MicrosoftStickyNotes_8wekyb3d8bbwe!App
+  [uwp] namelen=6 codes=0046 0061 006D 0069 006C 0079 | name=Family parsing=MicrosoftCorporationII.MicrosoftFamily_8wekyb3d8bbwe!App
+  [uwp] namelen=5 codes=0046 0069 006C 0065 0073 | name=Files parsing=Files_1y0xx7n9077q4!App
+  [uwp] namelen=2 codes=5929 6C14 | name=天气 parsing=Microsoft.BingWeather_8wekyb3d8bbwe!App
+  [uwp] namelen=2 codes=8D44 8BAF | name=资讯 parsing=Microsoft.BingNews_8wekyb3d8bbwe!AppexNews
+  [uwp] namelen=12 codes=0057 0069 006E 0064 006F 0077 0073 0020 | name=Windows 安全中心 parsing=Microsoft.SecHealthUI_8wekyb3d8bbwe!SecHealthUI
+  [uwp] namelen=8 codes=0047 0061 006D 0065 0020 0042 0061 0072 | name=Game Bar parsing=Microsoft.XboxGamingOverlay_8wekyb3d8bbwe!App
+  [uwp] namelen=2 codes=753B 56FE | name=画图 parsing=Microsoft.Paint_8wekyb3d8bbwe!App
+  [uwp] namelen=2 codes=65F6 949F | name=时钟 parsing=Microsoft.WindowsAlarms_8wekyb3d8bbwe!App
+  [uwp] namelen=3 codes=8BB0 4E8B 672C | name=记事本 parsing=Microsoft.WindowsNotepad_8wekyb3d8bbwe!App
+  [uwp] namelen=3 codes=8BA1 7B97 5668 | name=计算器 parsing=Microsoft.WindowsCalculator_8wekyb3d8bbwe!App
+  [uwp] namelen=5 codes=5A92 4F53 64AD 653E 5668 | name=媒体播放器 parsing=Microsoft.ZuneMusic_8wekyb3d8bbwe!Microsoft.ZuneMusic
+  [uwp] namelen=2 codes=76F8 673A | name=相机 parsing=Microsoft.WindowsCamera_8wekyb3d8bbwe!App
+  [uwp] namelen=3 codes=5F55 97F3 673A | name=录音机 parsing=Microsoft.WindowsSoundRecorder_8wekyb3d8bbwe!App
+  [uwp] namelen=4 codes=83B7 53D6 5E2E 52A9 | name=获取帮助 parsing=Microsoft.GetHelp_8wekyb3d8bbwe!App
+  [uwp] namelen=24 codes=0053 006F 006C 0069 0074 0061 0069 0072 | name=Solitaire & Casual Games parsing=Microsoft.MicrosoftSolitaireCollection_8wekyb3d8bbwe!App
+  [uwp] namelen=4 codes=53CD 9988 4E2D 5FC3 | name=反馈中心 parsing=Microsoft.WindowsFeedbackHub_8wekyb3d8bbwe!App
+  [uwp] namelen=15 codes=004D 0069 0063 0072 006F 0073 006F 0066 | name=Microsoft To Do parsing=Microsoft.Todos_8wekyb3d8bbwe!App
+  [uwp] namelen=2 codes=7EC8 7AEF | name=终端 parsing=Microsoft.WindowsTerminal_8wekyb3d8bbwe!App
+  [uwp] namelen=19 codes=004D 0069 0063 0072 006F 0073 006F 0066 | name=Microsoft Clipchamp parsing=Clipchamp.Clipchamp_yxz26nhyzhsrt!App
+  [uwp] namelen=2 codes=7167 7247 | name=照片 parsing=Microsoft.Windows.Photos_8wekyb3d8bbwe!App
+  [uwp] namelen=4 codes=622A 56FE 5DE5 5177 | name=截图工具 parsing=Microsoft.ScreenSketch_8wekyb3d8bbwe!App
+  [uwp] namelen=22 codes=0050 0079 0074 0068 006F 006E 0020 0069 | name=Python install manager parsing=PythonSoftwareFoundation.PythonManager_3847v3x7pw1km!Py.Manager.Exe
+  [uwp] namelen=4 codes=624B 673A 8FDE 63A5 | name=手机连接 parsing=Microsoft.YourPhone_8wekyb3d8bbwe!App
+  [uwp] namelen=15 codes=004D 0069 0063 0072 006F 0073 006F 0066 | name=Microsoft Store parsing=Microsoft.WindowsStore_8wekyb3d8bbwe!App
+  [uwp] namelen=14 codes=0050 006F 0077 0065 0072 0020 0041 0075 | name=Power Automate parsing=Microsoft.PowerAutomateDesktop_8wekyb3d8bbwe!PAD.Console
+  [uwp] namelen=29 codes=0050 006F 0077 0065 0072 0020 0041 0075 | name=Power Automate Troubleshooter parsing=Microsoft.PowerAutomateDesktop_8wekyb3d8bbwe!PAD.Troubleshooter
+  [uwp] namelen=4 codes=0058 0042 004F 0058 | name=XBOX parsing=Microsoft.GamingApp_8wekyb3d8bbwe!Microsoft.Xbox.App
+  [uwp] namelen=7 codes=004F 0075 0074 006C 006F 006F 006B | name=Outlook parsing=Microsoft.OutlookForWindows_8wekyb3d8bbwe!Microsoft.OutlookforWindows
+  [uwp] namelen=2 codes=5165 95E8 | name=入门 parsing=MicrosoftWindows.Client.CBS_cw5n1h2txyewy!WebExperienceHost
+  [uwp] namelen=10 codes=0057 0069 006E 0064 006F 0077 0073 0020 | name=Windows 备份 parsing=MicrosoftWindows.Client.CBS_cw5n1h2txyewy!WindowsBackup
+  [uwp] namelen=5 codes=5355 51FB 4EE5 6267 884C | name=单击以执行 parsing=MicrosoftWindows.Client.CoreAI_cw5n1h2txyewy!ClickToDoApp
+  [uwp] namelen=12 codes=0046 006C 0075 0065 006E 0074 0046 006C | name=FluentFlyout parsing=unchihugo.FluentFlyout_69b7b6qge1ahj!App
+apps_total=216 with_name=216 uwp=43

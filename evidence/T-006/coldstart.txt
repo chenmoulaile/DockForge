@@ -1,0 +1,7 @@
+﻿T-006 cold start (window visible via EnumWindows + IsWindowVisible polling)
+budget_ms=800
+measured_ms=642
+scan_ms=453.6
+icons_warm_ms=20.8 (disk cache warm) / 553.5 (cold, cache cleared)
+note=AppsFolder enumeration dominates; icons are warmed before window creation so the
+first frame never blocks on a 60-190ms GetImage call.
