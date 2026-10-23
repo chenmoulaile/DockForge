@@ -13,8 +13,10 @@
 #include <d2d1helper.h>
 #include <dwrite.h>
 
+#include <algorithm>
 #include <array>
 #include <cstring>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -60,6 +62,7 @@ class D2DBackend final : public IRenderBackend {
 
     void Shutdown() override {
         brushes_.fill(Entry{});
+        bitmaps_.clear();
         formats_.clear();
         dwrite_.Reset();
         factory_.Reset();
@@ -70,8 +73,10 @@ class D2DBackend final : public IRenderBackend {
         dc_ = &dc;
         dpi_ = dpi > 0.0f ? dpi : 96.0f;
         // Brushes are device-dependent; a new context means a new device generation.
+        // Bitmaps are device resources too, so they go with the brushes.
         if (dc_ != last_dc_) {
             brushes_.fill(Entry{});
+            bitmaps_.clear();
             last_dc_ = dc_;
         }
     }
@@ -121,6 +126,19 @@ class D2DBackend final : public IRenderBackend {
                         D2D1_DRAW_TEXT_OPTIONS_CLIP, DWRITE_MEASURING_MODE_NATURAL);
     }
 
+    void DrawBitmap(std::uint64_t cache_id, const BitmapView& view, const RectF& rect,
+                    float opacity) override {
+        if (!dc_ || !view.Valid() || opacity <= 0.0f) return;
+        ID2D1Bitmap1* bitmap = BitmapFor(cache_id, view);
+        if (!bitmap) return;
+        const D2D1_RECT_F dst = ToD2D(rect);
+        // Linear interpolation with a mip-free path is right here: icons are drawn
+        // at or below their extracted size, so this is a downscale, and nearest
+        // neighbour would shimmer on the 1px outline of a shell icon.
+        dc_->DrawBitmap(bitmap, &dst, std::clamp(opacity, 0.0f, 1.0f),
+                        D2D1_INTERPOLATION_MODE_LINEAR, nullptr, nullptr);
+    }
+
   private:
     struct Entry {
         ColorF color{};
@@ -128,8 +146,52 @@ class D2DBackend final : public IRenderBackend {
         bool used = false;
     };
 
+    // One GPU bitmap per caller-assigned content id. See the contract note in
+    // backend.h for why the key is an id and not a pointer.
+    struct BitmapEntry {
+        ComPtr<ID2D1Bitmap1> bitmap;
+        int width = 0;
+        int height = 0;
+    };
+
     static D2D1_RECT_F ToD2D(const RectF& r) {
         return D2D1::RectF(r.left, r.top, r.right, r.bottom);
+    }
+
+    ID2D1Bitmap1* BitmapFor(std::uint64_t cache_id, const BitmapView& view) {
+        auto it = bitmaps_.find(cache_id);
+        if (it != bitmaps_.end()) {
+            BitmapEntry& entry = it->second;
+            if (entry.width == view.width && entry.height == view.height && entry.bitmap) {
+                return entry.bitmap.Get();
+            }
+            // Same id, different size: the caller reused an id for new content, so
+            // the old texture is stale. Drop it and rebuild below.
+            bitmaps_.erase(it);
+        }
+
+        const D2D1_SIZE_U size = D2D1::SizeU(static_cast<UINT32>(view.width),
+                                             static_cast<UINT32>(view.height));
+        // DPI must be 96 here: the destination rect is already in DIP and the
+        // backend's transform carries the frame DPI. Tagging the bitmap with the
+        // frame DPI would scale it a second time (the T-005 frost bitmap bug).
+        const D2D1_BITMAP_PROPERTIES1 props = D2D1::BitmapProperties1(
+            D2D1_BITMAP_OPTIONS_NONE,
+            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), 96.0f,
+            96.0f);
+        BitmapEntry entry;
+        entry.width = view.width;
+        entry.height = view.height;
+        const UINT32 pitch = static_cast<UINT32>(view.width) * 4u;
+        const HRESULT hr =
+            dc_->CreateBitmap(size, view.pixels, pitch, props, entry.bitmap.GetAddressOf());
+        if (FAILED(hr)) {
+            DF_WARN("render", "CreateBitmap(%dx%d) failed: %s", view.width, view.height,
+                    core::WideToUtf8(HResultText(hr)).c_str());
+            return nullptr;
+        }
+        const auto [pos, inserted] = bitmaps_.emplace(cache_id, std::move(entry));
+        return inserted ? pos->second.bitmap.Get() : nullptr;
     }
 
     ID2D1Brush* Brush(const ColorF& color) {
@@ -187,6 +249,7 @@ class D2DBackend final : public IRenderBackend {
     std::array<Entry, 16> brushes_{};
     ComPtr<ID2D1SolidColorBrush> spill_;
     std::vector<std::pair<FormatKey, ComPtr<IDWriteTextFormat>>> formats_;
+    std::unordered_map<std::uint64_t, BitmapEntry> bitmaps_;
 };
 
 }  // namespace

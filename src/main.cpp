@@ -2,13 +2,15 @@
 //
 // T-001 skeleton window, T-002 config wiring, T-003 frame-driven app loop,
 // T-004 DirectComposition surface, T-005 render backend + material tiers,
-// T-006 shell app resolution + icon cache, T-007 display enumeration + placement.
+// T-006 shell app resolution + icon cache, T-007 display enumeration + placement,
+// T-009 real dock tile row (dock/dock_view.*).
 #include "core/app_loop.h"
 #include "core/config.h"
 #include "core/event_bus.h"
 #include "core/frame_clock.h"
 #include "core/log.h"
 #include "core/paths.h"
+#include "dock/dock_view.h"
 #include "platform/composition.h"
 #include "platform/display.h"
 #include "platform/window.h"
@@ -122,6 +124,10 @@ bool EnableDarkTitleBar(HWND hwnd) {
 constexpr int kIconWarmupLimit = 24;
 
 struct ShellScanReport {
+    // Kept by value because the dock tile list is built from it after the scan
+    // counters have been logged. 215 entries of a few hundred bytes each is far
+    // cheaper than a second AppsFolder enumeration.
+    std::vector<shell::AppEntry> entries;
     std::size_t app_count = 0;
     int shortcut_count = 0;
     int uwp_count = 0;
@@ -162,6 +168,7 @@ ShellScanReport ScanAndWarmIcons(shell::IconCache& icons) {
         }
     }
     report.icons_ms = core::QpcToMilliseconds(core::QueryPerformanceTicks() - start);
+    report.entries = std::move(scan.entries);
     return report;
 }
 
@@ -202,22 +209,17 @@ bool ApplySystemBackdrop(HWND hwnd, core::MaterialLevel tier) {
     return true;
 }
 
-// Logical (DIP) content size of the skeleton window. T-008 replaces this with
-// the real Dock layout engine; until then the box scales with the config so the
-// C-01 wiring stays observable.
-struct LogicalSize {
-    float width;
-    float height;
-};
+// How many tiles the dock shows. Not a config key yet: C-01 has no field for it and
+// adding one would need a migration for a value the user cannot meaningfully pick
+// until drag-reorder exists (T-012). Twelve is a plausible dock and, at the default
+// 48px icon with an 8px gap, 684 DIP wide - it fits a 1440x960 DIP work area with
+// room to spare, which is what makes the DPI matrix screenshots usable.
+constexpr int kDockTileLimit = 12;
 
-LogicalSize ComputeLogicalSize(const core::Config& config) {
-    // Kept deliberately modest: the dev host runs a 192 DPI session whose
-    // logical work area is only 720x480 DIP, so a bigger skeleton would hang off
-    // the screen and make screenshot evidence unusable. T-008 derives the real
-    // Dock width from the icon count instead.
-    return LogicalSize{240.0f + static_cast<float>(config.dock.icon_size) * 3.0f,
-                       static_cast<float>(config.dock.icon_size) + 56.0f};
-}
+// Icons are extracted once at 256px and downscaled at paint time. Extracting at
+// the live DPI instead would re-run the shell for every scale change (60-190ms
+// each, evidence/T-006) and still be softer than a 256px source.
+constexpr int kDockIconPx = 256;
 
 }  // namespace
 
@@ -262,6 +264,26 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
             scan.namespace_count, scan.skipped, scan.scan_ms, scan.icons_ready,
             scan.icons_ready + scan.icons_failed, scan.icons_ms);
 
+    // ---- dock tiles (T-009) ---------------------------------------------
+    // The tile list is built once, before the window exists, so painting never
+    // calls the shell: a cold GetImage is 60-190ms (evidence/T-006) and would
+    // stall the frame loop. The warm-up above already populated the cache, so this
+    // is a map lookup per tile.
+    const std::vector<dock::DockTile> tiles =
+        dock::BuildTiles(scan.entries, icons, kDockTileLimit, kDockIconPx);
+    DF_INFO("app", "dock tiles: %zu of %zu apps (limit=%d icon=%dpx)", tiles.size(),
+            scan.entries.size(), kDockTileLimit, kDockIconPx);
+    // Logged per tile because a tile with no icon still occupies a slot: the plate
+    // draws a placeholder ring, and without this line that ring looks like a
+    // rendering bug rather than a shell item the shell could not produce an icon
+    // for.
+    for (std::size_t i = 0; i < tiles.size(); ++i) {
+        DF_DEBUG("dock", "tile[%zu] %s kind=%s icon=%s", i,
+                 core::WideToUtf8(tiles[i].app.display_name).c_str(),
+                 shell::ToString(tiles[i].app.kind),
+                 tiles[i].icon.valid() ? "ok" : "missing");
+    }
+
     // ---- material tier resolution (T-005) -------------------------------
     // The configured tier is a request, not a promise: Mica needs Win11 22000+
     // and a rectangular plate, and the self-drawn frost needs a desktop capture.
@@ -289,22 +311,27 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         return 2;
     }
 
-    const LogicalSize logical = ComputeLogicalSize(config);
+    // Geometry needs the tile count, which needs the scan, which happens above.
+    // The scale is unknown until the HWND exists, so start at 1.0 and recompute
+    // inside apply_placement once Window::Dpi() is readable.
+    dock::DockGeometry geometry = dock::ComputeGeometry(config, static_cast<int>(tiles.size()), 1.0f);
+    dock::DockPainter dock_painter;
+    dock::DockHover dock_hover;
 
     platform::WindowDesc desc;
     desc.title = L"DockForge";
     // Window size is physical pixels; content is laid out in DIPs (ADR-0007).
     // The DPI is not known until the HWND exists, so start at 96 DPI and correct
     // after creation with an explicit resize.
-    desc.width = static_cast<int>(std::lround(logical.width));
-    desc.height = static_cast<int>(std::lround(logical.height));
+    desc.width = static_cast<int>(std::lround(geometry.window_width_dip));
+    desc.height = static_cast<int>(std::lround(geometry.window_height_dip));
     desc.topmost = true;
     // Content comes from DirectComposition only (ADR-0007).
     desc.composition_surface = true;
-    // The skeleton window must accept keyboard focus so Ctrl+Q can be proven
-    // here. The real Dock window flips this off in T-009 (it is click-driven
-    // and must never steal focus).
-    desc.no_activate = false;
+    // A dock is click-driven and must never steal focus from the app the user is
+    // typing in. WS_EX_NOACTIVATE also keeps clicking a tile from raising the dock
+    // above the window it just launched.
+    desc.no_activate = true;
 
     platform::Window window;
     if (!window.Create(instance, desc)) {
@@ -400,8 +427,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     const platform::DockEdge edge = ToDockEdge(config.dock.position);
     auto apply_placement = [&]() {
         if (!have_target) return;
+        // Recompute geometry here, not once at startup: the window DPI is only
+        // readable after Create(), and WM_DPICHANGED lands here too. Sizing the
+        // window from a stale scale would clip the row at 150%/200%.
+        geometry = dock::ComputeGeometry(config, static_cast<int>(tiles.size()), window.Scale());
         const auto placement = platform::ComputeDockPlacement(
-            target_display, edge, logical.width, logical.height, 8.0f);
+            target_display, edge, geometry.window_width_dip, geometry.window_height_dip, 8.0f);
         if (placement.clamped) {
             DF_WARN("platform", "dock clamped to %dx%d px on %s (work area %dx%d)",
                     placement.width_px, placement.height_px,
@@ -465,26 +496,18 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         if (!surface.Paint(dpi, [&](ID2D1DeviceContext& dc,
                                     const platform::CompositionSurface::PaintInfo& info) {
                 render_backend->BeginFrame(dc, dpi);
-                const render::RectF panel{0.5f, 0.5f, info.width_dip - 0.5f,
-                                          info.height_dip - 0.5f};
-                const float radius = static_cast<float>(config.appearance.corner_radius);
-                plate.Draw(dc, *render_backend, panel, radius, plate_style,
-                           backdrop_w > 0 ? backdrop_pixels.data() : nullptr, backdrop_w,
-                           backdrop_h, dpi);
-
-                // The label proves DirectWrite goes through the backend contract
-                // rather than straight to the D2D context, and reports what the
-                // shell scan found so the running app is its own evidence.
-                wchar_t label[256];
-                swprintf_s(label,
-                           L"DockForge \u00b7 %s \u00b7 apps %zu \u00b7 uwp %d \u00b7 id %d \u00b7 "
-                           L"ns %d \u00b7 icons %d",
-                           core::ToString(tier), scan.app_count, scan.uwp_count,
-                           scan.desktop_id_count, scan.namespace_count, scan.icons_ready);
-                render_backend->DrawLabel(label, render::RectF{0.0f, 0.0f, info.width_dip,
-                                                               info.height_dip},
-                                          15.0f, render::ColorF{0.925f, 0.941f, 0.973f, 1.0f},
-                                          render::TextAlign::Center);
+                dock::DockPaintInput input;
+                input.config = &config;
+                input.style = &plate_style;
+                input.tiles = &tiles;
+                input.backdrop = backdrop_w > 0 ? backdrop_pixels.data() : nullptr;
+                input.backdrop_w = backdrop_w;
+                input.backdrop_h = backdrop_h;
+                input.dpi = dpi;
+                input.hover = dock_hover;
+                if (!dock_painter.Paint(dc, *render_backend, plate, input)) {
+                    DF_WARN("dock", "dock paint failed at %.0f dpi", dpi);
+                }
                 render_backend->EndFrame();
             })) {
             return false;

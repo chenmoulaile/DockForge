@@ -1,0 +1,17 @@
+source=image evidence\T-009\dpi96.png size=684x68
+plate_rgb=13,15,18 tolerance=6
+slot   center     drawn_px   coverage verdict  bbox
+0      34,34      96         13.2%    ICON     8,10-56,60
+1      90,34      107        14.7%    ICON     66,10-112,56
+2      146,34     126        17.3%    ICON     122,10-168,56
+3      202,34     432        59.3%    ICON     178,16-224,50
+4      258,34     125        17.1%    ICON     234,10-280,56
+5      314,34     125        17.1%    ICON     290,10-336,56
+6      370,34     80         11%      ICON     346,10-392,56
+7      426,34     107        14.7%    ICON     402,10-448,56
+8      482,34     98         13.4%    ICON     458,10-504,56
+9      538,34     414        56.8%    ICON     516,12-560,56
+10     594,34     371        50.9%    ICON     572,12-614,54
+11     650,34     434        59.5%    ICON     626,8-676,60
+slots=12 with_icon=12 total_drawn_samples=2515
+verdict=ALL_SLOTS_DRAWN

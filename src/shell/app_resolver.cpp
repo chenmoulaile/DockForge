@@ -63,6 +63,20 @@ const char* ToString(ParsingKind kind) {
     return "unknown";
 }
 
+// Was declared in app_entry.h but never defined, so any caller that logged an
+// AppKind failed to link. Found when the dock's per-tile diagnostic was added.
+const char* ToString(AppKind kind) {
+    switch (kind) {
+        case AppKind::Shortcut: return "shortcut";
+        case AppKind::Executable: return "executable";
+        case AppKind::Uwp: return "uwp";
+        case AppKind::ShellItem: return "shell-item";
+        case AppKind::NamespaceItem: return "namespace-item";
+        case AppKind::Unknown: return "unknown";
+    }
+    return "unknown";
+}
+
 bool HasShortcutExtension(const std::wstring& path) {
     return EndsWithNoCase(path, L".lnk");
 }

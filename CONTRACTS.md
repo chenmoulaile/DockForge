@@ -90,8 +90,8 @@ x_i = base_i + Σ_{j} (s_j - 1) * w * 0.5 * sign(i - j)
 
 ### C-05a 求值规则（T-008 冻结，实现细节不可自由发挥）
 
-1. **指针钳制**：m 先钳到首尾图标**中心**的跨度 [w/2, base_width - w/2]（ase_width 为无悬停内容宽度）。钳到 [0, base_width] 会让边缘图标峰值达不到 magnification，并破坏峰值索引的单调性。
-2. **累积位移用前缀和**：x_i = base_i + 0.5*w*(Σ_{j<i} g_j - Σ_{j>i} g_j)，g_j = s_j - 1。与契约双重求和代数等价，	ests/layout_test.cpp 的 ReferenceLayout（逐字 O(n²) 转写）逐项比对锁定，容差 scale 1e-5 / center 1e-3 / width 1e-4。
+1. **指针钳制**：m 先钳到首尾图标**中心**的跨度 [w/2, base_width - w/2]（base_width 为无悬停内容宽度）。钳到 [0, base_width] 会让边缘图标峰值达不到 magnification，并破坏峰值索引的单调性。
+2. **累积位移用前缀和**：x_i = base_i + 0.5*w*(Σ_{j<i} g_j - Σ_{j>i} g_j)，g_j = s_j - 1。与契约双重求和代数等价，tests/layout_test.cpp 的 ReferenceLayout（逐字 O(n²) 转写）逐项比对锁定，容差 scale 1e-5 / center 1e-3 / width 1e-4。
 3. **零分配**：热路径 LayoutDock(params, count, mouse_x, hovering, IconLayout* out, capacity, summary) 禁止任何堆分配。g_j 从 out[i].scale - 1.0f 读回，不用临时数组。
 4. **半径外短路**：|d| >= R 的图标 s = 1 且跳过 pow()/exp()。ComputeScale 本身也必须对 d >= R 返回恰好 1.0f、对 d <= 0 返回恰好 magnification。
 5. **曲线在影响半径处必须归零**：FalloffWeight(1.0, params) < 1e-6。Gaussian 必须归一化 (exp(-(p*t)^2) - exp(-p^2)) / (1 - exp(-p^2))，未归一化在 p=2 残留 0.0183（≈1.5% 缩放台阶）。
@@ -240,3 +240,52 @@ DPI，否则面板会按一个比例布局、装在另一个比例尺寸的窗�
 - 单显示器主机上 `GetDpiForWindow` 始终返回真实 DPI。合成消息证明的是**处理器与放置数学**，
   不等于验证了合成器的真实跨屏缩放；不得把两者混为一谈。
 
+
+## C-11 Dock 渲染契约（T-009 冻结）
+
+### tile 模型
+
+`dock::DockTile { shell::AppEntry app; shell::IconBitmap icon; std::uint64_t icon_key; }`。
+
+- `icon_key` 是**内容身份**（`IconKeyFor(source)`，FNV-1a over UTF-16），不是像素地址也不是 `IconBitmap` 的地址。按指针做键会在 vector 重分配后每帧重传位图；按视图地址会别名到错误内容。
+- 同一 `icon_key` 在不同尺寸下视为不同位图，键里必须含尺寸（`IconCache::CacheKey` 已含）。
+- 图标提取尺寸固定 `kDockIconPx = 256`，绘制时按槽位尺寸线性降采样。禁止按槽位尺寸提取——槽位尺寸随 DPI 与悬停缩放变化，会击穿缓存。
+
+### 几何来源唯一
+
+`dock::ComputeGeometry(config, tile_count, scale)` 是窗口尺寸、板尺寸、内容宽度的**唯一**计算点。
+
+- `main.cpp` 不得自行累加 `icon_size * n + gap * (n-1)`。T-009 前存在 `LogicalSize` / `ComputeLogicalSize` 与 `apply_placement` 两处独立计算，已删除。
+- `ComputeGeometry` 内必须传 `config.dock` 给 `layout::FromConfig`，不是整个 `config`。
+- 内容宽 = `BaseContentWidth(count, params) / scale`；板 = 内容 + 2 × `kPlatePaddingDip`；板高 = `icon_size + 2 × kPlatePaddingDip`。
+- `kPlatePaddingDip = 10.0f` 是设计常量，**不进 C-01 配置**（用户不需要调板内边距）。
+
+### 绘制顺序
+
+1. 板（`PlateRenderer::Draw`，霜层 / 色调 / 圆角裁剪 / 描边）。
+2. 图标（`IRenderBackend::DrawBitmap`）。
+
+顺序不可交换：霜层盖住图标等于没画。图标矩形是**正方形**，边长 = `icon_size × scale`，中心 = `kPlatePaddingDip + layout[i].center / scale`（`layout` 输出的是像素坐标，除以 scale 转 DIP）。
+
+### 缺失图标
+
+`tile.icon.valid() == false` 时画 `StrokeRoundedRect` 淡色圆环占位，**不留空**。
+
+理由：缺图是外观问题，缺启动器是功能问题，两者不能长得一样。留空会让"图标提取失败"看起来像"这个槽位本来就没有应用"。
+
+### 位图 DPI 打标
+
+`ID2D1Bitmap1` 创建时 DPI **固定写 96**，不得写帧 DPI。
+
+目标矩形已是 DIP，后端 `BeginFrame` 设置的变换已带帧 DPI。若位图再打帧 DPI，192 DPI 下会被二次缩放成 1/2 尺寸。
+
+### 验证手段
+
+- `tests/layout_test.cpp` 用 O(n²) 参考实现锁定前缀和等价性。
+- `tools/dock_slots.ps1` 逐槽位统计非板色像素覆盖率与包围盒。**禁止用单点采样判断图标存在**：深色中心的图标（7-Zip 黑块）单点会读成板色，被误判为缺失。
+- 三档 DPI 必须给出物理窗口尺寸与 `round(DIP × dpi / 96)` 的对照，偏差为 0 才算通过。
+
+### 诚实边界
+
+- 本契约只覆盖**静态图标行**。悬停放大、运行指示、拖拽、缩略图不在其中，各自单独冻结。
+- "窗口自动贴合内容宽度"指基础尺寸；悬停时窗口是否扩张属 T-010 决策，不得由本契约推定。

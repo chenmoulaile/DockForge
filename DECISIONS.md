@@ -306,7 +306,7 @@ spike 实测（`evidence/T-007/run_*.txt`）澄清了三个此前只是"以为"�
 2. **热路径零分配**。g_j 从已写出的 out[i].scale - 1.0f 读回，不用临时 std::vector。初版每次调用分配一个 gain 数组，违反头文件「allocation-free」承诺与 C-05「禁止逐帧重建布局对象」。去掉后 129.88ms → 80.96ms。
 3. **半径外跳过超越函数**。|d| >= R 时 s = 1 且不调 pow()/exp()。20 图标通常只有约 6 个在影响半径内。80.96ms → 7ms 量级。
 4. **指针钳到首尾图标中心**，而非 [0, base_width]。后者把指针钉在首图标外边缘（离中心 w/2），6 图标 Dock 实测峰值 1.5556 而 magnification 是 1.8，且破坏峰值索引单调性。
-5. **Gaussian 曲线归一化**。exp(-(p*t)^2) 在 	=1 残留 exp(-p^2)（p=2 时 0.0183），是影响半径处约 1.5% 的可见台阶。减去边界值再归一化，代价一次 exp。
+5. **Gaussian 曲线归一化**。exp(-(p*t)^2) 在 t=1 残留 exp(-p^2)（p=2 时 0.0183），是影响半径处约 1.5% 的可见台阶。减去边界值再归一化，代价一次 exp。
 6. **benchmark 单位显式声明**。C-05 的求值单位是单图标公式项，不是整条 Dock。首版按整条 Dock 计数判 FAIL，是单位错误不是性能问题。修正后两个口径同时输出。
 
 ### 被拒绝的方案
@@ -321,3 +321,34 @@ spike 实测（`evidence/T-007/run_*.txt`）澄清了三个此前只是"以为"�
 - src/dock/layout.cpp 无 Win32 依赖、无分配、可脱离窗口测试。
 - C-05a 把上述 6 条固化为契约，后续改动必须走 ADR。
 - benchmark 单位规则写进 C-05a 第 7 条，防止未来用有利口径掩盖帧成本。
+
+
+## ADR-0014 · Dock 渲染：内容身份位图键、单一几何源、槽位覆盖率验证
+
+- 日期: 2026-10-24
+- 状态: 已采纳
+- 上下文: T-009 把 `layout` 与 `shell::IconCache` 接进 Dock 窗口。三个具体问题必须先定：位图缓存用什么做键、窗口尺寸从哪里算、图标"画出来了"怎么证明。
+
+### 决策
+
+1. **位图缓存键是内容身份，不是地址**。`IRenderBackend::DrawBitmap(cache_id, BitmapView, rect, opacity)` 的 `cache_id` 由调用方按内容生成（`IconKeyFor(source)`，FNV-1a over UTF-16）。按 `IconBitmap` 的 `pixels.data()` 做键，会在 `std::vector` 重分配后把同一图标当成新位图每帧重传；按 `BitmapView` 的栈地址做键，会让不同图标别名到同一条缓存。两者都是"看起来能跑、偶发闪图标"的 bug。
+2. **位图 DPI 固定打 96**。目标矩形已经是 DIP，`BeginFrame` 设置的变换已带帧 DPI。若位图再打帧 DPI，192 DPI 下 D2D 会把位图按 2 倍 DPI 解释、再被变换缩回去，实际渲染尺寸减半。T-004 的 `PaintInfo` 与 T-005 的霜层位图都踩过同类问题，这是第三次，因此写进 C-11。
+3. **几何只有一个计算点**。`dock::ComputeGeometry(config, tile_count, scale)` 产窗口尺寸、板尺寸、内容宽度。`main.cpp` 原有 `LogicalSize` / `ComputeLogicalSize` 与 `apply_placement` 两处各自累加 `icon_size * n + gap * (n-1)`，两者在 `scale` 参与后必然漂移；已删除前者，`apply_placement` 每次重算 `geometry`。
+4. **先画板后画图标**。霜层是不透明的模糊图像 + 色调，画在图标之上等于把图标糊掉。顺序在代码里是两行，但反过来是"图标为什么看不见"的经典排查黑洞。
+5. **缺失图标画占位环**。留空会让"提取失败"与"这个槽位本来没应用"无法区分。占位环让两类问题在外观上分开，也让 `dock_slots.ps1` 的 `SPARSE` 判定有意义。
+6. **图标存在性用槽位覆盖率证明，不用单点采样**。7-Zip 图标中心是黑色块，单点采样读成板色 `13,15,18`，会误判为"槽位是空的"。`tools/dock_slots.ps1` 以 2px 步长统计槽位内非板色像素占比与包围盒，`<2%` 判 `SPARSE`、`0` 判 `EMPTY`。实测 12 个槽位覆盖率 6.6%–81.9%，全部 `ICON`。
+
+### 被拒绝的方案
+
+- **每帧按槽位尺寸调 `IconCache::Get`**：槽位尺寸随 DPI 与悬停缩放变化，等于每帧都 miss 并重新走 shell 提取（冷调用实测 57–187ms）。固定 256px 提取 + 绘制时线性降采样。
+- **`ID2D1Bitmap` 而非 `ID2D1Bitmap1`**：T-005 已证明 `CreateBitmap` 对前者报 `invalid user-defined conversion`；且 DPI 打标需要 `BitmapProperties1`。
+- **用 `GetPixelSize()` 推窗口尺寸**：T-004 已证明它返回合成图集尺寸而非 surface 尺寸。
+- **保留两处尺寸计算并加断言对齐**：断言只会在漂移发生后报警，不能阻止漂移；直接删掉重复源更省事。
+- **给 `kPlatePaddingDip` 加配置项**：用户不需要调板内边距，加进 C-01 等于永久背负兼容成本。
+
+### 后果
+
+- `src/dock/dock_view.{h,cpp}` 不依赖窗口句柄，可在测试里用合成 `Config` 与假 tile 验证几何。
+- C-11 冻结 tile 模型、几何来源、绘制顺序、缺失图标策略、位图 DPI 打标与验证手段。
+- 悬停放大（T-010）接入时，`DockPaintInput::hover` 已预留，但窗口是否随悬停扩张尚未决定，属 T-010 的 ADR。
+- `dockforge::shell::ToString(AppKind)` 在 T-006 只声明未定义，本轮加逐 tile 日志时以链接错误暴露，已补齐。教训：`enum class` 的 `ToString` 重载容易在头文件里声明后忘记实现，且只有调用点才会报错。

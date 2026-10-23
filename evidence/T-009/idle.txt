@@ -1,0 +1,5 @@
+duration_s=60 cores=18
+cpu_total_s=0.031 cpu_percent=0.0029
+rss_mb=89.68 -> 77.83
+handles=372 -> 364
+threads=10 -> 6

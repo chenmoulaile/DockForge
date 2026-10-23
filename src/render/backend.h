@@ -12,6 +12,7 @@
 
 #include "platform/win_common.h"
 
+#include <cstdint>
 #include <memory>
 
 namespace dockforge::render {
@@ -37,6 +38,17 @@ struct RectF {
 
 enum class TextAlign { Left, Center, Right };
 
+// A caller-owned BGRA bitmap. Premultiplied alpha, top-down, tightly packed
+// (stride == width * 4), which is exactly what shell::IconBitmap produces and what
+// D2D wants, so no conversion happens on the frame path.
+struct BitmapView {
+    int width = 0;
+    int height = 0;
+    const std::uint8_t* pixels = nullptr;
+
+    bool Valid() const { return width > 0 && height > 0 && pixels != nullptr; }
+};
+
 class IRenderBackend {
   public:
     virtual ~IRenderBackend() = default;
@@ -54,6 +66,17 @@ class IRenderBackend {
                                    float width) = 0;
     virtual void DrawLabel(const wchar_t* text, const RectF& rect, float size_dip,
                            const ColorF& color, TextAlign align) = 0;
+
+    // Draws a caller-owned bitmap scaled into `rect`.
+    //
+    // `cache_id` is a stable caller-assigned identity for the *content*, not for
+    // the pixels: the backend keeps one GPU bitmap per id and re-uploads only when
+    // the view's dimensions change. Keying on the pixel pointer instead would
+    // re-upload every frame because the vector can reallocate, and keying on the
+    // view's address would alias after a move. The caller must therefore not
+    // reuse an id for different content of the same size.
+    virtual void DrawBitmap(std::uint64_t cache_id, const BitmapView& view, const RectF& rect,
+                            float opacity) = 0;
 };
 
 // The only backend that exists today. Named as a factory so that adding a D3D11
