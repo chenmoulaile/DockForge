@@ -1,0 +1,6 @@
+dock=(685,1595) 1510x213 pid=3148
+target tile=0 scale=2.002 window=754.3dip origin=45.1dip click=(823,1748)
+window_from_point=True (5768754)
+foreground_before=hh pid=28044 cls=HH Parent title=AutoHotkey Help
+foreground_after=7zFM pid=28288 cls=7-Zip::FM title=D:\BaiduNetdiskDownload\
+foreground_changed=True

@@ -2,13 +2,13 @@
     "project":  "DockForge",
     "schema":  1,
     "milestone":  "M1",
-    "last_task":  "T-011",
+    "last_task":  "T-012",
     "last_commit":  "2bed0dc",
     "current_module":  "dock",
-    "current_task":  "T-012",
+    "current_task":  "T-013",
     "counters":  {
                      "total":  16,
-                     "done":  11,
+                     "done":  12,
                      "partial":  0,
                      "blocked":  0
                  },
@@ -84,7 +84,13 @@
                           "ShowWindow 同步等待目标应用消息循环，实测 p99 494.59ms；必须用 ShowWindowAsync",
                           "SetForegroundWindow 从后台被拒、AttachThreadInput 无效；WM_LBUTTONDOWN 内直接调用成功",
                           "Catch2 CHECK(result.route == \"launch\") 是指针比较，必须包 std::string",
-                          "EnumerateAppWindows 断言必须先 IsWindow(hwnd)==FALSE 跳过已销毁句柄，否则并发关窗随机失败"
+                          "EnumerateAppWindows 断言必须先 IsWindow(hwnd)==FALSE 跳过已销毁句柄，否则并发关窗随机失败",
+                          "solid 材质仍混合 8% 背景，板色随背景从 (13,15,18) 变到 (33,35,38) —— 任何硬编码板色的采样工具都会误判",
+                          "图标行在比内容更宽的窗口里居中，行原点是 (window_dip - content_dip)/2 不是 padding；用 padding 会偏 35 DIP",
+                          "click_probe.ps1 默认退出即杀进程，测量后截图会「进程不存在」——需要 -KeepRunning",
+                          "RunningTracker 的 Update 返回「可见状态是否可能变化」而非「是否轮询了」，窗口集合未变时必须 false",
+                          "文档类 AppsFolder 条目（.chm）点击后运行 hh.exe，路径匹配必然失败，指示器按真实归属不亮",
+                          "帧预算归因必须交替 A/B：同配置运行间波动 0.018ms 与待测差值同量级，单次对比无法归因"
                       ],
-    "updated_at":  "2026-10-24T03:05:00+08:00"
+    "updated_at":  "2026-10-24T03:12:00+08:00"
 }

@@ -29,6 +29,36 @@ namespace dockforge::dock {
 // every theme override longer.
 inline constexpr float kPlatePaddingDip = 10.0f;
 
+// Diameter of a running indicator, in DIP.
+//
+// The indicator lives inside the plate's existing bottom padding rather than in a
+// band of its own. Adding a band would grow the plate and the window by 7 DIP, which
+// moves every dock on screen and invalidates every measurement tool that derives
+// scale from the window height. The padding is 10 DIP, so a 4 DIP dot centred in it
+// leaves a 3 DIP gap under the icons - the proportion macOS uses.
+inline constexpr float kIndicatorDotDip = 4.0f;
+
+// Indicator opacity by state. The foreground dot is nearly opaque and the background
+// one is deliberately faint: at 48 DIP the dots are small enough that equal weight
+// would read as a row of beads rather than as one active app.
+inline constexpr float kIndicatorOpacityForeground = 0.95f;
+inline constexpr float kIndicatorOpacityRunning = 0.45f;
+
+// A tile's relationship to a live window, refreshed by the tracker (T-012).
+//
+// Three states rather than a bool because "running" and "frontmost" are answered by
+// different sources at different times: existence comes from the window list, which
+// changes when apps open and close; foreground comes from GetForegroundWindow,
+// which changes on every alt-tab. Collapsing them into one flag would make the
+// highlight lag behind the foreground change it is supposed to report.
+enum class TileRunState {
+    Idle,        // no window
+    Running,     // has a window, not in front
+    Foreground,  // has a window and it is the foreground window
+};
+
+const char* ToString(TileRunState state);
+
 // One dock slot. The icon is kept by value so painting never touches the shell or
 // the cache: a frame that blocks on GetImage is a 60-190ms stall (evidence/T-006).
 struct DockTile {
@@ -38,6 +68,10 @@ struct DockTile {
     // icon source rather than the tile index so reordering the dock does not
     // invalidate every texture.
     std::uint64_t icon_key = 0;
+    // Written by RunningTracker::ApplyToTiles, read by the painter. Lives on the
+    // tile rather than in a parallel array so the two cannot fall out of step when
+    // the tile list changes length.
+    TileRunState run_state = TileRunState::Idle;
 };
 
 // FNV-1a over the UTF-16 source string. Only needs to be collision-resistant
@@ -62,6 +96,9 @@ struct DockGeometry {
     // cursor (the row is centred) and re-arm the capture region on every hover.
     float window_width_dip = 0.0f;
     float window_height_dip = 0.0f;
+    // Where the icon row's bottom edge sits, measured from the window's top. Icons
+    // are bottom-aligned here and the indicator band occupies the space below it.
+    float baseline_dip = 0.0f;
 };
 
 // Pure function of config + tile count + scale, so the window size can be asserted

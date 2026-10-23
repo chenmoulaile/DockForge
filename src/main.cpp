@@ -11,6 +11,7 @@
 #include "core/log.h"
 #include "core/paths.h"
 #include "dock/dock_view.h"
+#include "dock/running_tracker.h"
 #include "platform/composition.h"
 #include "platform/display.h"
 #include "platform/hit_region.h"
@@ -80,6 +81,21 @@ std::optional<UINT> SimulatedDpiFromEnvironment() {
     if (n == 0 || n >= ARRAYSIZE(buffer)) return std::nullopt;
     const int value = _wtoi(buffer);
     if (value >= 72 && value <= 480) return static_cast<UINT>(value);
+    return std::nullopt;
+}
+
+// Poll interval override for the running-indicator tracker.
+//
+// Verification hook, not a user setting: proving the tracker's frame cost requires
+// running the same benchmark with the poll disabled, and 5000ms is long enough that
+// at most one poll lands in a 15s window. Without this the A/B is a guess.
+std::optional<int> RunningPollFromEnvironment() {
+    wchar_t buffer[16]{};
+    const DWORD n = GetEnvironmentVariableW(L"DOCKFORGE_RUNNING_POLL_MS", buffer,
+                                            ARRAYSIZE(buffer));
+    if (n == 0 || n >= ARRAYSIZE(buffer)) return std::nullopt;
+    const int value = _wtoi(buffer);
+    if (value >= 50 && value <= 5000) return value;
     return std::nullopt;
 }
 
@@ -323,7 +339,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                 scan.entries.size());
     }
 
-    const std::vector<dock::DockTile> tiles =
+    // Non-const: RunningTracker writes each tile's run_state in place. Keeping the
+    // state on the tile rather than in a parallel array means the two cannot fall
+    // out of step if the tile list is ever rebuilt.
+    std::vector<dock::DockTile> tiles =
         dock::BuildTiles(dock_apps, icons, kDockTileLimit, kDockIconPx);
     DF_INFO("app", "dock tiles: %zu of %zu apps (limit=%d icon=%dpx)", tiles.size(),
             dock_apps.size(), kDockTileLimit, kDockIconPx);
@@ -371,6 +390,20 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     dock::DockGeometry geometry = dock::ComputeGeometry(config, static_cast<int>(tiles.size()), 1.0f);
     dock::DockPainter dock_painter;
     dock::DockHover dock_hover;
+    // Polls window existence on an interval and the foreground window every frame.
+    // Existence costs a full EnumWindows sweep (0.4-0.7ms); foreground is one
+    // syscall. Running both on the same clock would either lag the highlight by up
+    // to 300ms or sweep 60 times a second for nothing.
+    dock::RunningTracker running_tracker;
+    if (const auto interval = RunningPollFromEnvironment()) {
+        running_tracker.SetIntervalMs(*interval);
+        DF_INFO("app", "running indicator poll overridden to %dms (verification hook)",
+                *interval);
+    }
+    // Seed the indicators before the first paint so the dock never shows an idle row
+    // for one frame while the first poll is still pending.
+    running_tracker.Update(0.0);
+    running_tracker.ApplyToTiles(tiles);
 
     platform::WindowDesc desc;
     desc.title = L"DockForge";
@@ -681,6 +714,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                 dirty = true;
             }
         }
+        // Running indicators: the tracker polls existence on its own interval and
+        // reads the foreground window every frame, so it returns true exactly when
+        // the dots would look different. A false return costs one GetForegroundWindow
+        // and keeps the dock asleep.
+        if (running_tracker.Update(delta_ms)) {
+            running_tracker.ApplyToTiles(tiles);
+            dirty = true;
+        }
         // Hover drives both the magnification ramp and the clickable region. The
         // ramp runs at frame rate, so the tick is the only place it can advance
         // without a separate timer.
@@ -703,17 +744,21 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
             InvalidateRect(window.Handle(), nullptr, FALSE);
         }
     });
-    loop.SetStatsHandler([&capture, &paint_clock](const core::FrameClock& clock) {
+    loop.SetStatsHandler([&capture, &paint_clock, &running_tracker](const core::FrameClock& clock) {
         const core::FrameClock& paint = paint_clock;
         const auto stats = capture.GetStats();
+        const auto& run = running_tracker.GetStats();
         DF_DEBUG("loop",
                  "frames=%zu avg=%.2fms p50=%.2fms p99=%.2fms fps=%.1f | paint n=%zu "
-                 "avg=%.2fms p99=%.2fms | capture=%llu/%llu avg=%.1fms",
+                 "avg=%.2fms p99=%.2fms | capture=%llu/%llu avg=%.1fms | run polls=%llu "
+                 "avg=%.2fms max=%.2fms fg=%llu",
                  clock.SampleCount(), clock.AverageMs(), clock.Percentile(50.0),
                  clock.Percentile(99.0), clock.AverageFps(), paint.SampleCount(),
                  paint.AverageMs(), paint.Percentile(99.0),
                  static_cast<unsigned long long>(stats.successes),
-                 static_cast<unsigned long long>(stats.attempts), stats.average_ms);
+                 static_cast<unsigned long long>(stats.attempts), stats.average_ms,
+                 static_cast<unsigned long long>(run.polls), run.AveragePollMs(),
+                 run.max_poll_ms, static_cast<unsigned long long>(run.foreground_changes));
     });
 
     window.SetMessageHook([&](HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, LRESULT& out) {
@@ -854,6 +899,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                 // needed to keep the click path inside the 16.7ms frame budget.
                 DF_DEBUG("dock", "click cost: enumerate=%.2fms total=%.2fms", result.enumerate_ms,
                          result.elapsed_ms);
+                // Force the next tick to re-enumerate so the new window's indicator
+                // appears immediately instead of up to 300ms later. Without this a
+                // launch looks like it failed for a quarter second.
+                running_tracker.Invalidate();
                 out = 0;
                 return true;
             }

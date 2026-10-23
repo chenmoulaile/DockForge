@@ -438,3 +438,82 @@ Dock 的点击语义是「一个槽位三种结局」，判据必须来自实时
 - 单显示器主机：`restore` 与 `minimize` 都在同一屏幕上验证，跨屏激活未测。
 - UWP 分支用「计算器」验证（`DOCKFORGE_PIN_APPS=calculator`），未覆盖所有打包应用；某些应用可能拒绝 `SetForegroundWindow` 而落到 ALT 回退路径。
 - `route` 的 `restore`/`raise` 区分依赖动作前的 `IsIconic` 采样，采样与动作之间若被第三方最小化会标错，不影响行为。
+
+
+## C-14 运行指示器契约（T-012 冻结）
+
+### C-14a 两个时钟，不可合并
+
+| 状态 | 来源 | 实测成本 | 频率 |
+|---|---|---|---|
+| 应用是否有窗口 | `shell::EnumerateAppWindows()` | 0.48–0.94ms | `RunningTracker::IntervalMs()`，默认 300ms |
+| 哪个窗口在前台 | `GetForegroundWindow()` | 亚微秒 | 每帧 |
+
+`TileRunState` 必须是三值（`Idle` / `Running` / `Foreground`）。合并成 `bool running` 会把慢时钟强加给快状态，alt-tab 后高亮滞后最多 300ms。
+
+`RunningTracker::Update(double delta_ms)` 的返回值语义固定为「可见状态是否可能变化」，不是「是否轮询了」。窗口集合未变、前台未变时必须返回 false —— 调用方靠它保持空闲不重绘。
+
+`RunningTracker::Invalidate()` 只影响下一次 `Update` 是否强制重扫，不影响 `Foreground()`。
+
+### C-14b 轮询间隔钳制
+
+`SetIntervalMs` 钳到 **50..5000**。低于 50 会把 0.5ms 的枚举变成每秒 20 次；高于 5000 会让指示器在应用启动后长时间缺失。
+
+`DOCKFORGE_RUNNING_POLL_MS` 是验证钩子（同样钳制到 50..5000），不是用户配置，不得进 C-01。
+
+### C-14c 指示器几何
+
+| 常量 | 值 | 单位 |
+|---|---|---|
+| `kIndicatorDotDip` | 4.0 | DIP 直径 |
+| `kIndicatorOpacityForeground` | 0.95 | — |
+| `kIndicatorOpacityRunning` | 0.45 | — |
+| 后台圆点宽度系数 | 0.85 | 倍数 |
+
+圆点垂直中心 = `geometry.baseline_dip + kPlatePaddingDip * 0.5`，即板的底部内边距中央。
+
+**约束**：`kIndicatorDotDip < kPlatePaddingDip` 必须由测试断言，不得只写在注释里。板的底边就是窗口底边，圆点超出内边距会同时落在板和窗口 region 之外，被 `SetWindowRgn` 裁掉。
+
+**禁止新增指示器带**。板的 `plate_height_dip` 与窗口 `window_height_dip` 不得因指示器而改变：改高会让屏幕上每个 Dock 位移，并让所有从窗口高度反推 scale 的验证工具失效。
+
+### C-14d 状态写入位置
+
+`run_state` 写在 `dock::DockTile` 上，由 `RunningTracker::ApplyToTiles` 整体覆写，不得使用并行数组。tile 列表重建时并行数组会失步，而失步的表现是圆点指向错误的图标。
+
+`ApplyToTiles` 必须覆盖每个 tile（包括把陈旧的 `Foreground` 改回 `Idle`），并接受空列表。
+
+### C-14e 前台归属判定
+
+判定顺序（不可交换）：
+1. 命中的窗口 `hwnd` 等于 `GetForegroundWindow()`
+2. 否则从 `GetForegroundWindow()` 起 `GetAncestor(GA_ROOTOWNER)` 向上最多 8 层，命中即 `Foreground`
+3. 否则取前台窗口的 pid，等于命中的 `app_pid` 或 `pid` 即 `Foreground`
+4. 其余为 `Running`
+
+第 3 步不可省：`GA_ROOTOWNER` 不保证落到应用顶层窗口，对话框/弹出窗口会漏判。
+
+### C-14f 身份匹配沿用 C-13c
+
+`StateFor` 必须调 `shell::FindAppWindow`，不得另写匹配逻辑。这意味着指示器与点击行为对「哪个窗口属于这个应用」的判断永远一致 —— 否则会出现「点了能激活但没圆点」或反向的自相矛盾。
+
+已知后果：文档类条目（条目指向 `.chm`、实际运行 `hh.exe`）不显示圆点。这是真实归属，不是缺陷。
+
+### C-14g 验证手段
+
+| 手段 | 工具 | 判据 |
+|---|---|---|
+| 圆点存在与亮度 | `tools/indicator_probe.ps1` | `max_delta` 与板色距离；前台 > 后台 × 1.8 |
+| 四态覆盖 | `tools/t012_evidence.ps1` | `verdict=ALL_PASS` |
+| 退出延迟 | 同上 | `exit_detected=True` 且 `elapsed_ms <= 1000` |
+| 轮询成本 | 每秒 stats 行的 `run polls= avg= max=` | `avg < 1ms` |
+| 帧预算归因 | `DOCKFORGE_RUNNING_POLL_MS` 交替 A/B | 差值需超过同配置运行间波动才算归因 |
+
+`indicator_probe.ps1` 的两条硬约束：
+- 行原点必须由窗口宽度与内容宽度算（`(window_dip - content_dip) / 2`），不得用 padding。
+- 板色必须从被采样行自身取众数（`-Plate auto`），不得硬编码。solid 材质仍混合 8% 背景，板色随背景从 `(13,15,18)` 变到 `(33,35,38)`。
+
+### C-14h 诚实边界
+
+- 单显示器主机，跨屏时指示器跟随未验证。
+- 同一进程多窗口时只高亮第一个命中窗口；逐窗口指示依赖 T-015 的窗口列表。
+- 帧预算判 WATCH 而非 PASS，理由见 `evidence/T-012/ab_tracker_cost.md`。

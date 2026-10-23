@@ -11,7 +11,11 @@ param(
     [string]$ProcessName = 'DockForge',
     [string]$Exe = 'build\bin\DockForge.exe',
     [int]$SettleMs = 1200,
-    [switch]$SecondClick
+    [switch]$SecondClick,
+    # Leave the dock running on exit. Needed whenever the caller wants to screenshot
+    # or sample the dock after the click: the default teardown kills the process the
+    # evidence is about.
+    [switch]$KeepRunning
 )
 
 $ErrorActionPreference = 'Stop'
@@ -159,7 +163,9 @@ if ($SecondClick) {
 }
 
 Start-Sleep -Milliseconds 400
-Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+if (-not $KeepRunning) {
+    Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+}
 
 $dir = Split-Path -Parent $Out
 if ($dir -and -not (Test-Path $dir)) { [void](New-Item -ItemType Directory -Path $dir -Force) }

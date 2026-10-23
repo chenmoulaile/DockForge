@@ -1,0 +1,18 @@
+image=evidence\T-012\state_exited.png
+size=1510x213 scale=2.002
+origin_dip=45.15 first_center_dip=69.15 stride_dip=56
+band_y_px=203 plate=33,35,38 tolerance=6
+tile[0] cx=138 cy=203 samples=13 max_delta=0 at_x=132 dot=NO
+tile[1] cx=251 cy=203 samples=13 max_delta=0 at_x=245 dot=NO
+tile[2] cx=363 cy=203 samples=13 max_delta=0 at_x=357 dot=NO
+tile[3] cx=475 cy=203 samples=13 max_delta=0 at_x=469 dot=NO
+tile[4] cx=587 cy=203 samples=13 max_delta=0 at_x=581 dot=NO
+tile[5] cx=699 cy=203 samples=13 max_delta=0 at_x=693 dot=NO
+tile[6] cx=811 cy=203 samples=13 max_delta=0 at_x=805 dot=NO
+tile[7] cx=923 cy=203 samples=13 max_delta=0 at_x=917 dot=NO
+tile[8] cx=1035 cy=203 samples=13 max_delta=0 at_x=1029 dot=NO
+tile[9] cx=1147 cy=203 samples=13 max_delta=0 at_x=1141 dot=NO
+tile[10] cx=1259 cy=203 samples=13 max_delta=0 at_x=1253 dot=NO
+tile[11] cx=1372 cy=203 samples=13 max_delta=0 at_x=1366 dot=NO
+tiles=12 with_dot=0
+verdict=NO_DOTS

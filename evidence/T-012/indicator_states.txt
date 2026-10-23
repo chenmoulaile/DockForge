@@ -1,0 +1,18 @@
+=== idle ===
+state_idle with_dot=0 brightest_delta=0 brightest_tile=-1 verdict=NO_DOTS
+=== foreground ===
+foreground_now=7zFM
+state_foreground with_dot=1 brightest_delta=339.5 brightest_tile=0 verdict=PARTIAL
+=== running (behind) ===
+foreground_now=hh
+state_running with_dot=1 brightest_delta=160.5 brightest_tile=0 verdict=PARTIAL
+=== exited ===
+exit_detected=True elapsed_ms=437 budget_ms=1000
+state_exited with_dot=0 brightest_delta=0 brightest_tile=-1 verdict=NO_DOTS
+=== verdict ===
+idle_has_no_dots=True
+foreground_has_dot=True
+running_has_dot=True
+foreground_brighter_than_running=True (fg=339.5 bg=160.5)
+exit_within_1s=True
+verdict=ALL_PASS

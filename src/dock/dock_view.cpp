@@ -108,6 +108,11 @@ DockGeometry ComputeGeometry(const core::Config& config, int tile_count, float s
     // (spike conclusion 3: SetWindowRgn clips DComp content and moves hit-testing).
     geometry.window_height_dip =
         icon_dip * std::max(geometry.params.magnification, 1.0f) + 2.0f * kPlatePaddingDip;
+
+    // Icons bottom-align here and grow upward, so the row never dips below the dock.
+    // Computed once instead of in both Paint and the indicator pass: the two must
+    // agree to the pixel or the dots drift off the icons they belong to.
+    geometry.baseline_dip = geometry.window_height_dip - kPlatePaddingDip;
     return geometry;
 }
 
@@ -212,8 +217,10 @@ bool DockPainter::Paint(ID2D1DeviceContext& dc, render::IRenderBackend& backend,
     const float row_origin_dip = (width_dip - geometry.content_width_dip) * 0.5f;
 
     // Icons are bottom-aligned to the plate's inner edge and grow upward, so the
-    // row never dips below the dock and the tallest icon defines the top.
-    const float baseline_dip = height_dip - kPlatePaddingDip;
+    // row never dips below the dock and the tallest icon defines the top. The
+    // baseline comes from the geometry so the indicator pass below lands on the same
+    // line without recomputing it.
+    const float baseline_dip = geometry.baseline_dip;
     for (int i = 0; i < count; ++i) {
         const IconLayout& icon = scratch_[static_cast<std::size_t>(i)];
         const DockTile& tile = (*input.tiles)[static_cast<std::size_t>(i)];
@@ -232,6 +239,27 @@ bool DockPainter::Paint(ID2D1DeviceContext& dc, render::IRenderBackend& backend,
             // read as a broken dock rather than a missing shell icon.
             backend.StrokeRoundedRect(slot, half_dip, render::ColorF{0.62f, 0.66f, 0.74f, 0.35f},
                                       1.5f);
+        }
+
+        // Running indicator, centred in the plate's bottom padding.
+        //
+        // Drawn inside the padding rather than below the plate because the plate's
+        // bottom edge is the window's bottom edge: anything lower would fall outside
+        // both the plate and the window region, and SetWindowRgn would clip it.
+        if (tile.run_state != TileRunState::Idle) {
+            const bool front = tile.run_state == TileRunState::Foreground;
+            const float dot = kIndicatorDotDip;
+            // Vertically centred in the 10 DIP padding that sits under the icons.
+            const float dot_y = baseline_dip + kPlatePaddingDip * 0.5f;
+            const float alpha = front ? kIndicatorOpacityForeground : kIndicatorOpacityRunning;
+            // The foreground dot is drawn from the icon's centre, the running dot
+            // slightly wider. Same geometry otherwise: two different sizes would make
+            // the row read as two rows.
+            const float dot_w = front ? dot : dot * 0.85f;
+            const render::RectF mark{center_x_dip - dot_w * 0.5f, dot_y - dot * 0.5f,
+                                     center_x_dip + dot_w * 0.5f, dot_y + dot * 0.5f};
+            backend.FillRoundedRect(mark, dot_w * 0.5f,
+                                    render::ColorF{0.92f, 0.94f, 0.98f, alpha});
         }
     }
     return true;
