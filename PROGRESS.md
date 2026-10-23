@@ -36,3 +36,9 @@
 - 关键缺陷（已修）：① `BeginDraw` 的 offset 是物理像素而 `SetTransform` 吃 DIP，144 DPI 下面板整体偏移出窗口（中心采样为 TRANSPARENT）→ 乘 `96/dpi`；② `ID2D1DeviceContext::GetPixelSize()` 返回合成图集尺寸而非 surface 尺寸，96 DPI 下圆角矩形溢出右边界 → 改为传 `PaintInfo{width_dip,height_dip}`；③ 用 `ShowWindow(SW_HIDE)` 取差分基线会误判（DWM 异步）→ 改杀进程取基线。
 - 遗留：材质（Mica/Acrylic/模糊）未做 → T-005；WM_PAINT 每帧重建 brush，动画接入后需缓存。
 - 下轮开始于：T-005
+
+## 2026-10-24T00:45:00+08:00 | T-005 | DONE
+- ����ʲô������ `IRenderBackend`��C-04����ʵ�� D2D/DWrite ��ˣ������ļ������� + ����ԭ���Ի�ĥɰ�壨�����߳� BitBlt ���� + D2D GaussianBlur + Բ�ǲü������޸� SetTransform ����ͼ��ƫ�ơ�
+- ֤�ݣ�evidence/T-005/��verify.md ���ܣ�alpha96/144/192.txt��alpha_solid_*��contrast_*.txt��dpi*.png��tier_*.png��build.log��test.txt��
+- ������ʵʱ���� RSS 103MB �������� �� T-015 ǰ�Ż���`plate.Draw` ÿ֡ȫ�� CopyFromMemory �� T-010 һ��������
+- ���ֿ�ʼ�ڣ�T-006

@@ -1,0 +1,1 @@
+checker window 2880x1920 at 0,0 cell=8 hold=25000ms

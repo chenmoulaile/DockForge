@@ -1,7 +1,7 @@
 // DockForge entry point.
 //
 // T-001 skeleton window, T-002 config wiring, T-003 frame-driven app loop,
-// T-004 DirectComposition surface.
+// T-004 DirectComposition surface, T-005 render backend + material tiers.
 #include "core/app_loop.h"
 #include "core/config.h"
 #include "core/event_bus.h"
@@ -10,12 +10,16 @@
 #include "core/paths.h"
 #include "platform/composition.h"
 #include "platform/window.h"
+#include "render/backend.h"
+#include "render/backdrop_capture.h"
+#include "render/material.h"
 
 #include <d2d1helper.h>
-#include <dwrite.h>
 #include <dwmapi.h>
 
 #include <cmath>
+#include <optional>
+#include <vector>
 
 namespace {
 
@@ -26,13 +30,6 @@ void EnablePerMonitorDpi() {
     // The call fails harmlessly on older builds where the manifest already
     // declared system DPI awareness.
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-}
-
-bool EnableDarkTitleBar(HWND hwnd) {
-    constexpr DWORD kDwmwaUseImmersiveDarkMode = 20;
-    BOOL dark = TRUE;
-    return SUCCEEDED(
-        DwmSetWindowAttribute(hwnd, kDwmwaUseImmersiveDarkMode, &dark, sizeof(dark)));
 }
 
 // DOCKFORGE_DPI_OVERRIDE=<96|120|144|192> forces the layout DPI. The DPI matrix
@@ -47,6 +44,74 @@ void ApplyDpiOverrideFromEnvironment() {
     if (value >= 72 && value <= 480) {
         platform::Window::SetDpiOverride(static_cast<UINT>(value));
     }
+}
+
+bool ReadEnvFlag(const wchar_t* name) {
+    wchar_t buffer[8]{};
+    const DWORD n = GetEnvironmentVariableW(name, buffer, ARRAYSIZE(buffer));
+    if (n == 0 || n >= ARRAYSIZE(buffer)) return false;
+    return buffer[0] != L'0' && buffer[0] != L'\0';
+}
+
+// DOCKFORGE_FORCE_MATERIAL=<mica|acrylic|blur|solid> overrides the configured
+// tier so every degradation step can be exercised on a machine whose OS would
+// normally pick a higher one. Verification hook, not a user setting.
+std::optional<core::MaterialLevel> ForcedMaterialFromEnvironment() {
+    wchar_t buffer[32]{};
+    const DWORD n = GetEnvironmentVariableW(L"DOCKFORGE_FORCE_MATERIAL", buffer,
+                                            ARRAYSIZE(buffer));
+    if (n == 0 || n >= ARRAYSIZE(buffer)) return std::nullopt;
+    core::MaterialLevel level{};
+    if (!core::ParseMaterial(core::WideToUtf8(buffer), level)) {
+        DF_WARN("app", "DOCKFORGE_FORCE_MATERIAL=%s is not a material name",
+                core::WideToUtf8(buffer).c_str());
+        return std::nullopt;
+    }
+    return level;
+}
+
+bool EnableDarkTitleBar(HWND hwnd) {
+    constexpr DWORD kDwmwaUseImmersiveDarkMode = 20;
+    BOOL dark = TRUE;
+    return SUCCEEDED(
+        DwmSetWindowAttribute(hwnd, kDwmwaUseImmersiveDarkMode, &dark, sizeof(dark)));
+}
+
+// Excludes (or re-includes) this window in screen captures. The frost reads the
+// desktop behind the plate; without exclusion the readback contains our own last
+// frame, so the blur feeds on its own output and the plate darkens frame by frame
+// (spike conclusion 2, measured as magenta bleeding into the capture).
+bool SetWindowCaptureExclusion(HWND hwnd, bool exclude) {
+    const BOOL ok =
+        SetWindowDisplayAffinity(hwnd, exclude ? WDA_EXCLUDEFROMCAPTURE : WDA_NONE);
+    if (!ok) {
+        DF_WARN("render", "SetWindowDisplayAffinity(%d) failed: %lu", exclude ? 1 : 0,
+                GetLastError());
+    }
+    return ok != FALSE;
+}
+
+// System backdrop for the Mica and Acrylic tiers. Only reachable when
+// appearance.corner_radius == 0: the spike measured that DWMWA_SYSTEMBACKDROP_TYPE
+// fills the whole window rectangle and ignores both the DComp surface's per-pixel
+// alpha and SetWindowRgn, so it cannot coexist with a custom radius.
+bool ApplySystemBackdrop(HWND hwnd, core::MaterialLevel tier) {
+    constexpr DWORD kDwmwaSystemBackdropType = 38;  // DWMWA_SYSTEMBACKDROP_TYPE
+    // DWMSBT_MAINWINDOW = Mica, DWMSBT_TRANSIENTWINDOW = Acrylic.
+    const int backdrop = tier == core::MaterialLevel::Mica ? 2 : 3;
+    const HRESULT hr = DwmSetWindowAttribute(hwnd, kDwmwaSystemBackdropType, &backdrop,
+                                             sizeof(backdrop));
+    if (FAILED(hr)) {
+        DF_WARN("render", "DWMWA_SYSTEMBACKDROP_TYPE failed: %s",
+                core::WideToUtf8(HResultText(hr)).c_str());
+        return false;
+    }
+    const MARGINS margins{-1, -1, -1, -1};
+    if (FAILED(DwmExtendFrameIntoClientArea(hwnd, &margins))) {
+        DF_WARN("render", "DwmExtendFrameIntoClientArea failed");
+        return false;
+    }
+    return true;
 }
 
 // Logical (DIP) content size of the skeleton window. T-008 replaces this with
@@ -64,79 +129,6 @@ LogicalSize ComputeLogicalSize(const core::Config& config) {
     // Dock width from the icon count instead.
     return LogicalSize{240.0f + static_cast<float>(config.dock.icon_size) * 3.0f,
                        static_cast<float>(config.dock.icon_size) + 56.0f};
-}
-
-// DirectWrite text format for the skeleton label. Created once per process.
-IDWriteTextFormat* SharedLabelFormat() {
-    static ComPtr<IDWriteFactory> factory = [] {
-        ComPtr<IDWriteFactory> created;
-        const HRESULT hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,
-                                               __uuidof(IDWriteFactory),
-                                               reinterpret_cast<IUnknown**>(created.GetAddressOf()));
-        if (FAILED(hr)) {
-            DF_ERROR("render", "DWriteCreateFactory failed: %s",
-                     core::WideToUtf8(HResultText(hr)).c_str());
-            return ComPtr<IDWriteFactory>{};
-        }
-        return created;
-    }();
-
-    static ComPtr<IDWriteTextFormat> format = [&] {
-        ComPtr<IDWriteTextFormat> created;
-        if (!factory) return ComPtr<IDWriteTextFormat>{};
-        const HRESULT hr = factory->CreateTextFormat(
-            L"Segoe UI Variable Display", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD,
-            DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 15.0f, L"zh-CN", &created);
-        if (FAILED(hr)) {
-            // Windows 10 ships "Segoe UI" only; the variable family is Win11+.
-            factory->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD,
-                                      DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-                                      15.0f, L"zh-CN", &created);
-        }
-        return created;
-    }();
-    return format.Get();
-}
-
-// Draws the T-004 placeholder content: a rounded panel proving per-pixel alpha,
-// a hairline border proving edge coverage, and a label proving DirectWrite.
-void PaintDockContent(ID2D1DeviceContext& dc, const platform::CompositionSurface::PaintInfo& info,
-                      const core::Config& config) {
-    // Lay out against the surface size handed in, never against
-    // dc.GetPixelSize(): that is the composition atlas, not this surface.
-    const float wdip = info.width_dip;
-    const float hdip = info.height_dip;
-    if (wdip <= 1.0f || hdip <= 1.0f) return;
-
-    ComPtr<ID2D1SolidColorBrush> fill;
-    dc.CreateSolidColorBrush(D2D1::ColorF(0.094f, 0.102f, 0.125f, 0.82f), fill.GetAddressOf());
-
-    ComPtr<ID2D1SolidColorBrush> border;
-    dc.CreateSolidColorBrush(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.16f), border.GetAddressOf());
-
-    const float radius = static_cast<float>(config.appearance.corner_radius);
-    const D2D1_ROUNDED_RECT body{
-        D2D1::RectF(0.5f, 0.5f, wdip - 0.5f, hdip - 0.5f), radius, radius};
-
-    dc.FillRoundedRectangle(&body, fill.Get());
-    dc.DrawRoundedRectangle(&body, border.Get(), 1.0f);
-
-    IDWriteTextFormat* format = SharedLabelFormat();
-    if (!format) return;
-
-    ComPtr<ID2D1SolidColorBrush> text_brush;
-    dc.CreateSolidColorBrush(D2D1::ColorF(0.925f, 0.941f, 0.973f, 1.0f), text_brush.GetAddressOf());
-
-    wchar_t label[192];
-    swprintf_s(label, L"DockForge \u00b7 icon %d px \u00b7 gap %d \u00b7 mag %.1fx \u00b7 %s",
-               config.dock.icon_size, config.dock.gap,
-               static_cast<double>(config.dock.magnification),
-               core::ToString(config.dock.hover_falloff));
-    format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-    format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-    (dc.DrawText)(label, static_cast<UINT32>(wcslen(label)), format,
-                 D2D1::RectF(0.0f, 0.0f, wdip, hdip), text_brush.Get(), D2D1_DRAW_TEXT_OPTIONS_CLIP,
-                 DWRITE_MEASURING_MODE_NATURAL);
 }
 
 }  // namespace
@@ -161,6 +153,28 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
             static_cast<double>(config.dock.magnification),
             core::ToString(config.dock.hover_falloff),
             core::ToString(config.appearance.material), config.appearance.corner_radius);
+
+    // ---- material tier resolution (T-005) -------------------------------
+    // The configured tier is a request, not a promise: Mica needs Win11 22000+
+    // and a rectangular plate, and the self-drawn frost needs a desktop capture.
+    // ResolveMaterialTier walks down to the first tier this machine can render.
+    core::MaterialLevel requested = config.appearance.material;
+    if (const auto forced = ForcedMaterialFromEnvironment()) {
+        DF_INFO("app", "material forced to %s by DOCKFORGE_FORCE_MATERIAL",
+                core::ToString(*forced));
+        requested = *forced;
+    }
+    render::MaterialCaps caps = render::ProbeMaterialCaps(config.appearance.corner_radius);
+    const core::MaterialLevel tier = render::ResolveMaterialTier(requested, caps);
+    const render::PlateStyle plate_style =
+        render::StyleForTier(tier, config.appearance.corner_radius);
+    DF_INFO("app", "material: requested=%s resolved=%s os_build=%d backdrop=%d capture=%d",
+            core::ToString(requested), core::ToString(tier), caps.os_build,
+            caps.system_backdrop_supported ? 1 : 0, caps.capture_available ? 1 : 0);
+    if (const char* reason = render::DegradeReason(requested, caps); *reason != '\0') {
+        DF_WARN("render", "material degraded %s -> %s: %s", core::ToString(requested),
+                core::ToString(tier), reason);
+    }
 
     if (!platform::Window::RegisterWindowClass(instance)) {
         DF_FATAL("app", "window class registration failed");
@@ -190,12 +204,42 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         return 3;
     }
     EnableDarkTitleBar(window.Handle());
+    if (plate_style.use_system_backdrop) {
+        if (!ApplySystemBackdrop(window.Handle(), tier)) {
+            DF_WARN("render", "system backdrop failed at runtime; plate still draws");
+        }
+    }
 
     platform::CompositionSurface surface;
     if (!surface.Initialize(window.Handle())) {
         DF_FATAL("app", "composition surface initialization failed");
         return 4;
     }
+
+    auto render_backend = render::CreateD2DBackend();
+    if (!render_backend->Initialize()) {
+        DF_FATAL("render", "D2D backend initialization failed");
+        return 5;
+    }
+    render::PlateRenderer plate;
+
+    // ---- backdrop capture (Blur tier only) ------------------------------
+    // The frost needs the pixels physically behind the plate. Two modes:
+    //   live   - worker thread re-captures every 200ms. Requires
+    //            WDA_EXCLUDEFROMCAPTURE for the window's lifetime, because without
+    //            it the readback contains our own last frame and the blur eats its
+    //            own output (spike conclusion 2).
+    //   frozen - DOCKFORGE_FREEZE_BACKDROP=1 captures once, then releases the
+    //            exclusion and stops the worker. The frost stays visually correct
+    //            for a static desktop and the window becomes screenshot-visible
+    //            again, which is what makes the evidence screenshots possible.
+    render::BackdropCapture capture;
+    const bool freeze_backdrop = ReadEnvFlag(L"DOCKFORGE_FREEZE_BACKDROP");
+    bool capture_active = false;
+    std::vector<std::uint8_t> backdrop_pixels;
+    int backdrop_w = 0;
+    int backdrop_h = 0;
+    std::uint64_t backdrop_generation = 0;
 
     // Resize to the DPI-correct physical size now that the monitor is known.
     auto resize_to_logical = [&window, &surface](LogicalSize size) {
@@ -210,11 +254,62 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     };
     resize_to_logical(logical);
 
-    auto repaint = [&window, &surface, &config] {
+    if (plate_style.use_capture && caps.capture_available) {
+        if (freeze_backdrop) {
+            // One capture, with exclusion on, taken before the window is shown.
+            // Then exclusion is dropped so the window is visible to screen capture.
+            SetWindowCaptureExclusion(window.Handle(), true);
+            render::BackdropCapture one_shot;
+            RECT rc{};
+            GetWindowRect(window.Handle(), &rc);
+            if (one_shot.Start(window.Handle(), rc.left, rc.top, rc.right - rc.left,
+                               rc.bottom - rc.top, 1000)) {
+                for (int i = 0; i < 20 && !one_shot.HasFrame(); ++i) {
+                    Sleep(50);
+                }
+                one_shot.AcquireIfNew(0, backdrop_pixels, backdrop_w, backdrop_h,
+                                      backdrop_generation);
+                one_shot.Stop();
+            }
+            SetWindowCaptureExclusion(window.Handle(), false);
+            DF_INFO("render", "frozen backdrop %dx%d (frame=%d)", backdrop_w, backdrop_h,
+                    backdrop_generation > 0 ? 1 : 0);
+        } else {
+            RECT rc{};
+            GetWindowRect(window.Handle(), &rc);
+            SetWindowCaptureExclusion(window.Handle(), true);
+            capture_active = capture.Start(window.Handle(), rc.left, rc.top, rc.right - rc.left,
+                                           rc.bottom - rc.top, 200);
+            if (!capture_active) {
+                DF_WARN("render", "backdrop capture failed to start; plate will be flat");
+            }
+        }
+    }
+
+    auto repaint = [&] {
         const float dpi = static_cast<float>(window.Dpi());
-        if (!surface.Paint(dpi, [&config](ID2D1DeviceContext& dc,
-                                          const platform::CompositionSurface::PaintInfo& info) {
-                PaintDockContent(dc, info, config);
+        if (!surface.Paint(dpi, [&](ID2D1DeviceContext& dc,
+                                    const platform::CompositionSurface::PaintInfo& info) {
+                render_backend->BeginFrame(dc, dpi);
+                const render::RectF panel{0.5f, 0.5f, info.width_dip - 0.5f,
+                                          info.height_dip - 0.5f};
+                const float radius = static_cast<float>(config.appearance.corner_radius);
+                plate.Draw(dc, *render_backend, panel, radius, plate_style,
+                           backdrop_w > 0 ? backdrop_pixels.data() : nullptr, backdrop_w,
+                           backdrop_h, dpi);
+
+                // The label proves DirectWrite goes through the backend contract
+                // rather than straight to the D2D context.
+                wchar_t label[192];
+                swprintf_s(label,
+                           L"DockForge \u00b7 %s \u00b7 icon %d \u00b7 gap %d \u00b7 mag %.1fx",
+                           core::ToString(tier), config.dock.icon_size, config.dock.gap,
+                           static_cast<double>(config.dock.magnification));
+                render_backend->DrawLabel(label, render::RectF{0.0f, 0.0f, info.width_dip,
+                                                               info.height_dip},
+                                          15.0f, render::ColorF{0.925f, 0.941f, 0.973f, 1.0f},
+                                          render::TextAlign::Center);
+                render_backend->EndFrame();
             })) {
             return false;
         }
@@ -225,25 +320,36 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     core::AppLoop loop;
     loop.SetTargetIntervalMs(16);  // 60 FPS target (PERFORMANCE.md)
 
-    // T-003 wiring: the loop drives repaints only when something asked for one,
-    // so an idle Dock stays at ~0% CPU. Later milestones publish layout/animation
-    // events here instead of invalidating unconditionally.
-    loop.SetTickHandler([hwnd = window.Handle()](double delta_ms) {
-        // Animation work lands here in T-010. For now the tick only proves the
-        // cadence: a repaint request is issued when a frame budget was missed,
-        // which keeps idle CPU at zero while still exercising the path.
-        if (delta_ms > 100.0) {
-            InvalidateRect(hwnd, nullptr, FALSE);
+    // Pull a fresh backdrop at most once per frame, and only when the worker
+    // published something new. At 60 FPS with a 200ms capture interval that skips
+    // the pixel copy on ~11 of every 12 frames.
+    loop.SetTickHandler([&](double delta_ms) {
+        bool dirty = false;
+        if (capture_active) {
+            if (capture.AcquireIfNew(backdrop_generation, backdrop_pixels, backdrop_w,
+                                     backdrop_h, backdrop_generation)) {
+                dirty = true;
+            }
+        }
+        // T-010 replaces this with animation-driven invalidation. Until then a
+        // repaint happens only when the backdrop moved or a frame budget was
+        // missed, which keeps idle CPU at zero.
+        if (dirty || delta_ms > 100.0) {
+            InvalidateRect(window.Handle(), nullptr, FALSE);
         }
     });
-    loop.SetStatsHandler([](const core::FrameClock& clock) {
-        DF_DEBUG("loop", "frames=%zu avg=%.2fms p50=%.2fms p99=%.2fms fps=%.1f",
+    loop.SetStatsHandler([&capture](const core::FrameClock& clock) {
+        const auto stats = capture.GetStats();
+        DF_DEBUG("loop",
+                 "frames=%zu avg=%.2fms p50=%.2fms p99=%.2fms fps=%.1f | capture=%llu/%llu "
+                 "avg=%.1fms",
                  clock.SampleCount(), clock.AverageMs(), clock.Percentile(50.0),
-                 clock.Percentile(99.0), clock.AverageFps());
+                 clock.Percentile(99.0), clock.AverageFps(),
+                 static_cast<unsigned long long>(stats.successes),
+                 static_cast<unsigned long long>(stats.attempts), stats.average_ms);
     });
 
-    window.SetMessageHook([&loop, &repaint, &resize_to_logical, &surface, logical](
-                              HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, LRESULT& out) {
+    window.SetMessageHook([&](HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, LRESULT& out) {
         switch (msg) {
             case WM_PAINT: {
                 // A NOREDIRECTIONBITMAP window has no GDI surface; BeginPaint is
@@ -273,6 +379,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                 InvalidateRect(hwnd, nullptr, FALSE);
                 out = 0;
                 return true;
+            }
+            case WM_MOVE: {
+                if (capture_active) {
+                    RECT rc{};
+                    GetWindowRect(hwnd, &rc);
+                    capture.SetRegion(rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top);
+                }
+                return false;
             }
             case WM_KEYDOWN:
                 if (wp == 'Q' && (GetKeyState(VK_CONTROL) & 0x8000)) {
@@ -318,6 +432,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
 
     const int code = loop.Run();
     DF_INFO("app", "app loop exited with code %d", code);
+    capture.Stop();
+    plate.Reset();
+    render_backend->Shutdown();
     surface.Shutdown();
     bus.Clear();
     core::Logger::Instance().Shutdown();

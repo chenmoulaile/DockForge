@@ -1,0 +1,4 @@
+﻿rect=(992,800) size=896x60
+adjacent_contrast=31.626
+luminance_min=0.0 max=255.0 range=255.0
+verdict=PATTERN_VISIBLE

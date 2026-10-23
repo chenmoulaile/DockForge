@@ -1,0 +1,4 @@
+﻿rect=(992,800) size=896x60
+adjacent_contrast=2.480
+luminance_min=14.7 max=34.7 range=20.0
+verdict=PARTIAL

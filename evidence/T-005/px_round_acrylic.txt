@@ -1,0 +1,4 @@
+﻿rect=(200,200) size=480x200
+corner         (4,4) rgba=(3,5,7,255)
+center         (240,100) rgba=(20,22,27,255)
+image=evidence\T-005\shot_round_acrylic.png

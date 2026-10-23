@@ -1,0 +1,18 @@
+host build=26300 (mica requires >=22000) dcomp=1 material=acrylic
+D3D11CreateDevice                                    hr=0x00000000 OK
+ID3D11Device -> IDXGIDevice                          hr=0x00000000 OK
+D2D1CreateFactory                                    hr=0x00000000 OK
+ID2D1Factory1::CreateDevice                          hr=0x00000000 OK
+DCompositionCreateDevice2                            hr=0x00000000 OK
+CreateTargetForHwnd                                  hr=0x00000000 OK
+CreateVisual                                         hr=0x00000000 OK
+CreateSurface                                        hr=0x00000000 OK
+IDCompositionVisual::SetContent                      hr=0x00000000 OK
+IDCompositionTarget::SetRoot                         hr=0x00000000 OK
+EndDraw                                              hr=0x00000000 OK
+Commit                                               hr=0x00000000 OK
+SetWindowCompositionAttribute(ACRYLICBLURBEHIND)     OK
+SetWindowCompositionAttribute(ACRYLICBLURBEHIND)     OK
+EndDraw                                              hr=0x00000000 OK
+Commit                                               hr=0x00000000 OK
+holding 5000 ms at 200,200 480x200

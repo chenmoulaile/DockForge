@@ -79,18 +79,19 @@
 - 证据: evidence/T-004/
 
 ### T-005 · render: D2D/DWrite 后端 + 材质多级回退
-- 状态: TODO
+- 状态: DONE
 - 优先级: P0
 - 依赖: T-004
 - 预估: 1 会话
 - 上下文: `src/render/`、CONTRACTS.md#C-04
 - DoD:
-  - [ ] `IRenderBackend` 接口冻结并实现 D2D 版本
-  - [ ] 圆角矩形 + 描边 + 文本绘制可用
-  - [ ] 材质回退链 Mica→Acrylic→Gaussian→solid 按系统版本选择，日志记录实际级别
-  - [ ] 三级降级均可渲染，不崩溃、不黑块（强制降级开关）
-  - [ ] 三张 DPI 截图
+  - [x] `IRenderBackend` 接口冻结并实现 D2D 版本
+  - [x] 圆角矩形 + 描边 + 文本绘制可用
+  - [x] 材质回退链 Mica→Acrylic→Gaussian→solid 按系统版本选择，日志记录实际级别
+  - [x] 三级降级均可渲染，不崩溃、不黑块（强制降级开关）
+  - [x] 三张 DPI 截图
 - 证据: evidence/T-005/
+- 备注: 实测系统材质无视逐像素 alpha / SetWindowRgn / 可配圆角，改为自绘磨砂板（ADR-0008）；修复 SetTransform 覆盖图集偏移（ADR-0009）。实时捕获 RSS 103MB，余量不足，T-015 前需优化。
 
 ### T-006 · shell: 图标提取 + .lnk/.exe/UWP 解析
 - 状态: TODO

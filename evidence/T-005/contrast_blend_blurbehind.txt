@@ -1,0 +1,4 @@
+﻿rect=(240,240) size=400x120
+adjacent_contrast=1.169
+luminance_min=25.6 max=76.2 range=50.7
+verdict=PARTIAL

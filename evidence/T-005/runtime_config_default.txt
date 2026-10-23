@@ -1,0 +1,4 @@
+﻿2026-10-24T00:41:14.002+08:00 INFO [app] config: icon_size=96 gap=0 mag=2.50 falloff=sine material=acrylic corner=40
+2026-10-24T00:41:14.002+08:00 INFO [app] material: requested=acrylic resolved=blur os_build=26300 backdrop=1 capture=1
+2026-10-24T00:41:14.002+08:00 WARN [render] material degraded acrylic -> blur: accent-policy acrylic cannot be clipped to a custom corner radius
+2026-10-24T00:41:14.057+08:00 INFO [render] backdrop capture started: 1056x304 @0,0 every 200ms

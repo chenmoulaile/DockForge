@@ -41,11 +41,37 @@ theme.json: { name, author, version, extends, overrides:{<C-01 子集>} }
 - 日志：`%LOCALAPPDATA%\DockForge\logs\dockforge-YYYYMMDD.log`
 - 转储：`%LOCALAPPDATA%\DockForge\dumps\`
 
-## C-04 渲染后端契约（T-004 冻结）
+## C-04 渲染后端契约（T-004 冻结，T-005 扩充）
 
 - 后端接口 `dockforge::render::IRenderBackend`，由 `src/render/backend.h` 定义。
 - 所有坐标在**逻辑像素**（DIP）下计算，paint 时由后端乘以 `scale`。
 - 后端必须在 `resize(w,h)` 后一帧内清屏，不得残留上一帧内容。
+- 方法名用 `DrawLabel` 而非 `DrawText`：`<winuser.h>` 把 `DrawText` 定义为 `__MINGW_NAME_AW` 宏，成员函数名会被文本替换成 `DrawTextW`。
+- 笔刷按 RGBA 精确缓存（16 槽），槽满时用临时笔刷溢出，**不淘汰已有条目**；`BeginFrame` 只在 `ID2D1DeviceContext` 实例变化时清空缓存（笔刷是设备相关的）。
+
+### C-04a 变换矩阵复合规则（T-005 冻结，ADR-0009）
+
+`CompositionSurface::Paint` 回调内的 `ID2D1DeviceContext` 已带有一个平移矩阵（surface 在合成图集内的偏移，见 ADR-0007 第 4 条）。任何图层绘制**必须**：
+
+```cpp
+D2D1_MATRIX_3X2_F base{};
+dc.GetTransform(&base);
+dc.SetTransform(D2D1::Matrix3x2F::Translation(local_x, local_y) * base);
+// ... 绘制 ...
+dc.SetTransform(base);   // 还原，禁止写 Identity
+```
+
+违反此规则的症状是特定 DPI 下内容整体偏移出窗口（96/144 DPI 采样全透明，192 DPI 侥幸正常）。
+
+### C-04b 材质契约（T-005 冻结，ADR-0008）
+
+- `core::MaterialLevel` 枚举值 `Mica / Acrylic / Blur / Solid` 表示**板自身的模糊强度与不透明度档位**，不表示"使用哪个系统材质"。
+- 降级链固定为 `Mica → Acrylic → Blur → Solid`，由 `render::ResolveMaterialTier(requested, caps)` 单向向下走，不得跳过中间档位。
+- 系统材质（`DWMWA_SYSTEMBACKDROP_TYPE` / `SetWindowCompositionAttribute`）只在 `PlateStyle::use_system_backdrop == true` 时启用，且该标志在 `corner_radius != 0` 时恒为 false。
+- `render::DegradeReason(requested, caps)` 返回单条最紧的约束文案，未降级返回空串；降级必须同时写 `DF_WARN`。
+- 环境变量 `DOCKFORGE_FORCE_MATERIAL=<mica|acrylic|blur|solid>` 覆盖配置里的材质请求（测试钩子，不写入配置文件）。
+- 自绘磨砂板依赖屏幕捕获，`MaterialCaps::capture_available == false` 时 Blur 档必须降级到 Solid，不得黑屏。
+- 捕获线程与 UI 线程之间只传**拷贝**（`BackdropCapture::AcquireIfNew` 填充调用方缓冲），不传裸指针。
 
 ## C-05 Dock 布局数学（T-008 冻结）
 

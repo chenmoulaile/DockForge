@@ -1,0 +1,4 @@
+﻿rect=(240,240) size=400x120
+adjacent_contrast=0.205
+luminance_min=21.6 max=76.2 range=54.7
+verdict=BLURRED

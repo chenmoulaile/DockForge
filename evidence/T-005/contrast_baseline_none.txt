@@ -1,0 +1,4 @@
+﻿rect=(240,240) size=400x120
+adjacent_contrast=9.055
+luminance_min=29.7 max=104.2 range=74.5
+verdict=PATTERN_VISIBLE

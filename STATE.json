@@ -1,14 +1,14 @@
 ﻿{
     "project":  "DockForge",
     "schema":  1,
-    "milestone":  "M0",
-    "last_task":  "T-004",
+    "milestone":  "M1",
+    "last_task":  "T-005",
     "last_commit":  "pending",
     "current_module":  "render",
     "current_task":  null,
     "counters":  {
                      "total":  15,
-                     "done":  4,
+                     "done":  5,
                      "partial":  0,
                      "blocked":  0
                  },
@@ -50,7 +50,12 @@
                           "新增源文件必须先跑 cmake configure，否则 GLOB mismatch",
                           "IDCompositionSurface::BeginDraw 返回的 offset 是物理像素，SetTransform 吃 DIP：必须乘 96/dpi 否则非 96 DPI 内容偏移出窗口",
                           "ID2D1DeviceContext::GetPixelSize() 返回合成图集尺寸而非 surface 尺寸，布局必须用 CompositionSurface::PaintInfo 的 width_dip/height_dip",
-                          "证明 NOREDIRECTIONBITMAP 窗口透明必须差分采样（窗口在 vs 进程被杀），ShowWindow(SW_HIDE) 经 DWM 异步生效会导致误判"
+                          "证明 NOREDIRECTIONBITMAP 窗口透明必须差分采样（窗口在 vs 进程被杀），ShowWindow(SW_HIDE) 经 DWM 异步生效会导致误判",
+                          "系统材质（Mica/accent acrylic）无视逐像素 alpha 与 SetWindowRgn，圆角半径不可配；材质必须自绘（ADR-0008）",
+                          "CompositionSurface::Paint 回调内 SetTransform 必须先 GetTransform(\u0026base) 再 Translation(...)*base 复合，否则覆盖图集偏移，特定 DPI 下内容偏移出窗口（ADR-0009）",
+                          "BitBlt 读合成桌面是固定 ~78-95ms 的合成器往返，与区域大小无关，必须放工作线程",
+                          "WDA_EXCLUDEFROMCAPTURE 生效后 PrintWindow 采到全黑；要拍自己的霜层必须用 DOCKFORGE_FREEZE_BACKDROP 先抓帧再解除排除",
+                          "证据采样前必须用 tools/window_list.ps1 核对窗口真实矩形与 z 序，全屏窗口会污染背景测量"
                       ],
-    "updated_at":  "2026-10-23T23:52:57+08:00"
+    "updated_at":  "2026-10-24T00:41:42+08:00"
 }

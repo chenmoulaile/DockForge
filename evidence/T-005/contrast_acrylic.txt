@@ -1,0 +1,4 @@
+﻿rect=(992,800) size=896x60
+adjacent_contrast=0.000
+luminance_min=46.9 max=46.9 range=0.0
+verdict=BLURRED

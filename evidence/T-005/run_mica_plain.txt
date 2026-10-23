@@ -1,0 +1,6 @@
+host build=26300 (mica requires >=22000) dcomp=0 material=mica
+DwmSetWindowAttribute(DWMSBT_MAINWINDOW)             hr=0x00000000 OK
+DwmExtendFrameIntoClientArea(-1)                     hr=0x00000000 OK
+DwmSetWindowAttribute(DWMSBT_MAINWINDOW)             hr=0x00000000 OK
+DwmExtendFrameIntoClientArea(-1)                     hr=0x00000000 OK
+holding 5000 ms at 200,200 480x200
