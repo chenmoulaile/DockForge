@@ -1,0 +1,8 @@
+﻿[  3%] Building CXX object CMakeFiles/dockforge_lib.dir/src/dock/layout.cpp.obj
+[  6%] Linking CXX static library libdockforge_lib.a
+[ 60%] Built target dockforge_lib
+[ 63%] Linking CXX executable bin\DockForge.exe
+[ 66%] Linking CXX executable bin\dockforge_tests.exe
+[ 70%] Built target DockForge
+[100%] Built target dockforge_tests
+

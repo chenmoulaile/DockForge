@@ -73,3 +73,15 @@ if(DOCKFORGE_BUILD_TESTS)
     add_test(NAME dockforge_tests COMMAND dockforge_tests)
   endif()
 endif()
+
+# ---------------------------------------------------------------- benchmarks
+# Console tools, kept out of the default build target so a normal build does not
+# pay for them, but reproducible: `cmake --build build --target dockforge_bench`.
+option(DOCKFORGE_BUILD_BENCH "Build benchmark tools" ON)
+if(DOCKFORGE_BUILD_BENCH)
+  add_executable(layout_bench ${CMAKE_CURRENT_SOURCE_DIR}/tools/layout_bench.cpp)
+  target_link_libraries(layout_bench PRIVATE dockforge_lib)
+  if(MINGW)
+    target_link_options(layout_bench PRIVATE -static-libgcc -static-libstdc++)
+  endif()
+endif()

@@ -2,13 +2,13 @@
     "project":  "DockForge",
     "schema":  1,
     "milestone":  "M1",
-    "last_task":  "T-007",
+    "last_task":  "T-008",
     "last_commit":  "pending",
-    "current_module":  "platform",
+    "current_module":  "dock",
     "current_task":  null,
     "counters":  {
                      "total":  16,
-                     "done":  7,
+                     "done":  8,
                      "partial":  0,
                      "blocked":  0
                  },
@@ -63,7 +63,10 @@
                           "GetSystemMetricsForDpi(SM_CXSCREEN) 与 DPI 无关，恒返回物理分辨率，不能用来推缩放（T-007 实测）",
                           "AdjustWindowRectExForDpi 对 WS_POPUP 是 no-op，无边框窗口不需要它（T-007 实测）",
                           "WM_DPICHANGED 无法跨进程注入：PostMessage 返回 ERROR_MESSAGE_SYNC_ONLY(1159)，SendMessage 返回 0 但处理器不执行；WM_CLOSE 可跨进程（T-007 实测）。验证必须用 DOCKFORGE_SIMULATE_DPI 在进程内 SendMessage",
-                          "GetDpiForMonitor/MDT_* 需要 shellscalingapi.h + 链接 shcore；std::max 混用 LONG 与 int 会推导失败"
+                          "GetDpiForMonitor/MDT_* 需要 shellscalingapi.h + 链接 shcore；std::max 混用 LONG 与 int 会推导失败",
+                          "Catch2 的 CHECK(a < b < c) 与含两个比较符的 || 表达式都触发 chained comparisons static_assert，必须拆成多条 CHECK（T-008）",
+                          "fisheye 指针必须钳到首尾图标中心跨度而非 [0,base_width]，否则边缘图标峰值达不到 magnification 且峰值索引不单调（T-008）",
+                          "布局热路径禁止堆分配：gain 从 out[i].scale 读回，半径外图标跳过 pow()（C-05a / ADR-0013）"
                       ],
-    "updated_at":  "2026-10-24T01:40:00+08:00"
+    "updated_at":  "2026-10-24T02:35:00+08:00"
 }

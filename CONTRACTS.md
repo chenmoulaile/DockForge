@@ -88,6 +88,16 @@ x_i = base_i + Σ_{j} (s_j - 1) * w * 0.5 * sign(i - j)
 - 缩放与位移**只在顶点缓冲/变换矩阵中体现**，禁止逐帧重建布局对象。
 - 帧时间预算 p99 < 16.7ms。
 
+### C-05a 求值规则（T-008 冻结，实现细节不可自由发挥）
+
+1. **指针钳制**：m 先钳到首尾图标**中心**的跨度 [w/2, base_width - w/2]（ase_width 为无悬停内容宽度）。钳到 [0, base_width] 会让边缘图标峰值达不到 magnification，并破坏峰值索引的单调性。
+2. **累积位移用前缀和**：x_i = base_i + 0.5*w*(Σ_{j<i} g_j - Σ_{j>i} g_j)，g_j = s_j - 1。与契约双重求和代数等价，	ests/layout_test.cpp 的 ReferenceLayout（逐字 O(n²) 转写）逐项比对锁定，容差 scale 1e-5 / center 1e-3 / width 1e-4。
+3. **零分配**：热路径 LayoutDock(params, count, mouse_x, hovering, IconLayout* out, capacity, summary) 禁止任何堆分配。g_j 从 out[i].scale - 1.0f 读回，不用临时数组。
+4. **半径外短路**：|d| >= R 的图标 s = 1 且跳过 pow()/exp()。ComputeScale 本身也必须对 d >= R 返回恰好 1.0f、对 d <= 0 返回恰好 magnification。
+5. **曲线在影响半径处必须归零**：FalloffWeight(1.0, params) < 1e-6。Gaussian 必须归一化 (exp(-(p*t)^2) - exp(-p^2)) / (1 - exp(-p^2))，未归一化在 p=2 残留 0.0183（≈1.5% 缩放台阶）。
+6. **magnification < 1 钳到 1**，不允许缩小。
+7. **求值单位**：benchmark 的「一次求值」= 单个图标的 C-05 公式项，不是整条 Dock。两者都要输出，禁止只报有利口径。
+
 ## C-06 模块边界
 
 | 模块 | 职责 | 不得触碰 |
