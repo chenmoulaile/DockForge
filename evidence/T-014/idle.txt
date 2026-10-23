@@ -1,0 +1,27 @@
+process=DockForge pid=27168
+duration_s=60 interval_ms=5000
+cpu_total_s=0.188 wall_s=60.2 cores=18
+cpu_percent=0.0173
+rss_first_mb=94.16 rss_last_mb=94.14
+rss_growth_mb=-0.02
+handles_first=394 handles_last=386
+handles_min=386 handles_max=394
+threads_min=6 threads_max=10
+--- samples ---
+t=  5.0s rss=  94.16MB handles= 394 threads=10 cpu=  0.312s
+t= 10.0s rss=  94.16MB handles= 394 threads=10 cpu=  0.344s
+t= 15.0s rss=  94.16MB handles= 394 threads=10 cpu=  0.375s
+t= 20.0s rss=  94.16MB handles= 394 threads=10 cpu=  0.391s
+t= 25.0s rss=  94.16MB handles= 394 threads=10 cpu=  0.391s
+t= 30.0s rss=  94.18MB handles= 389 threads=9 cpu=  0.422s
+t= 35.0s rss=  94.18MB handles= 389 threads=9 cpu=  0.453s
+t= 40.0s rss=  94.20MB handles= 389 threads=9 cpu=  0.453s
+t= 45.0s rss=  94.20MB handles= 389 threads=9 cpu=  0.469s
+t= 50.0s rss=  94.20MB handles= 389 threads=9 cpu=  0.484s
+t= 55.0s rss=  94.20MB handles= 389 threads=9 cpu=  0.484s
+t= 60.0s rss=  94.14MB handles= 386 threads=6 cpu=  0.484s
+--- budgets ---
+cpu_budget=0.5% rss_budget=120MB
+verdict_cpu=PASS
+verdict_rss=PASS
+verdict_handles=PASS

@@ -1,0 +1,7 @@
+OleInitialize -> hr=0x00000000
+mode=target payload_count=0 region=1 drop_y=80%
+expand_on_enter=0
+target: hwnd=0000000000180694 rect=600,1500 800x200
+target: SetWindowRgn(bottom 3/5) -> 1
+target: RegisterDragDrop -> hr=0x00000000 (S_OK)
+exit code=0

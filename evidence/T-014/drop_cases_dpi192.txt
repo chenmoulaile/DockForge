@@ -1,0 +1,70 @@
+dpi=192 dock=685,1595 1510x213 pid=34788
+target=(1440,1755)
+--- case=shortcut ---
+2026-10-24T04:34:43.754+08:00 DEBUG [dock] tile order: 12 named, 12 resolved of 215 scanned
+2026-10-24T04:34:43.755+08:00 INFO [dock] curated order: 12 names -> 12 visible of 215 scanned
+2026-10-24T04:34:43.755+08:00 DEBUG [dock] tile[0] Ahk2Exe kind=shell-item icon=ok
+2026-10-24T04:34:43.755+08:00 DEBUG [dock] tile[1] AI 空间 kind=namespace-item icon=ok
+2026-10-24T04:34:43.755+08:00 DEBUG [dock] tile[2] AutoClaw kind=shell-item icon=ok
+2026-10-24T04:34:43.755+08:00 DEBUG [dock] tile[3] AutoHotkey kind=executable icon=ok
+2026-10-24T04:34:43.755+08:00 DEBUG [dock] tile[4] 7-Zip kind=executable icon=ok
+2026-10-24T04:34:43.755+08:00 DEBUG [dock] tile[5] AutoHotkey Dash kind=shell-item icon=ok
+2026-10-24T04:34:43.755+08:00 DEBUG [dock] tile[6] AutoHotkey Help File kind=executable icon=ok
+2026-10-24T04:34:43.755+08:00 DEBUG [dock] tile[7] AutoHotkey Setup kind=executable icon=ok
+2026-10-24T04:34:43.755+08:00 DEBUG [dock] tile[8] AutoHotkey Window Spy kind=shell-item icon=ok
+2026-10-24T04:34:43.755+08:00 DEBUG [dock] tile[9] BandiView kind=namespace-item icon=ok
+2026-10-24T04:34:43.755+08:00 DEBUG [dock] tile[10] Bandizip kind=namespace-item icon=ok
+2026-10-24T04:34:43.755+08:00 DEBUG [dock] tile[11] Beautiful kind=executable icon=ok
+2026-10-24T04:34:43.813+08:00 DEBUG [dock] region plate=0,77,1510,213 row=0,0,0,0 include_row=0
+2026-10-24T04:34:43.817+08:00 DEBUG [dock] drop grid scale=2.000 slots=12 first=69.4 last=685.4 dip
+2026-10-24T04:34:43.817+08:00 INFO [dock] drop target registered (12 slots, scale=2.000)
+2026-10-24T04:34:43.822+08:00 DEBUG [dock] drop grid scale=2.000 slots=12 first=69.4 last=685.4 dip
+2026-10-24T04:34:43.842+08:00 DEBUG [dock] region plate=0,77,1510,213 row=28,47,1482,213 include_row=1
+2026-10-24T04:34:48.242+08:00 DEBUG [dock] region plate=0,77,1510,213 row=0,0,0,0 include_row=0
+2026-10-24T04:34:49.720+08:00 INFO [dock] drop enter: paths=1 kind=shortcut acceptable=1
+2026-10-24T04:34:49.720+08:00 DEBUG [dock]   drop path: C:\Users\chenk\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Cursor.lnk
+2026-10-24T04:34:49.720+08:00 DEBUG [dock] region plate=0,77,1510,213 row=0,0,1510,213 include_row=1
+2026-10-24T04:34:50.120+08:00 INFO [dock] drop commit: 1 paths at insert=6
+2026-10-24T04:34:50.193+08:00 INFO [dock] tile order saved: 13 tiles, 0 hidden
+2026-10-24T04:34:50.193+08:00 INFO [dock] drop: added c:\users\chenk\appdata\local\programs\cursor\cursor.exe at tile[6] (13 tiles)
+2026-10-24T04:34:50.193+08:00 INFO [dock] drop: 1 of 1 paths accepted
+2026-10-24T04:34:50.194+08:00 DEBUG [dock] drop grid scale=2.000 slots=13 first=69.4 last=741.4 dip
+2026-10-24T04:34:50.194+08:00 DEBUG [dock] region plate=0,77,1622,213 row=0,0,0,0 include_row=0
+2026-10-24T04:34:50.197+08:00 DEBUG [dock] region plate=0,77,1622,213 row=20,20,1602,213 include_row=1
+after_shortcut tiles=13
+--- case=shortcut_again ---
+2026-10-24T04:34:55.590+08:00 DEBUG [dock] region plate=0,77,1622,213 row=0,0,0,0 include_row=0
+2026-10-24T04:34:56.924+08:00 INFO [dock] drop enter: paths=1 kind=shortcut acceptable=1
+2026-10-24T04:34:56.924+08:00 DEBUG [dock]   drop path: C:\Users\chenk\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Cursor.lnk
+2026-10-24T04:34:56.924+08:00 DEBUG [dock] region plate=0,77,1622,213 row=0,0,1622,213 include_row=1
+2026-10-24T04:34:57.308+08:00 INFO [dock] drop commit: 1 paths at insert=7
+2026-10-24T04:34:57.313+08:00 INFO [dock] drop: c:\users\chenk\appdata\local\programs\cursor\cursor.exe is already on the dock at tile[6]
+2026-10-24T04:34:57.319+08:00 INFO [dock] tile order saved: 13 tiles, 0 hidden
+2026-10-24T04:34:57.319+08:00 INFO [dock] drop: 1 of 1 paths accepted
+2026-10-24T04:34:57.320+08:00 DEBUG [dock] drop grid scale=2.000 slots=13 first=69.4 last=741.4 dip
+2026-10-24T04:34:57.320+08:00 DEBUG [dock] region plate=0,77,1622,213 row=0,0,0,0 include_row=0
+2026-10-24T04:34:57.382+08:00 DEBUG [dock] region plate=0,77,1622,213 row=20,20,1602,213 include_row=1
+after_again tiles=13 (duplicate would be +1)
+--- case=document ---
+2026-10-24T04:35:02.710+08:00 DEBUG [dock] region plate=0,77,1622,213 row=0,0,0,0 include_row=0
+2026-10-24T04:35:04.119+08:00 INFO [dock] drop enter: paths=1 kind=unsupported acceptable=0
+2026-10-24T04:35:04.119+08:00 DEBUG [dock]   drop path: C:\Users\chenk\AppData\Local\Temp\dockforge-drop-sample.txt
+2026-10-24T04:35:04.119+08:00 DEBUG [dock] region plate=0,77,1622,213 row=0,0,1622,213 include_row=1
+2026-10-24T04:35:04.505+08:00 INFO [dock] drop leave
+2026-10-24T04:35:04.505+08:00 DEBUG [dock] region plate=0,77,1622,213 row=0,0,0,0 include_row=0
+2026-10-24T04:35:04.582+08:00 DEBUG [dock] region plate=0,77,1622,213 row=20,20,1602,213 include_row=1
+after_document tiles=13 (rejection must not change it)
+--- case=folder ---
+2026-10-24T04:35:09.893+08:00 DEBUG [dock] region plate=0,77,1622,213 row=0,0,0,0 include_row=0
+2026-10-24T04:35:11.367+08:00 INFO [dock] drop enter: paths=1 kind=folder acceptable=1
+2026-10-24T04:35:11.367+08:00 DEBUG [dock]   drop path: C:\Users\chenk\AppData\Local\Temp\dockforge-drop-folder
+2026-10-24T04:35:11.367+08:00 DEBUG [dock] region plate=0,77,1622,213 row=0,0,1622,213 include_row=1
+2026-10-24T04:35:11.724+08:00 INFO [dock] drop commit: 1 paths at insert=7
+2026-10-24T04:35:11.737+08:00 INFO [dock] tile order saved: 14 tiles, 0 hidden
+2026-10-24T04:35:11.737+08:00 INFO [dock] drop: added c:\users\chenk\appdata\local\temp\dockforge-drop-folder at tile[7] (14 tiles)
+2026-10-24T04:35:11.737+08:00 INFO [dock] drop: 1 of 1 paths accepted
+2026-10-24T04:35:11.738+08:00 DEBUG [dock] drop grid scale=2.000 slots=14 first=69.3 last=797.3 dip
+2026-10-24T04:35:11.738+08:00 DEBUG [dock] region plate=0,77,1733,213 row=0,0,0,0 include_row=0
+2026-10-24T04:35:11.766+08:00 DEBUG [dock] region plate=0,77,1733,213 row=27,47,1706,213 include_row=1
+after_folder tiles=14
+folder_identity_present=True

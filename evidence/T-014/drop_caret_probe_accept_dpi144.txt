@@ -1,0 +1,9 @@
+idle=evidence\T-014\drop_idle_accept_dpi144.png
+drag=evidence\T-014\drop_caret_accept_dpi144.png
+size=1132x160 band=86..131 tolerance=30 coverage>=0.6 max_width=12
+qualifying_columns=7 need_rows=28 of 46
+run x=569..575 width=7 mean=(210,215,225) peak=(212,217,227) peak_delta=616
+caret x=569..575 width=7 centre=572 tint=accept
+expected_x=572 delta=0 tolerance=14
+expected_tint=accept actual_tint=accept
+verdict=DRAWN_AT_EXPECTED_SLOT

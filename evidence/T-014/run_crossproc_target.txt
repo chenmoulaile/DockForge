@@ -1,0 +1,18 @@
+OleInitialize -> hr=0x00000000
+mode=target payload_count=0 region=1 drop_y=80%
+expand_on_enter=1
+target: hwnd=00000000001702ee rect=600,1500 800x200
+target: SetWindowRgn(bottom 3/5) -> 1
+target: RegisterDragDrop -> hr=0x00000000 (S_OK)
+DragEnter screen=(1000,1620) client=(400,120) keys=0x00000001 effect_in=0x00000001
+  format cf=15 name=#15 tymed=0x00000001 aspect=0x00000001
+  acceptable=1
+  expand_on_enter: SetWindowRgn(full 800x200) -> 1
+DragOver  #1 screen=(1000,1620) client=(400,120) keys=0x00000001
+DragOver  #2 screen=(1000,1620) client=(400,120) keys=0x00000001
+DragOver  #3 screen=(1000,1620) client=(400,120) keys=0x00000001
+Drop screen=(1000,1620) client=(400,120) keys=0x00000000 over_count=5
+  hdrop_count=1
+  path[0] len=79 attrs=0x00000020 C:\Users\chenk\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Cursor.lnk
+  query_point=(0,0)
+exit code=0

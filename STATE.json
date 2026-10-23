@@ -2,13 +2,13 @@
     "project":  "DockForge",
     "schema":  1,
     "milestone":  "M1",
-    "last_task":  "T-013",
-    "last_commit":  "2bed0dc",
+    "last_task":  "T-014",
+    "last_commit":  "969bf40",
     "current_module":  "dock",
-    "current_task":  "T-014",
+    "current_task":  "T-015",
     "counters":  {
                      "total":  16,
-                     "done":  13,
+                     "done":  14,
                      "partial":  0,
                      "blocked":  0
                  },
@@ -98,6 +98,11 @@
                           "插入槽边界必须用 >= 而非 >：指针落在槽中心等于正压在那个图标上，严格大于会让目标永远差一槽",
                           "测试写配置必须隔离：CommitOrder 用例曾写进开发机真实 config.json；ConfigPath() 支持 DOCKFORGE_CONFIG_PATH 覆盖，测试静态初始化期指向 %TEMP%",
                           "ghost 一出板顶就被 SetWindowRgn 裁掉；WM_LBUTTONDOWN 里 drag.Begin 之后必须立刻 apply_region() 扩到整窗"
+,
+                          "RegisterDragDrop 在 CoInitializeEx 之后返回 0x8007000E E_OUTOFMEMORY，只有 OleInitialize 返回 S_OK；错误码是误导性的（T-014）",
+                          "region 外的 DragEnter/Drop 完全不投递，边界严格等于 region 顶边；进入后必须立刻把 region 扩到整窗，否则上移触发 DragLeave 且 Drop 永不触发、源进程挂死",
+                          "OLE 回调运行在源进程的模态循环里，每个 DragOver 都 InvalidateRect 会让 p99 到 17.284ms；必须由 tick 合并（drop_moved）",
+                          "caret 探针必须按列统计并只认 <=12px 宽的单 run；颜色必须取 run 内峰值像素，取首个合格列会读到抗锯齿边缘把 reject 判成 accept"
                       ],
-    "updated_at":  "2026-10-24T04:20:00+08:00"
+    "updated_at":  "2026-10-24T04:40:00+08:00"
 }

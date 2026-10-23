@@ -518,3 +518,60 @@ Dock 需要显示哪些应用正在运行、哪个在前台。两个状态的自
 - 拖拽期间行放大固定在按下点，不随指针横移。这不是缺陷：行跟着跑会让插入线永远在指针正下方，看不出要插到哪。
 - 移除只能靠长按，误触的代价从"删掉"降到"没反应"。代价是用户需要学一次这个手势，Dock 无法用文字提示（没有可显示的地方）。
 - 拖拽帧预算实测 `fps_min=62.5`、14 个采样窗 p99 全部 ≤16.69ms。首个窗口曾报 19.63ms，根因是 `FrameClock` 的 1000 样本窗里还留着启动期样本（首帧 309ms 的模糊 shader 编译），不是拖拽路径。
+
+## ADR-0019 外部拖入用自建 IDropTarget，落点用静止栅格，回调只记录状态
+
+- 日期：2026-10-24
+- 状态：已采纳
+- 关联：C-16、T-014；受 C-10（几何与 DPI 同源）、C-15（拖拽状态机）约束
+
+### 背景
+
+Dock 需要接受从资源管理器、开始菜单、桌面拖来的 `.lnk` / `.exe` / 目录。桌面上的东西对 `IDropTarget` 只有一种形状：一个带 `CF_HDROP` 的 `IDataObject`。但 dock 窗口有两个特殊之处会与 OLE 相互作用：
+
+1. 它是 `WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST`，且用 `SetWindowRgn` 做命中测试形状（C-12）。
+2. 它已经在 `WM_MOUSEMOVE` 上跑自己的拖拽状态机（C-15），两个拖拽手势必须互斥。
+
+`spikes/t014_drop` 先用两个进程跑通了完整 OLE 握手，得到四条硬约束（`evidence/T-014/run_*.txt`），再决定实现形态。
+
+### 决定
+
+**1. 手写 `IDropTarget`，不用 `RegisterDragDrop` 的默认 helper。** 默认 helper 不做 region 处理、不做槽位解析，而这两件事正是 dock 的全部。
+
+**2. OLE 生命周期由 `dock::OleSession` 独占，`main.cpp` 不得调 `CoInitializeEx`。** 实测 `CoInitializeEx` 之后 `RegisterDragDrop` 返回 `0x8007000E E_OUTOFMEMORY`，只有 `OleInitialize` 返回 `S_OK`。把初始化收进一个引用计数 RAII，是为了让"忘记 OleInitialize"这件事在类型层面不可表达，而不是靠注释提醒。
+
+**3. 落点与 caret 都用静止栅格 `IdleCentersDip(geometry, scale)`。** 外部拖入时行强制回落（`dock_hover.active = false`），栅格是解析式而非放大布局的输出。这是 T-013 反馈环的直接继承：用放大后的 centres 会让"指针右移 → 右侧图标放大 → 中心更右 → 改变已越过的槽"形成闭环，实测错位 1 槽。
+
+**4. scale 由 `SetScale(window.Scale())` 注入，不读 `GetDpiForWindow`。** 这是 C-10 那条规则第二次发作：`DOCKFORGE_DPI_OVERRIDE` 下窗口保持真实 192 DPI，而行按 override 96 DPI 排布，两者比值 2 时每个 x 减半。第一次发作是 T-004 的 `BeginDraw` offset（物理像素）与 `SetTransform`（DIP）混用。
+
+**5. OLE 回调只记录状态，重绘由 tick 合并。** 回调运行在源进程的模态拖拽循环里，是同步打断。每个 `DragOver` 都 `InvalidateRect` 实测 `p99_mean=17.284ms`、19/20 窗超预算；tick 合并后 `p99_mean=16.512ms`、0 窗超。这是同一条规则的第三次应用（T-010 `hover_moved`、T-013 `drag_moved`、T-014 `drop_moved`）——现在它是 C-16g，不再是每次重新发现。
+
+**6. region 在 `DragEnter` 扩到整窗、`DragLeave`/`Drop` 恢复，只在两态翻转时调用。** region 外的 `DragEnter`/`Drop` 完全不投递（实测边界等于 region 顶边）；不扩则指针上移收到 `DragLeave` 且 `Drop` 永不触发，源进程挂死。但不能每次 `DragOver` 都 `SetWindowRgn`（T-010 的 17.3ms）。
+
+**7. 五类载荷，文档拒绝，混合载荷整体拒绝。** `IsDockable` 只看路径与属性，不看能否取到图标——`IShellItemImageFactory` 对 `.txt` 和目录都成功，这个信号没有区分力。
+
+**8. caret 在不可接受时也画，用暖红。** 系统光标的"禁止"徽标属于源进程，进入 `DROPEFFECT_NONE` 窗口就消失，dock 会显得在接受。
+
+**9. 查重按身份字符串、逆序插入、立即持久化。** 与 C-15 的 `CommitOrder` 同一套机制，不引入第二套顺序表示。
+
+### 被拒方案
+
+| 方案 | 拒绝理由 |
+|---|---|
+| 用 `DragAcceptFiles` + `WM_DROPFILES` | 只支持 `CF_HDROP`，且 `DragAcceptFiles` 内部就是 `RegisterDragDrop` 的简化封装；拿不到 `DragEnter`/`DragOver`，无法在悬停期间画 caret 或扩 region |
+| 在 `WM_NCHITTEST` 返回 `HTTRANSPARENT` 处理空白区 | 实测跨进程无效（`spikes/t010_hover`），只在同线程有效 |
+| 落点用放大后的 `IconCentersDip` | 反馈环，实测错位 1 槽（T-013） |
+| `UpdatePointer` 里读 `GetDpiForWindow` | `DOCKFORGE_DPI_OVERRIDE` 下与几何不同源，落点错 3 槽（实测 `x=188.5dip` vs 真实 `377.0dip`） |
+| 每个 OLE 回调里 `InvalidateRect` | p99 17.284ms，19/20 窗超预算 |
+| 每个 `DragOver` 里 `SetWindowRgn` | T-010 已测：p99 17.3ms |
+| 只在 `DragOver` 时扩 region（不在 `DragEnter`） | 指针从板内上移到板上方会先触发 `DragLeave`，`Drop` 永不到达 |
+| 用 `OleInitialize` 之外的方式满足 `RegisterDragDrop` | 三种 `CoInitializeEx` 变体全部 `E_OUTOFMEMORY`，没有其他路径 |
+| 多文件逐个接受可接受的、跳过不可接受的 | 用户无法知道哪部分生效；dock 的 tile 顺序是唯一凭据 |
+| caret 用系统光标徽标代替 | 徽标由源进程绘制，进入 `DROPEFFECT_NONE` 窗口即消失 |
+
+### 后果
+
+- `main.cpp` 的 `com_guard` 被 `dock::OleSession ole;` 取代，`CoInitializeEx` 从代码库消失。任何未来需要 COM 的模块必须构造 `OleSession` 或显式说明为何 `CoInitializeEx` 足够（即不需要拖放）。
+- `DockDropTarget` 需要 `SetScale` + `SetCentres` 两个注入点，由 `geometry_changed` lambda 统一刷新，日志打 `drop grid scale=%.3f slots=%zu first=%.1f last=%.1f dip`——这三个数字让"槽位算错"从猜测变成读数。
+- caret 位置有一行 `DF_TRACE` 打 `slot/origin/pitch/x/px/band`。T-014 期间正是靠它把"caret 在 762px"和"几何算出的 650.8px"对上，才确认截图里的 caret 属于另一次运行而不是几何错误。
+- `tools/drop_caret.ps1` 成为 caret 的唯一判据。整帧 `image_diff` 只能说明"有变化"，不能说明变化是 caret。

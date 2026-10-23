@@ -250,17 +250,23 @@
   - `CommitOrder` 用例曾写进开发机真实配置，`ConfigPath()` 已加 `DOCKFORGE_CONFIG_PATH` 覆盖，测试隔离到 `%TEMP%`。
   - `GetCapture()` 不能跨进程断言（返回调用线程的捕获窗口，恒为 0），改读 app 自报的 `capture=1 match=1`。
 ### T-014 · dock: OLE 拖入（文件/快捷方式）
-- 状态: TODO
+- 状态: DONE
 - 优先级: P0
 - 依赖: T-013
 - 预估: 1 会话
-- 上下文: `src/dock/`
+- 上下文: `src/dock/`、`src/shell/`
 - DoD:
-  - [ ] 实现 `IDropTarget`，接受 `.lnk`/`.exe`/文件夹
-  - [ ] 拖入时高亮插入位，释放后加入并持久化
-  - [ ] 非法类型有视觉反馈且不写入配置
-  - [ ] 与 T-013 内部重排不冲突
+  - [x] 实现 `IDropTarget`，接受 `.lnk`/`.exe`/文件夹
+  - [x] 拖入时高亮插入位，释放后加入并持久化
+  - [x] 非法类型有视觉反馈且不写入配置
+  - [x] 与 T-013 内部重排不冲突
 - 证据: evidence/T-014/
+- 备注:
+  - 「高亮插入位」实现为**一条 4 DIP 竖线**（`kDropCaretWidthDip`），接受色近白 `(212,218,227)`、拒绝色暖红 `(219,98,89)`，实测三档 DPI 全部落在静止栅格的期望槽位上（差 0/0/1px）。
+  - 四类载荷端到端通过：`.lnk` 新增、重复拖不产生第二个 tile、`.txt` 拒绝且配置不变、目录新增为 `AppKind::Folder`（走 `ShellExecuteExW`，`CreateProcess` 对目录返回 `ACCESS_DENIED`）。
+  - 两处缺陷：`UpdatePointer` 读 `GetDpiForWindow` 与几何不同源，`DOCKFORGE_DPI_OVERRIDE=96` 下把 tile[6] 算成 tile[3]（C-10 规则第二次发作）；每个 OLE 回调都 `InvalidateRect` 导致 `p99_mean=17.284ms`、19/20 窗超预算，改 tick 合并后 `16.512ms`、0 窗超。
+  - `main.cpp` 的 `CoInitializeEx` 已全部替换为 `dock::OleSession`：`CoInitializeEx` 之后 `RegisterDragDrop` 返回 `0x8007000E E_OUTOFMEMORY`，只有 `OleInitialize` 返回 `S_OK`。
+  - 视觉证据一律 `DOCKFORGE_FORCE_MATERIAL=solid`：blur 档的 `WDA_EXCLUDEFROMCAPTURE` 让 `CopyFromScreen` 采到桌面背后内容，dock 区域全黑。
 
 ### T-015 · dock: 窗口缩略图预览
 - 状态: TODO

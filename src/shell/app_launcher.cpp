@@ -147,6 +147,37 @@ const char* ToString(LaunchError error) {
     return "unknown";
 }
 
+// A folder is opened through the shell's default verb, not CreateProcess: the
+// latter fails with ACCESS_DENIED on a directory. ShellExecuteEx with an empty verb
+// runs the default action, which is exactly what double-clicking the folder does.
+LaunchResult LaunchFolder(const AppEntry& entry) {
+    LaunchResult result;
+    result.route = "ShellExecuteEx";
+    if (entry.target_path.empty()) {
+        result.error = LaunchError::NotLaunchable;
+        return result;
+    }
+    if (GetFileAttributesW(entry.target_path.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        result.error = LaunchError::NotFound;
+        return result;
+    }
+
+    SHELLEXECUTEINFOW info{};
+    info.cbSize = sizeof(info);
+    info.fMask = SEE_MASK_FLAG_NO_UI | SEE_MASK_NOASYNC;
+    info.lpVerb = nullptr;
+    info.lpFile = entry.target_path.c_str();
+    info.nShow = SW_SHOWNORMAL;
+    if (!ShellExecuteExW(&info)) {
+        const DWORD last = GetLastError();
+        DF_WARN("shell", "ShellExecuteEx(%s) failed: %lu",
+                core::WideToUtf8(entry.target_path).c_str(), last);
+        result.error = LaunchError::ProcessFailed;
+        return result;
+    }
+    result.error = LaunchError::None;
+    return result;
+}
 LaunchResult Launch(const AppEntry& entry) {
     switch (entry.kind) {
         case AppKind::Uwp:
@@ -158,6 +189,8 @@ LaunchResult Launch(const AppEntry& entry) {
         case AppKind::Shortcut:
         case AppKind::Executable:
             return LaunchByPath(entry);
+        case AppKind::Folder:
+            return LaunchFolder(entry);
         case AppKind::Unknown:
             break;
     }

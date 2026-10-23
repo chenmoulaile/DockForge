@@ -1,0 +1,21 @@
+OleInitialize -> hr=0x00000000
+mode=both payload_count=1 region=1 drop_y=60%
+expand_on_enter=0
+  payload[0] attrs=0x00000020 C:\Users\chenk\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Cursor.lnk
+target: hwnd=0000000000150310 rect=600,1500 800x200
+target: SetWindowRgn(bottom 3/5) -> 1
+target: RegisterDragDrop -> hr=0x00000000 (S_OK)
+source: hwnd=0000000000140316 rect=60,400 320x200
+driver: from=(220,500) to=(1000,1620)
+source: WM_LBUTTONDOWN (arming)
+source: WM_MOUSEMOVE + MK_LBUTTON -> DoDragDrop (modal)
+DragEnter screen=(1000,1620) client=(400,120) keys=0x00000001 effect_in=0x00000001
+  format cf=15 name=#15 tymed=0x00000001 aspect=0x00000001
+  acceptable=1
+DragOver  #1 screen=(1000,1620) client=(400,120) keys=0x00000001
+driver: second leg to y=1520
+DragOver  #2 screen=(1000,1620) client=(400,120) keys=0x00000001
+DragOver  #3 screen=(1000,1604) client=(400,104) keys=0x00000001
+DragLeave over_count=6
+driver: released
+source: QueryContinueDrag -> DROP (button released)

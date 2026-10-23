@@ -72,6 +72,7 @@ const char* ToString(AppKind kind) {
         case AppKind::Uwp: return "uwp";
         case AppKind::ShellItem: return "shell-item";
         case AppKind::NamespaceItem: return "namespace-item";
+        case AppKind::Folder: return "folder";
         case AppKind::Unknown: return "unknown";
     }
     return "unknown";

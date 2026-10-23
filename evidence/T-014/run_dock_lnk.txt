@@ -1,0 +1,12 @@
+OleInitialize -> hr=0x00000000
+mode=drag payload_count=1 region=1 drop_y=80%
+expand_on_enter=0
+  payload[0] attrs=0x00000020 C:\Users\chenk\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Cursor.lnk
+source: hwnd=000000000012068a rect=60,400 320x200
+driver: from=(220,500) to=(1440,1700)
+source: WM_LBUTTONDOWN (arming)
+source: WM_MOUSEMOVE + MK_LBUTTON -> DoDragDrop (modal)
+driver: released
+source: QueryContinueDrag -> DROP (button released)
+source: DoDragDrop hr=0x00040100 effect=0x00000001
+exit code=0

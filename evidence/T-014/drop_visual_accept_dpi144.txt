@@ -1,0 +1,11 @@
+dpi=144 payload=C:\Users\chenk\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Cursor.lnk tag=accept
+idle: rect=874,1652 1132x160 -> evidence\T-014\drop_idle_accept_dpi144.png
+drag: rect=874,1652 1132x160 -> evidence\T-014\drop_caret_accept_dpi144.png
+--- image_diff ---
+changed_pixels=312
+changed_pct=0.172
+bbox=29,58..1107,130
+bbox_size=1079x73
+rows_with_change=58..130
+cols_with_change=29..1107
+verdict=DIFFERENT

@@ -116,6 +116,21 @@ DockGeometry ComputeGeometry(const core::Config& config, int tile_count, float s
     return geometry;
 }
 
+std::vector<float> IdleCentersDip(const DockGeometry& geometry, float scale) {
+    std::vector<float> centers;
+    if (!(scale > 0.0f)) return centers;
+    const int count = std::max(geometry.tile_count, 0);
+    centers.reserve(static_cast<std::size_t>(count));
+    const float origin_dip = (geometry.window_width_dip - geometry.content_width_dip) * 0.5f;
+    const float pitch_px =
+        static_cast<float>(geometry.params.icon_size + geometry.params.gap);
+    const float half_px = static_cast<float>(geometry.params.icon_size) * 0.5f;
+    for (int i = 0; i < count; ++i) {
+        centers.push_back(origin_dip + (i * pitch_px + half_px) / scale);
+    }
+    return centers;
+}
+
 bool AdvanceHover(DockHover& hover, double delta_ms) {
     if (!(delta_ms > 0.0)) return false;
     const float target = hover.active ? 1.0f : 0.0f;
@@ -189,17 +204,7 @@ std::vector<float> DockPainter::IdleCentersDip(float scale) const {
     // Analytic, not a layout run: at rest every icon has scale 1 and zero shift, so the
     // centres are just a fixed pitch. Computing them from geometry_ rather than from
     // scratch_ is the whole point - scratch_ holds the magnified row.
-    std::vector<float> centers;
-    if (!(scale > 0.0f)) return centers;
-    const int count = static_cast<int>(scratch_.size());
-    centers.reserve(static_cast<std::size_t>(count));
-    const float pitch_px =
-        static_cast<float>(geometry_.params.icon_size + geometry_.params.gap);
-    const float half_px = static_cast<float>(geometry_.params.icon_size) * 0.5f;
-    for (int i = 0; i < count; ++i) {
-        centers.push_back(row_origin_dip_ + (i * pitch_px + half_px) / scale);
-    }
-    return centers;
+    return dockforge::dock::IdleCentersDip(geometry_, scale);
 }
 
 bool DockPainter::Paint(ID2D1DeviceContext& dc, render::IRenderBackend& backend,
@@ -315,6 +320,41 @@ bool DockPainter::Paint(ID2D1DeviceContext& dc, render::IRenderBackend& backend,
             backend.FillRoundedRect(mark, dot_w * 0.5f,
                                     render::ColorF{0.92f, 0.94f, 0.98f, alpha});
         }
+    }
+
+    // External drag (T-014): a caret at the slot the payload would land in.
+    //
+    // Drawn for both the accepting and the rejecting case, in different colours. The
+    // cursor already carries the source application's "no drop" badge, but that badge
+    // is drawn by a process the dock does not control and disappears the moment the
+    // pointer is over a window that reports DROPEFFECT_NONE - which reads as "the dock
+    // is fine with this" right up until the release does nothing.
+    if (input.drop != nullptr && input.drop->active) {
+        const float icon_dip = static_cast<float>(std::max(config.dock.icon_size, 1));
+        // The caret sits on the REST grid, not the magnified one, because that is the
+        // grid the drop target resolves the slot against (C-16d: the row settles while
+        // an external drag is over the dock). Deriving it analytically also keeps this
+        // off the allocation path: a DragOver fires dozens of times per second and
+        // building a centre vector here would allocate on every one.
+        const int slot = std::clamp(input.drop->insert_index, 0, count);
+        const float pitch_dip =
+            static_cast<float>(geometry.params.icon_size + geometry.params.gap) / scale;
+        const float caret_x_dip = row_origin_dip + static_cast<float>(slot) * pitch_dip;
+        const float half = icon_dip * kDropLineHeightFactor * 0.5f;
+        const float mid = baseline_dip - icon_dip * 0.5f;
+        const render::RectF caret{caret_x_dip - kDropCaretWidthDip * 0.5f, mid - half,
+                                  caret_x_dip + kDropCaretWidthDip * 0.5f, mid + half};
+        // Where the caret actually lands, in DIP and in device pixels. The image
+        // measurement and this line have to agree; when they did not, the caret was
+        // being read off the wrong column and the slot was blamed instead.
+        DF_TRACE("dock", "drop caret slot=%d origin=%.2fdip pitch=%.2fdip x=%.2fdip px=%.1f "
+                         "band=%.2f..%.2f dip",
+                 slot, static_cast<double>(row_origin_dip), static_cast<double>(pitch_dip),
+                 static_cast<double>(caret_x_dip), static_cast<double>(caret_x_dip * scale),
+                 static_cast<double>(mid - half), static_cast<double>(mid + half));
+        backend.FillRoundedRect(caret, kDropCaretWidthDip * 0.5f,
+                                input.drop->acceptable ? kDropLineAcceptColor
+                                                       : kDropLineRejectColor);
     }
 
     if (!dragging) return true;

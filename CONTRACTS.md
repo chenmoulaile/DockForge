@@ -615,3 +615,111 @@ Dock 的点击语义是「一个槽位三种结局」，判据必须来自实时
 2. **拖拽视觉验证需要控制帧**，且控制帧必须停在**按下点**而不是释放点。拖拽期间行放大围绕按下点保持（C-15f），停在释放点的控制帧会放大另一个图标，差分结果全是图标横移，证明不了 ghost。
 3. **单显示器主机无法验证跨屏拖拽**。拖到副屏需要两个物理屏；本机只有一块 2880x1920，跨屏行为未测。
 4. **`drag_bench.ps1` 必须先等 `frames=1000`**。`FrameClock` 是 1000 样本滚动窗，启动期的大样本（首帧 309ms）要在 1000 个新样本后才滚出；不等就测，会把启动成本算成拖拽成本（实测报 p99=91.36ms / OVER_BUDGET，而稳态每窗 16.56–16.66ms）。
+
+## C-16 外部拖入（OLE drop，T-014 冻结）
+
+Dock 接受从资源管理器、开始菜单、桌面拖来的对象。这一节冻结"什么算可拖入"、"落点怎么算"、"OLE 有哪些硬约束"，以及用什么证据判定它真的工作。
+
+### C-16a 五类载荷
+
+`shell::DropKind` 由路径 + 文件属性决定，**不看能否取到图标**：`IShellItemImageFactory` 对 `.txt`、目录、任何路径都返回 `S_OK` 和一张图（实测 `.txt` 冷 92.17ms / 热 0.31ms，目录冷 56.85ms / 热 0.31ms），所以"能取到图标"不能作为可接受性判据。
+
+| DropKind | 判据 | 是否可拖入 |
+|---|---|---|
+| `Shortcut` | 属性非目录且扩展名 `.lnk` | 是 |
+| `Executable` | 属性非目录且扩展名 `.exe`/`.cmd`/`.bat`/`.com` | 是 |
+| `Folder` | 属性含 `FILE_ATTRIBUTE_DIRECTORY` | 是 |
+| `Unsupported` | 其余已存在的文件（文档、图片、压缩包……） | 否 |
+| `None` | 空路径，或 `GetFileAttributesW` 返回 `INVALID_FILE_ATTRIBUTES` | 否 |
+
+扩展名比较大小写不敏感。**文档类不接受**：pin 一个 `.txt` 得到的 tile 点下去只会启动编辑器，dock 会显得在随机开程序。
+
+`IsDockable(DropKind)` 是唯一判据，`DropKind::None` 与 `Unsupported` 为假。
+
+### C-16b 混合载荷整体拒绝
+
+`ClassifyDroppedPaths` 对多文件载荷**全部可接受才返回可接受**，否则整体 `Unsupported`。静默接受一半会让用户无法知道哪部分生效，而 dock 的 tile 顺序是用户唯一能核对的凭据。
+
+### C-16c `OleInitialize` 是硬前置
+
+`RegisterDragDrop` 在 `CoInitializeEx(COINIT_APARTMENTTHREADED)` 之后返回 **`0x8007000E E_OUTOFMEMORY`**（加不加 `COINIT_DISABLE_OLE1DDE` 都一样），在 `OleInitialize(nullptr)` 之后返回 `S_OK`。同一进程、同一窗口、只换初始化方式，实测三组（`evidence/T-014/run_reg_oleinit.txt`、`run_reg_coinitapt.txt`、`run_coinit_target.txt`）。
+
+因此 `main.cpp` **不得调用 `CoInitializeEx`**，OLE 生命周期由 `dock::OleSession` 独占：引用计数 RAII，首次构造 `OleInitialize`，末次析构 `OleUninitialize`。`E_OUTOFMEMORY` 是误导性错误码，日志里必须原样记录 HRESULT，否则现场只会看到"拖不进去"。
+
+### C-16d 拖入时行回落 + 静止栅格
+
+外部拖入期间：
+
+- `dock_hover.active` 强制为 `false`，行通过正常 ramp 回落。原因：放大后的行会把图标移到指针旁边，而落点槽位是按静止栅格算的，两者不一致时 caret 指的图标不是松手后真的落进去的位置。
+- 落点槽位与 caret 都用 **`IdleCentersDip(geometry, scale)`**：静止栅格是解析式（`origin + (i*pitch + half)/scale`），不是放大布局的输出。用放大布局的 `IconCentersDip` 会产生反馈环——指针右移放大右侧图标，中心更右，反过来改变"已越过哪个槽"（T-013 实测错位 1 槽）。
+- `InsertIndexFor` 用 `x_dip >= centre` 计数，`clamp(passed, 0, size)`，`size` 表示追加到末尾。`>=` 而不是 `>`：指针正好压在图标中心时算压在那个图标上。
+
+**scale 必须与几何同源**。`DockDropTarget::SetScale(window.Scale())`，禁止在 `UpdatePointer` 里读 `GetDpiForWindow`：`DOCKFORGE_DPI_OVERRIDE` 下窗口保持真实 DPI 而行按 override 排布，两者比值为 2 时每个 x 都被减半（实测 96 DPI override 报 `scale=2.000 x=188.5dip`，实际行原点 69.4 DIP、槽距 56 DIP，落点算成 tile[3] 而真实是 tile[6]）。这条与 C-10「几何与内容读同一 DPI」是同一条规则的第二次发作。
+
+### C-16e caret：位置、颜色、形状
+
+落点提示是**一条竖线**，画在静止栅格的目标槽位上：
+
+| 属性 | 值 |
+|---|---|
+| 宽度 | `kDropCaretWidthDip = 4.0f` DIP（圆角矩形，圆角 = 半宽） |
+| 高度 | `icon_size * kDropLineHeightFactor`（0.62），与内部重排的插入线同高 |
+| 垂直位置 | 居中于图标行（`baseline_dip - icon_size * 0.5f`） |
+| 可接受色 | `kDropLineAcceptColor{0.92f, 0.94f, 0.98f, 0.90f}`（近白） |
+| 不可接受色 | `kDropLineRejectColor{0.95f, 0.42f, 0.38f, 0.90f}`（暖红） |
+| 绘制时机 | `input.drop->active` 为真时，**在 `if (!dragging) return true;` 之前**（外部拖入与内部重排互斥，但不能因为内部重排分支提前返回就不画） |
+
+**不可接受时也要画**。系统光标上的"禁止"徽标由源进程绘制，一旦指针进入一个报 `DROPEFFECT_NONE` 的窗口就消失——那会让 dock 在松手前一刻看起来是接受的。红色 caret 是 dock 自己能保证的反馈。
+
+caret 位置解析式计算（`row_origin_dip + slot * pitch_dip`），**不建 centre vector**：`DragOver` 每秒几十次，每次分配会进热路径。
+
+### C-16f region 只在两态翻转时更新
+
+`DragEnter` 时把 region 扩到整窗（`drag.Active() || drop_pointer.active || full_region_probe` → `row = {0,0,plate.right,plate.bottom}`），`DragLeave` / `Drop` 时恢复。理由：
+
+- region 外的 `DragEnter`/`Drop` **完全不投递**。实测边界严格等于 region 顶边：窗口 800x200、region 从 client y=80 起，drop_y=39% 收不到、40% 收到（`evidence/T-014/run_edge_39.txt` / `run_edge_40.txt`）。
+- 进入后不扩 region，指针上移到板上方会收到 `DragLeave` 且 `Drop` 永不触发；源进程的 `DoDragDrop` 卡在 `QueryContinueDrag -> DROP` 之后不返回（`run_shrink_noexpand.txt`，进程须强杀）。
+- **不能每次 `DragOver` 都 `SetWindowRgn`**：那是 T-010 测过的每帧 region 反模式（p99 17.3ms）。只在 `region_drop` 由 false 变 true、由 true 变 false 时调用。
+
+### C-16g 回调只记录状态，重绘由 tick 合并
+
+OLE 回调运行在源进程的模态拖拽循环里，是**对我们消息循环的同步打断**。回调里：
+
+- 允许：写 `drop_pointer`、翻转 `region_drop`、调 `apply_region()`（仅翻转时）、置 `drop_moved = true`。
+- 禁止：`InvalidateRect`、枚举窗口、读配置、任何可能阻塞的调用。
+
+`drop_moved` 由 tick 消费，每帧最多一次重绘。实测：每个 `DragOver` 都 `InvalidateRect` 时 `p99_mean=17.284ms / p99_max=18.490ms / 19-20 窗超预算`；改成 tick 合并后 `p99_mean=16.512ms / p99_max=16.540ms / 0 窗超`（`evidence/T-014/drop_bench.txt`）。与 T-010 的 `hover_moved`、T-013 的 `drag_moved` 是同一条规则的第三次应用。
+
+### C-16h 落盘：查重、逆序、立即持久化
+
+- **查重按身份字符串**（`dock::IdentityOf`，与 C-15a 同一个函数）。已存在时只把 tile 移到目标槽位，不新增。
+- **逆序插入**（`paths.rbegin()..rend()`）：每次 insert 会把后面的右移，正序插入会让第一个路径落到最后一个位置。
+- **立即 `CommitOrder`**，不等到退出：drop 是用户可见的一次性动作，崩溃丢排列比多一次磁盘写更糟。
+- 新增 tile 后必须 `apply_placement()`：窗口宽度依赖 tile 数（12 tile 1510px、13 tile 1622px、14 tile 1733px @ 192 DPI），不重新放置会裁掉新图标。
+
+### C-16i 验证手段
+
+| 断言 | 手段 | 判据 |
+|---|---|---|
+| 可接受性分类 | 单元测试 `tests/dock_drop_test.cpp` | 五类 kind + 混合载荷 + 属性优先（叫 `notes.txt` 的目录算 Folder） |
+| OLE 初始化 | spike 三组对照 | `OleInitialize` → `S_OK`；`CoInitializeEx` → `0x8007000E` |
+| region 边界 | spike 逐百分比 drop | 39% 无 `DragEnter`，40% 有 |
+| region 扩张必要性 | spike 两段路径 | 扩张：`Drop` 到达；不扩张：`DragLeave` 且源进程挂住 |
+| 端到端四类载荷 | `tools/t014_evidence.ps1` | shortcut 新增、shortcut_again 不重复、document 拒绝、folder 新增 |
+| caret 存在与槽位 | `tools/drop_caret.ps1` | 带内变化覆盖率 ≥60% 的**单一 ≤12px 宽 run**，中心与 `ExpectedX` 差 ≤14px |
+| caret 颜色 | 同上 `-ExpectedTint` | 峰值像素 R 比 B 高 40 以上判 reject，否则 accept |
+| 拖入帧预算 | 日志 `frames=` 行 | p99 超预算窗口数 = 0，`fps_min ≥ 55` |
+| 空闲成本 | `tools/idle_stats.ps1` | CPU <0.5%、RSS <120MB、句柄无增长 |
+
+`tools/drop_caret.ps1` 的三条实现约束，都是踩过才写下来的：
+
+1. **按列统计而不是整帧 bbox**。caret 4 DIP 宽、约 30 DIP 高，整帧差分里只占 0.16%，bbox 被行回落或图标高亮主导（96 DPI 实测 bbox `0,57..754,105` 跨整行）。
+2. **宽度是唯一区分器**。图标边缘 48 DIP、行回落数百像素，只有 caret 是几像素宽。
+3. **颜色取 run 内变化最强的像素，不取首个合格列**。caret 抗锯齿，边缘列会向板色混合：192 DPI 下首个合格列读成 `(46,28,29)`（近黑），峰值是 `(219,98,89)`。用边缘列会把 reject 判成 accept——正是这个检查要防的错误。
+
+### C-16j 诚实边界
+
+1. **截图快门必须由 app 日志驱动**。固定 `Start-Sleep` 实测在拖入前 ~200ms 开快门，得到 `changed_pixels=0 IDENTICAL`，会被读成"caret 没画"。`tools/drop_visual.ps1` 轮询日志出现 `drop enter` 后再等 `DwellMs/2`。
+2. **blur 档无法截图**。该档 `WDA_EXCLUDEFROMCAPTURE` 让 `CopyFromScreen` 返回桌面背后内容，dock 区域是黑的。视觉证据一律 `DOCKFORGE_FORCE_MATERIAL=solid`；这是快门的限制，不是 caret 的限制。
+3. **多文件拖入未做视觉证据**。`ClassifyDroppedPaths` 的整体拒绝逻辑有单元测试，但没有真实多选拖拽的端到端截图。
+4. **单显示器主机**。跨屏拖入未测。

@@ -9,6 +9,7 @@
 
 #include "core/config.h"
 #include "dock/drag_controller.h"
+#include "dock/drop_target.h"
 #include "dock/layout.h"
 #include "platform/win_common.h"
 #include "render/backend.h"
@@ -110,6 +111,13 @@ struct DockGeometry {
 // never inside the paint path (C-05a rule 3).
 DockGeometry ComputeGeometry(const core::Config& config, int tile_count, float scale);
 
+// Slot centres of the UNMAGNIFIED row for a geometry, in window DIP.
+//
+// Free function rather than a DockPainter method because the OLE drop target needs the
+// rest grid before the first paint has happened: the painter caches the geometry it
+// last laid out, and reading that cache before any layout would answer with zeros.
+std::vector<float> IdleCentersDip(const DockGeometry& geometry, float scale);
+
 // Pointer state in dock-local DIPs.
 //
 // `intensity` ramps 0..1 on enter and back on leave rather than snapping: the peak
@@ -147,6 +155,9 @@ struct DockPaintInput {
     // controller owns the gesture, and two owners would let the ghost and the
     // insertion slot disagree.
     const DragState* drag = nullptr;
+    // In-flight OLE drag from another application, or nullptr. Same rule as `drag`:
+    // the drop target owns it, the painter only reads.
+    const DropPointer* drop = nullptr;
 };
 
 // Opacity of the lifted tile's ghost while dragging.
@@ -161,6 +172,18 @@ inline constexpr float kDropLineWidthDip = 3.0f;
 // Height of the insertion line as a fraction of the icon size. A full-height line
 // competes with the icons; a short one reads as a caret marking a text position.
 inline constexpr float kDropLineHeightFactor = 0.62f;
+
+// Colour of the insertion caret while an external drag is over the dock. White when
+// the payload would be accepted, warm red when it would not: the cursor already shows
+// a "no drop" badge, but that badge belongs to the source application, and a dock that
+// only relied on it would look willing right up until the release did nothing.
+inline constexpr render::ColorF kDropLineAcceptColor{0.92f, 0.94f, 0.98f, 0.90f};
+inline constexpr render::ColorF kDropLineRejectColor{0.95f, 0.42f, 0.38f, 0.90f};
+
+// Width of the caret shown for an external drag, in DIP. Wider than the internal
+// reorder caret because it also has to be visible against a backdrop the dock does not
+// control.
+inline constexpr float kDropCaretWidthDip = 4.0f;
 
 // Owns the per-frame scratch layout so painting does not allocate. A Dock is
 // repainted on every hover frame, and C-05a rule 3 forbids heap traffic there.

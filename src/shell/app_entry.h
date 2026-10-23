@@ -12,6 +12,7 @@ enum class AppKind {
     Uwp,            // packaged app, launched by AppUserModelID
     ShellItem,      // registered Win32 app with an AUMID but no path
     NamespaceItem,  // shell-namespace child, identity is "{GUID}\name" (see below)
+    Folder,         // a directory pinned by an OLE drop (T-014)
     Unknown,
 };
 
@@ -68,6 +69,9 @@ struct AppEntry {
             case AppKind::NamespaceItem:
                 return !namespace_parsing.empty();
             default:
+                // Folder is included: it has a target_path and is started through
+                // ShellExecuteEx rather than CreateProcess (a folder is not an
+                // executable, and CreateProcess on one fails with ACCESS_DENIED).
                 return !target_path.empty();
         }
     }

@@ -1,0 +1,7 @@
+CoInitializeEx(APT) -> hr=0x00000000
+mode=target payload_count=0 region=1 drop_y=80%
+expand_on_enter=0
+target: hwnd=0000000000170694 rect=600,1500 800x200
+target: SetWindowRgn(bottom 3/5) -> 1
+target: RegisterDragDrop -> hr=0x8007000E
+exit code=13

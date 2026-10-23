@@ -11,6 +11,7 @@
 #include "core/log.h"
 #include "core/paths.h"
 #include "dock/dock_view.h"
+#include "dock/drop_target.h"
 #include "dock/drag_controller.h"
 #include "dock/running_tracker.h"
 #include "dock/tile_order.h"
@@ -22,6 +23,7 @@
 #include "render/backdrop_capture.h"
 #include "render/material.h"
 #include "shell/app_resolver.h"
+#include "shell/drop_resolver.h"
 #include "shell/icon_cache.h"
 #include "shell/start_menu.h"
 #include "shell/window_actions.h"
@@ -32,6 +34,7 @@
 #include <windowsx.h>
 
 #include <cmath>
+#include <functional>
 #include <optional>
 #include <vector>
 
@@ -286,11 +289,16 @@ bool MatchesAnyPin(const shell::AppEntry& app, const std::vector<std::wstring>& 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     EnablePerMonitorDpi();
 
-    // COM is required by every shell/DirectX surface DockForge touches.
-    if (FAILED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE))) {
+    // OLE, not a bare CoInitializeEx. RegisterDragDrop refuses to register on an
+    // apartment initialised with CoInitializeEx and reports E_OUTOFMEMORY, which reads
+    // like a memory failure and is actually "OLE was not initialised" (measured, see
+    // evidence/T-014/run_coinit_target.txt vs run_oleinit_target.txt). OleSession is
+    // reference counted and owns the matching OleUninitialize, so the ordering against
+    // the drop target's lifetime is handled by scope rather than by remembering.
+    dock::OleSession ole;
+    if (!ole.ok()) {
         return 1;
     }
-    auto com_guard = MakeGuard([] { CoUninitialize(); });
 
     core::Logger::Instance().Init(L"app");
     DF_INFO("app", "DockForge %s starting", "0.1.0");
@@ -530,6 +538,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     apply_dpi_override(target_display);
 
     const platform::DockEdge edge = ToDockEdge(config.dock.position);
+    // Set once the drop target exists. Placement is where the geometry is recomputed,
+    // and the drop target resolves insertion slots against that geometry, so the two
+    // have to be updated together - but the target is created after this lambda
+    // because it needs the HWND. A null check here is cheaper than reordering the
+    // whole startup so that one consumer comes first.
+    std::function<void()> geometry_changed;
     auto apply_placement = [&]() {
         if (!have_target) return;
         // Recompute geometry here, not once at startup: the window DPI is only
@@ -561,6 +575,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                 target_display.work.right, target_display.work.bottom, placement.rect.left,
                 placement.rect.top, placement.width_px, placement.height_px, actual.left,
                 actual.top, actual.right, actual.bottom, window.Dpi());
+        if (geometry_changed) geometry_changed();
     };
     apply_placement();
 
@@ -607,6 +622,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     dock::DragController drag;
     bool drag_moved = false;  // set by WM_MOUSEMOVE, consumed by the tick
 
+    // In-flight OLE drag from another application (T-014). Written by the drop target
+    // and read by the painter and the region, never the other way round: OLE runs the
+    // drag loop inside the source process, so every callback here is a synchronous
+    // interruption of our own message loop and must not call back into it.
+    dock::DropPointer drop_pointer;
+    bool drop_moved = false;  // set by the OLE callbacks, consumed by the tick
+
     // Paint cost, measured separately from the frame interval: the frame clock only
     // says a deadline was missed, this says whether the miss was drawing or present.
     core::FrameClock paint_clock;
@@ -632,6 +654,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                 // the controller's own state (not a copy) keeps the ghost and the
                 // insertion slot from disagreeing mid-gesture.
                 input.drag = drag.Active() ? &drag.State() : nullptr;
+                input.drop = drop_pointer.active ? &drop_pointer : nullptr;
                 if (!dock_painter.Paint(dc, *render_backend, plate, input)) {
                     DF_WARN("dock", "dock paint failed at %.0f dpi", dpi);
                 }
@@ -671,6 +694,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     // over the whole ramp is a single rectangle, so computing it at full
     // magnification covers every intermediate frame without changing per frame.
     bool region_hovered = false;
+    // Diagnostic: force the region to the whole window so the reserved band above the
+    // plate gets composited. Nothing in normal operation does this while idle, which is
+    // why the band's appearance had never been looked at before the drop target started
+    // widening the region (T-014).
+    const bool full_region_probe = ReadEnvFlag(L"DOCKFORGE_FULL_REGION_PROBE");
     auto apply_region = [&]() {
         const float scale = window.Scale();
         const float width_dip = geometry.window_width_dip;
@@ -695,7 +723,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         // clipping composition content is exactly what SetWindowRgn does (T-010
         // spike conclusion 3). A drag is a transient state, so paying for a full
         // window region here does not affect the idle path.
-        if (drag.Active()) {
+        if (drag.Active() || drop_pointer.active || full_region_probe) {
             row.left = 0;
             row.top = 0;
             row.right = plate.right;
@@ -740,6 +768,142 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
             platform::CreateDockRegion(plate, radius_px, row, include_row));
     };
     apply_region();
+
+    // ---- OLE drop target (T-014) ----------------------------------------
+    // The sink is a set of std::functions rather than a subclass because every piece
+    // of state it needs is a local in this function, and threading a subclass through
+    // them would mean either moving the dock's state into a class or handing the class
+    // pointers to it. Both are larger changes than the feature.
+    dock::DropSink drop_sink;
+
+    // Adds one resolved path as a tile at `insert_index`.
+    //
+    // Returns false when the path is already on the dock: dropping a shortcut that is
+    // already pinned should move it, not duplicate it. Duplicates would also break the
+    // identity contract (C-15a) - two tiles with the same key, and a config list that
+    // cannot say which one was removed.
+    auto InsertDroppedPath = [&](const std::wstring& path, int insert_index) -> bool {
+        shell::AppEntry entry;
+        const shell::ResolveError error = shell::ResolveDroppedPath(path, entry);
+        if (error != shell::ResolveError::None) {
+            DF_WARN("dock", "drop rejected %s: %s", core::WideToUtf8(path).c_str(),
+                    shell::ToString(error));
+            return false;
+        }
+        const std::string identity = dock::IdentityOf(entry);
+        for (std::size_t i = 0; i < tiles.size(); ++i) {
+            if (dock::IdentityOf(tiles[i].app) != identity) continue;
+            DF_INFO("dock", "drop: %s is already on the dock at tile[%zu]", identity.c_str(), i);
+            const int from = static_cast<int>(i);
+            const int to = std::clamp(insert_index, 0, static_cast<int>(tiles.size()) - 1);
+            if (from != to) {
+                dock::MoveTile(tiles, from, to);
+                dock::CommitOrder(config, tiles, std::string());
+            }
+            return true;
+        }
+
+        // Icon extraction is a shell round trip (60-190ms cold, evidence/T-006). It
+        // runs here, on the drop, because the alternative is a tile that paints a
+        // placeholder ring for a frame and then pops an icon in - and because a drop is
+        // already a user-visible pause.
+        dock::DockTile tile;
+        tile.app = std::move(entry);
+        const std::wstring source = shell::IconSourceFor(tile.app);
+        if (!icons.Get(source, kDockIconPx, tile.icon)) {
+            DF_WARN("dock", "drop: no icon for %s", core::WideToUtf8(source).c_str());
+        }
+        tile.icon_key = dock::IconKeyFor(source);
+
+        const int at = std::clamp(insert_index, 0, static_cast<int>(tiles.size()));
+        tiles.insert(tiles.begin() + at, std::move(tile));
+        // Dropping onto a dock that was auto-populated is the moment it becomes
+        // curated: CommitOrder writes the whole visible order, so the arrangement the
+        // user is looking at is the one that survives the restart.
+        dock::CommitOrder(config, tiles, std::string());
+        DF_INFO("dock", "drop: added %s at tile[%d] (%zu tiles)", identity.c_str(), at,
+                tiles.size());
+        return true;
+    };
+
+    dock::DockDropTarget drop_target(window.Handle(), &drop_sink);
+
+    // Whether the window region currently covers the whole window because of a drop.
+    // Tracked separately from drop_pointer because DragOver fires dozens of times a
+    // second and rebuilding the region on each one is the "SetWindowRgn every frame"
+    // antipattern that cost 0.6ms of p99 in T-010. The region only has to change on the
+    // two transitions.
+    bool region_drop = false;
+
+    drop_sink.hover = [&](const dock::DropPointer& pointer) {
+        // DragOver fires dozens of times a second - far faster than the dock can paint.
+        // Repainting per callback is the same antipattern that cost 18.2ms of p99 in
+        // T-010 (one WM_MOUSEMOVE, one InvalidateRect); the callback only records the
+        // new pointer and the tick turns it into at most one repaint per frame.
+        drop_pointer = pointer;
+        drop_moved = true;
+        // The row settles while an external drag is over the dock. Two reasons: the
+        // magnified row moves icons under the pointer, and the insertion slot is
+        // resolved against the rest grid, so a magnified row would put the caret
+        // between icons that are not where the caret says they are. Hover intensity
+        // decays through the normal ramp, so this reads as the dock relaxing, not as a
+        // snap.
+        dock_hover.active = false;
+        // The region widens on entry: a drag that entered over the plate would
+        // otherwise lose the pointer the moment it rose into the reserved band, and
+        // OLE reports that as DragLeave (measured, evidence/T-014/run_shrink_noexpand).
+        if (!region_drop) {
+            region_drop = true;
+            apply_region();
+        }
+    };
+    drop_sink.leave = [&]() {
+        drop_pointer = dock::DropPointer{};
+        region_drop = false;
+        apply_region();
+        drop_moved = true;
+    };
+    drop_sink.commit = [&](const std::vector<std::wstring>& paths, int insert_index) {
+        int added = 0;
+        // Inserted in reverse so the first path ends up first in the row: each insert
+        // shifts the ones after it right.
+        for (auto it = paths.rbegin(); it != paths.rend(); ++it) {
+            if (InsertDroppedPath(*it, insert_index)) ++added;
+        }
+        drop_pointer = dock::DropPointer{};
+        region_drop = false;
+        DF_INFO("dock", "drop: %d of %zu paths accepted", added, paths.size());
+        // The window width depends on the tile count, so adding a tile is a re-place,
+        // not just a repaint. Same reason as removal (T-013).
+        apply_placement();
+        apply_region();
+        InvalidateRect(window.Handle(), nullptr, FALSE);
+    };
+
+    if (const HRESULT hr = drop_target.Register(); SUCCEEDED(hr)) {
+        // The rest grid, not the magnified one: an external drag settles the row (see
+        // the hover suppression in WM_MOUSEMOVE), and the caret must agree with where
+        // the icons actually are.
+        auto refresh_drop_grid = [&] {
+            const float row_scale = window.Scale() > 0.0f ? window.Scale() : 1.0f;
+            const auto centres = dock::IdleCentersDip(geometry, row_scale);
+            drop_target.SetScale(row_scale);
+            drop_target.SetCentres(centres);
+            // The first and last centre pin down the grid the drop slot is resolved
+            // against. Without them a slot that is off by a fixed pitch is
+            // indistinguishable from a pointer that arrived in the wrong place.
+            DF_DEBUG("dock", "drop grid scale=%.3f slots=%zu first=%.1f last=%.1f dip",
+                     static_cast<double>(row_scale), centres.size(),
+                     centres.empty() ? 0.0 : static_cast<double>(centres.front()),
+                     centres.empty() ? 0.0 : static_cast<double>(centres.back()));
+        };
+        refresh_drop_grid();
+        geometry_changed = refresh_drop_grid;
+        DF_INFO("dock", "drop target registered (%zu slots, scale=%.3f)", tiles.size(),
+                static_cast<double>(window.Scale()));
+    } else {
+        DF_ERROR("dock", "RegisterDragDrop failed: 0x%08lX", static_cast<unsigned long>(hr));
+    }
 
     // One tile's click action, factored out because it now runs on button release
     // rather than on press: the press may become a drag, and only the release knows
@@ -804,6 +968,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         // intermediate paints loses nothing.
         if (drag_moved) {
             drag_moved = false;
+            dirty = true;
+        }
+        // Same coalescing again for the external drag: OLE's DragOver runs inside the
+        // source process's modal loop and arrives at whatever rate the mouse reports.
+        // Invalidating per callback measured p99 17.28ms against the 16.7ms budget.
+        if (drop_moved) {
+            drop_moved = false;
             dirty = true;
         }
         // The eject confirmation is time-based, so it has to advance on the tick: the
@@ -1122,6 +1293,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
 
     const int code = loop.Run();
     DF_INFO("app", "app loop exited with code %d", code);
+    // Revoked before the window is destroyed: OLE keeps a reference to the HWND, and a
+    // destroyed window still registered is the classic shutdown hang.
+    drop_target.Revoke();
     capture.Stop();
     plate.Reset();
     render_backend->Shutdown();
