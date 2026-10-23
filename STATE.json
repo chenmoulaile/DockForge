@@ -1,0 +1,35 @@
+{
+  "project": "DockForge",
+  "schema": 1,
+  "milestone": "M0",
+  "last_task": null,
+  "last_commit": null,
+  "current_module": "platform",
+  "current_task": null,
+  "counters": {
+    "total": 0,
+    "done": 0,
+    "partial": 0,
+    "blocked": 0
+  },
+  "remote": {
+    "name": "origin",
+    "url": null,
+    "status": "unconfigured",
+    "reason": "gh CLI 未登录，无 remote URL；本地 commit 正常进行，push 标记 SKIPPED"
+  },
+  "toolchain": {
+    "compiler": "g++ (MSYS2 mingw-w64) 15.2.0",
+    "cmake": "4.4.2",
+    "generator": "MinGW Makefiles (mingw32-make)",
+    "sdk_headers": "mingw-w64 自带 Windows 头 (dcomp.h / dwmapi.h / d2d1_3.h 均存在)",
+    "msvc": "absent",
+    "windows_app_sdk": "absent",
+    "decision": "ADR-0002：改用纯 Win32 + DirectComposition + Direct2D"
+  },
+  "targets": {
+    "os": ["Windows 10 21H2+", "Windows 11 22H2+"],
+    "arch": ["x64"]
+  },
+  "updated_at": null
+}

@@ -1,0 +1,27 @@
+# .gitignore
+build/
+out/
+.vs/
+.vscode/
+*.user
+*.suo
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.o
+*.obj
+*.exe
+*.dll
+*.pdb
+*.ilk
+vcpkg_installed/
+*.dmp
+evidence/**/*.mp4
+evidence/**/*.mkv
+*.log
+!evidence/**/build.log
+!evidence/**/*.txt
+thumbs.db
+desktop.ini
+.DS_Store

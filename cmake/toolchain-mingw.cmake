@@ -1,0 +1,19 @@
+# MinGW-w64 toolchain file for DockForge.
+# Usage:
+#   cmake -S . -B build -G "MinGW Makefiles" \
+#         -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-mingw.cmake
+
+set(CMAKE_SYSTEM_NAME Windows)
+set(CMAKE_SYSTEM_PROCESSOR x86_64)
+
+set(DOCKFORGE_MINGW_ROOT "D:/MSYS2/mingw64" CACHE PATH "MinGW-w64 root")
+
+set(CMAKE_C_COMPILER   "${DOCKFORGE_MINGW_ROOT}/bin/gcc.exe")
+set(CMAKE_CXX_COMPILER "${DOCKFORGE_MINGW_ROOT}/bin/g++.exe")
+set(CMAKE_RC_COMPILER  "${DOCKFORGE_MINGW_ROOT}/bin/windres.exe")
+set(CMAKE_MAKE_PROGRAM "${DOCKFORGE_MINGW_ROOT}/bin/mingw32-make.exe")
+
+set(CMAKE_FIND_ROOT_PATH "${DOCKFORGE_MINGW_ROOT}")
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
