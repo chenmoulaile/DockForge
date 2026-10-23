@@ -242,3 +242,4 @@ GBK 字节、头部仍是 UTF-8，任何严格 UTF-8 读取器都会在中间报
 - 三个文件已修复（`DECISIONS.md` 11751→12581B、`PERFORMANCE.md` 2500→2679B、
   `PROGRESS.md` 5383→5553B），内容人工核对无乱码。
 - 此规则写进 `CONTRACTS.md` C-09，后续所有状态文件写入都受约束。
+- `STATE.json` 例外保留 BOM：PowerShell 5.1 的 `Get-Content` 无 BOM 时按 ANSI 解码，GBK 尾字节 `0x5C` 会静默破坏 JSON 转义。

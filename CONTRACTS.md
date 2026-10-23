@@ -171,3 +171,7 @@ LEVEL ∈ TRACE/DEBUG/INFO/WARN/ERROR/FATAL。文件按天切分，保留 7 天�
 修复：`tools/fix_encoding.ps1 -Repair`（按首个非法字节的行边界切分，前半 UTF-8、后半 ANSI 解码后拼接）。
 
 理由见 ADR-0011：混合编码的状态文件会让冷启动协议在第一步就失败，而失败是静默的。
+
+**例外**：`STATE.json` 保留 UTF-8 BOM。PowerShell 5.1 的 `Get-Content` 在无 BOM 时按 ANSI
+解码，而 GBK 尾字节可能是 `0x5C`（反斜杠），会静默破坏 JSON 字符串转义。加 BOM 让
+PowerShell 5.1 / .NET / Python 三方对同一文件达成一致。Markdown 文件仍无 BOM。
