@@ -1,0 +1,30 @@
+sweeps=11 seconds=20 sweep_ms=12
+log=C:\Users\chenk\AppData\Local\DockForge\logs\dockforge-20261024.log
+--- frame lines since start ---
+2026-10-24T02:31:46.217+08:00 DEBUG [loop] frames=189 avg=16.00ms p50=16.02ms p99=16.40ms fps=62.5 | paint n=27 avg=2.72ms p99=7.46ms | capture=0/0 avg=0.0ms
+2026-10-24T02:31:47.225+08:00 DEBUG [loop] frames=252 avg=16.00ms p50=16.02ms p99=16.40ms fps=62.5 | paint n=40 avg=2.74ms p99=7.46ms | capture=0/0 avg=0.0ms
+2026-10-24T02:31:48.234+08:00 DEBUG [loop] frames=315 avg=16.00ms p50=16.02ms p99=16.40ms fps=62.5 | paint n=53 avg=2.82ms p99=7.46ms | capture=0/0 avg=0.0ms
+2026-10-24T02:31:49.241+08:00 DEBUG [loop] frames=378 avg=16.00ms p50=16.02ms p99=16.43ms fps=62.5 | paint n=66 avg=2.79ms p99=7.46ms | capture=0/0 avg=0.0ms
+2026-10-24T02:31:50.250+08:00 DEBUG [loop] frames=441 avg=16.00ms p50=16.02ms p99=16.49ms fps=62.5 | paint n=79 avg=2.80ms p99=7.46ms | capture=0/0 avg=0.0ms
+2026-10-24T02:31:51.258+08:00 DEBUG [loop] frames=504 avg=16.00ms p50=16.02ms p99=16.49ms fps=62.5 | paint n=92 avg=2.85ms p99=7.46ms | capture=0/0 avg=0.0ms
+2026-10-24T02:31:52.265+08:00 DEBUG [loop] frames=567 avg=16.00ms p50=16.01ms p99=16.49ms fps=62.5 | paint n=105 avg=2.83ms p99=4.34ms | capture=0/0 avg=0.0ms
+2026-10-24T02:31:53.274+08:00 DEBUG [loop] frames=630 avg=16.00ms p50=16.01ms p99=16.49ms fps=62.5 | paint n=118 avg=2.85ms p99=4.34ms | capture=0/0 avg=0.0ms
+2026-10-24T02:31:54.281+08:00 DEBUG [loop] frames=693 avg=16.00ms p50=16.02ms p99=16.49ms fps=62.5 | paint n=130 avg=2.88ms p99=4.54ms | capture=0/0 avg=0.0ms
+2026-10-24T02:31:55.289+08:00 DEBUG [loop] frames=756 avg=16.00ms p50=16.01ms p99=16.49ms fps=62.5 | paint n=143 avg=2.92ms p99=4.54ms | capture=0/0 avg=0.0ms
+2026-10-24T02:31:56.297+08:00 DEBUG [loop] frames=819 avg=16.00ms p50=16.01ms p99=16.51ms fps=62.5 | paint n=156 avg=2.93ms p99=4.54ms | capture=0/0 avg=0.0ms
+2026-10-24T02:31:57.305+08:00 DEBUG [loop] frames=882 avg=16.00ms p50=16.01ms p99=16.51ms fps=62.5 | paint n=169 avg=2.93ms p99=4.54ms | capture=0/0 avg=0.0ms
+2026-10-24T02:31:58.314+08:00 DEBUG [loop] frames=945 avg=16.00ms p50=16.01ms p99=16.51ms fps=62.5 | paint n=182 avg=2.95ms p99=4.89ms | capture=0/0 avg=0.0ms
+2026-10-24T02:31:59.321+08:00 DEBUG [loop] frames=1000 avg=16.00ms p50=16.01ms p99=16.51ms fps=62.5 | paint n=195 avg=2.93ms p99=4.89ms | capture=0/0 avg=0.0ms
+2026-10-24T02:32:00.329+08:00 DEBUG [loop] frames=1000 avg=16.00ms p50=16.01ms p99=16.51ms fps=62.5 | paint n=208 avg=2.94ms p99=4.54ms | capture=0/0 avg=0.0ms
+2026-10-24T02:32:01.337+08:00 DEBUG [loop] frames=1000 avg=16.00ms p50=16.01ms p99=16.51ms fps=62.5 | paint n=221 avg=2.95ms p99=4.54ms | capture=0/0 avg=0.0ms
+2026-10-24T02:32:02.345+08:00 DEBUG [loop] frames=1000 avg=16.00ms p50=16.01ms p99=16.51ms fps=62.5 | paint n=234 avg=2.95ms p99=4.54ms | capture=0/0 avg=0.0ms
+2026-10-24T02:32:03.354+08:00 DEBUG [loop] frames=1000 avg=16.00ms p50=16.01ms p99=16.51ms fps=62.5 | paint n=247 avg=2.94ms p99=4.54ms | capture=0/0 avg=0.0ms
+2026-10-24T02:32:04.361+08:00 DEBUG [loop] frames=1000 avg=16.00ms p50=16.01ms p99=16.53ms fps=62.5 | paint n=260 avg=2.94ms p99=4.54ms | capture=0/0 avg=0.0ms
+2026-10-24T02:32:05.369+08:00 DEBUG [loop] frames=1000 avg=16.00ms p50=16.01ms p99=16.54ms fps=62.5 | paint n=273 avg=2.94ms p99=4.54ms | capture=0/0 avg=0.0ms
+2026-10-24T02:32:06.378+08:00 DEBUG [loop] frames=1000 avg=16.00ms p50=16.01ms p99=16.53ms fps=62.5 | paint n=286 avg=2.96ms p99=4.89ms | capture=0/0 avg=0.0ms
+--- summary over 21 one-second windows ---
+avg_mean=16ms
+p99_mean=16.488ms
+p99_max=16.54ms
+p99_over_budget_windows=0
+verdict=WITHIN_BUDGET

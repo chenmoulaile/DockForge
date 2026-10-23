@@ -1,0 +1,12 @@
+a=evidence\T-010\dpi96.measure.txt.idle.png
+b=evidence\T-010\dpi96.measure.txt.hover.png
+size=755x106
+tolerance=6
+changed_pixels=15747
+total_pixels=80030
+changed_pct=19.676
+bbox=10,11..744,105
+bbox_size=735x95
+rows_with_change=11..105
+cols_with_change=10..744
+verdict=DIFFERENT

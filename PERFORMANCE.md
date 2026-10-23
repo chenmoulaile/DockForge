@@ -78,3 +78,35 @@ corner_radius=22 material=solid，12 个 tile。原始数据 evidence/T-009/idle
 RSS 从 T-007 的 90.09MB 降到 77.83MB 不是优化成果：T-007 测的是 1056x304 调试窗口（icon 96 /
 gap 0 / mag 2.5 / corner 40），T-009 是 1368x136 默认配置。两个数字不可直接比较，只可各自对预算。
 12 张 256px 图标位图约 3MB，D2D 位图缓存未随帧增长（键是内容身份，重复 tile 复用）。
+
+## T-010 实测（2026-10-24）
+
+测量环境：18 核，Windows 10.0.26300，DPI 192 主屏，配置 icon_size=48 gap=8 magnification=1.8
+corner_radius=22 material=solid，12 个 tile。原始数据 evidence/T-010/。
+
+| 指标 | 预算 | 实测 | 结论 |
+|---|---|---|---|
+| 悬停放大帧时间 p99（21 个 1 秒窗） | < 16.7ms | p99_mean 16.488ms / p99_max 16.54ms | PASS |
+| 悬停放大帧时间 p99 超预算窗数 | 0 | 0 / 21 | PASS |
+| 绘制耗时（Paint + Commit） | — | avg 2.85ms / p99 4.49ms | 参考 |
+| 空闲 CPU（60s，光标在 (20,20)） | < 0.5% | 0.0101% | PASS |
+| 空闲 RSS（60s） | < 120MB | 87.30MB，增长 -0.02MB | PASS |
+| 空闲句柄（60s） | 无线性增长 | 378 → 370（回落） | PASS |
+| 线程数 | 稳定 | 6–10（捕获 worker 按需启停） | PASS |
+| 放大倍率（96/144/192 DPI） | = magnification 1.8 | 1.778 / 1.787 / 1.790 | PASS |
+
+### 三个反模式的代价（同一测量方法，同一配置）
+
+| 实现 | p99_mean | p99_max | 超预算窗 |
+|---|---|---|---|
+| 每条 `WM_MOUSEMOVE` 都 `InvalidateRect` | 18.459ms | 19.02ms | 22 / 22 |
+| 改为 tick 合并 + 每帧 `SetWindowRgn` | 17.341ms | 18.42ms | 17 / 21 |
+| tick 合并 + region 只在悬停翻转时更新 | **16.488ms** | **16.54ms** | **0 / 21** |
+
+结论：帧预算超支不是绘制（paint p99 4.49ms），是消息洪流与 `SetWindowRgn` 的 DWM 往返。
+两个都修掉后才达标；只修一个不够。
+
+### 与 T-009 的空闲数字差异
+
+T-010 的 RSS 87.30MB 高于 T-009 的 77.83MB。差异来自 `src/platform/hit_region.*` 与悬停布局的
+一次性分配，以及本轮 `paint_clock` 采样容量。两者都远低于 120MB 预算，未做进一步归因。

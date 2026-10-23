@@ -1,0 +1,7 @@
+dpi=192 scale=2.00
+window=1432x212 plate_height=136
+click inside plate           at (1440,1792) -> dock (dock+1 victim+0)
+click reserved band          at (1440,1686) -> victim (dock+0 victim+1)
+click above window           at (1440,1628) -> victim (dock+0 victim+1)
+total dock_clicks=1 victim_clicks=2
+verdict=PASS_THROUGH_OK

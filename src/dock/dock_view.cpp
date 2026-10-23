@@ -1,4 +1,4 @@
-// DockForge - Dock tile model, geometry and painter (T-009).
+// DockForge - Dock tile model, geometry and painter (T-009, hover T-010).
 #include "dock/dock_view.h"
 
 #include "core/log.h"
@@ -19,6 +19,32 @@ std::uint64_t Fnv1a16(const std::wstring& text) {
         hash *= 1099511628211ull;
     }
     return hash;
+}
+
+// Widest the icon row can get for any pointer position, in DIP.
+//
+// The window is sized once from this so magnification never resizes it. Resizing
+// on hover would move the window under the cursor (the row is centred), jittering
+// the hit test and re-arming the backdrop capture region on every enter/leave.
+//
+// Swept rather than solved in closed form: the shift term sums over every icon, so
+// the maximum is not simply base_width plus one icon's growth. A sweep is exact for
+// the config in hand; it costs a few hundred layout evaluations and runs only when
+// the config, tile count or DPI changes, never per frame.
+float MaxRowWidthDip(int tile_count, const LayoutParams& params, float scale,
+                     float base_width_px) {
+    if (tile_count <= 0 || !(scale > 0.0f)) return base_width_px;
+    const int steps = std::max(32, std::min(256, static_cast<int>(base_width_px)));
+    float widest_px = base_width_px;
+
+    std::vector<IconLayout> scratch(static_cast<std::size_t>(tile_count));
+    for (int i = 0; i <= steps; ++i) {
+        const float mouse = base_width_px * static_cast<float>(i) / static_cast<float>(steps);
+        LayoutSummary summary{};
+        LayoutDock(params, tile_count, mouse, true, scratch.data(), scratch.size(), &summary);
+        widest_px = std::max(widest_px, summary.max_extent - summary.min_extent);
+    }
+    return widest_px / scale;
 }
 
 }  // namespace
@@ -58,15 +84,67 @@ DockGeometry ComputeGeometry(const core::Config& config, int tile_count, float s
     // through the same LayoutParams for both keeps the two from drifting: a dock
     // sized from `icon_size * scale` but laid out from `icon_size` would clip its
     // last icon at every non-100% DPI.
-    const float content_px =
-        BaseContentWidth(geometry.tile_count, geometry.params);
+    const float content_px = BaseContentWidth(geometry.tile_count, geometry.params);
     geometry.content_width_dip = content_px / scale;
+
+    const float icon_dip = static_cast<float>(std::max(config.dock.icon_size, 1));
+    // The plate keeps its idle height while icons magnify, the way macOS does: the
+    // icons lift out of the dock and overhang the background, which reads as growth
+    // rather than the dock inflating. The plate height therefore does not depend on
+    // hover at all.
+    geometry.plate_height_dip = icon_dip + 2.0f * kPlatePaddingDip;
+
     geometry.plate_width_dip = geometry.content_width_dip + 2.0f * kPlatePaddingDip;
-    geometry.plate_height_dip =
-        static_cast<float>(std::max(config.dock.icon_size, 1)) + 2.0f * kPlatePaddingDip;
-    geometry.window_width_dip = geometry.plate_width_dip;
-    geometry.window_height_dip = geometry.plate_height_dip;
+    // Width has to hold the widest row the pointer can produce, not the idle row: a
+    // 1.8x icon with its neighbours pushed aside needs more room than the idle slots.
+    const float widest_dip = MaxRowWidthDip(geometry.tile_count, geometry.params, scale,
+                                            content_px);
+    geometry.window_width_dip =
+        std::max(geometry.plate_width_dip, widest_dip + 2.0f * kPlatePaddingDip);
+
+    // The window reserves room for the tallest icon, which overhangs above the
+    // plate. The band between the window top and the plate is transparent dead
+    // space, excluded from the window region so clicks pass to the app underneath
+    // (spike conclusion 3: SetWindowRgn clips DComp content and moves hit-testing).
+    geometry.window_height_dip =
+        icon_dip * std::max(geometry.params.magnification, 1.0f) + 2.0f * kPlatePaddingDip;
     return geometry;
+}
+
+bool AdvanceHover(DockHover& hover, double delta_ms) {
+    if (!(delta_ms > 0.0)) return false;
+    const float target = hover.active ? 1.0f : 0.0f;
+    const float step = static_cast<float>(delta_ms) / 1000.0f * kHoverRampPerSecond;
+    float next = hover.intensity;
+    if (next < target) {
+        next = std::min(target, next + step);
+    } else if (next > target) {
+        next = std::max(target, next - step);
+    }
+    if (next == hover.intensity) return false;
+    hover.intensity = next;
+    return true;
+}
+
+const LayoutSummary& DockPainter::UpdateLayout(const DockGeometry& geometry,
+                                              const DockHover& hover, int tile_count) {
+    const int count = std::max(tile_count, 0);
+    if (count == 0) {
+        last_ = LayoutSummary{};
+        return last_;
+    }
+
+    const float intensity = std::clamp(hover.intensity, 0.0f, 1.0f);
+    LayoutParams params = geometry.params;
+    params.magnification = 1.0f + (params.magnification - 1.0f) * intensity;
+
+    const float row_origin_dip =
+        (geometry.window_width_dip - geometry.content_width_dip) * 0.5f;
+    scratch_.resize(static_cast<std::size_t>(count));
+    const float mouse_px = (hover.mouse_x_dip - row_origin_dip) * geometry.scale;
+    LayoutDock(params, count, mouse_px, hover.active && intensity > 0.0f, scratch_.data(),
+               scratch_.size(), &last_);
+    return last_;
 }
 
 bool DockPainter::Paint(ID2D1DeviceContext& dc, render::IRenderBackend& backend,
@@ -74,18 +152,25 @@ bool DockPainter::Paint(ID2D1DeviceContext& dc, render::IRenderBackend& backend,
     if (!input.config || !input.style || !input.tiles) return false;
     const float scale = input.dpi > 0.0f ? input.dpi / 96.0f : 1.0f;
     const auto& config = *input.config;
+    // Geometry is computed by the caller and passed in. It must NOT be recomputed
+    // here: ComputeGeometry sweeps up to 256 layouts to find the widest row, and
+    // this function runs on every hover frame (C-05a rule 3).
+    const DockGeometry& geometry = input.geometry;
 
     const int count = static_cast<int>(input.tiles->size());
-    const auto geometry = ComputeGeometry(config, count, scale);
     const float width_dip = geometry.window_width_dip;
     const float height_dip = geometry.window_height_dip;
+    const float plate_height_dip = geometry.plate_height_dip;
 
-    // Plate first: the frost must not paint over the icons.
+    // The plate sits on the window's bottom edge; the reserved band above it is
+    // where magnified icons overhang into.
+    const float plate_top_dip = height_dip - plate_height_dip;
     const float radius = std::min(static_cast<float>(config.appearance.corner_radius),
-                                  std::min(width_dip, height_dip) * 0.5f);
-    const render::RectF panel{0.5f, 0.5f, width_dip - 0.5f, height_dip - 0.5f};
-    if (!plate.Draw(dc, backend, panel, radius, *input.style, input.backdrop, input.backdrop_w,
-                    input.backdrop_h, input.dpi)) {
+                                  std::min(width_dip, plate_height_dip) * 0.5f);
+    const render::RectF panel{0.5f, plate_top_dip + 0.5f, width_dip - 0.5f,
+                              height_dip - 0.5f};
+    if (!plate.Draw(dc, backend, panel, radius, *input.style, input.backdrop,
+                    input.backdrop_w, input.backdrop_h, input.dpi)) {
         return false;
     }
 
@@ -96,24 +181,26 @@ bool DockPainter::Paint(ID2D1DeviceContext& dc, render::IRenderBackend& backend,
         return true;
     }
 
+    // Deterministic and idempotent: same geometry + same hover produces the same
+    // layout, so the region applied just before this call describes exactly the row
+    // painted here. O(n) with no allocation after the first resize.
+    UpdateLayout(geometry, input.hover, count);
+
     // Layout in device pixels, then convert once. `mouse_x_dip` is DIP because the
     // window receives DIP-scaled coordinates from Windows; C-05 wants pixels.
-    scratch_.resize(static_cast<std::size_t>(count));
-    const float mouse_px = input.hover.mouse_x_dip * scale;
-    LayoutDock(geometry.params, count, mouse_px, input.hover.active, scratch_.data(),
-               scratch_.size(), &last_);
+    const float row_origin_dip = (width_dip - geometry.content_width_dip) * 0.5f;
 
-    const float icon_center_y = height_dip * 0.5f;
+    // Icons are bottom-aligned to the plate's inner edge and grow upward, so the
+    // row never dips below the dock and the tallest icon defines the top.
+    const float baseline_dip = height_dip - kPlatePaddingDip;
     for (int i = 0; i < count; ++i) {
         const IconLayout& icon = scratch_[static_cast<std::size_t>(i)];
         const DockTile& tile = (*input.tiles)[static_cast<std::size_t>(i)];
 
-        // Layout centres are measured from the plate's left edge, so the padding
-        // shifts the whole row inward.
-        const float center_x_dip = kPlatePaddingDip + icon.center / scale;
+        const float center_x_dip = row_origin_dip + icon.center / scale;
         const float half_dip = icon.width / scale * 0.5f;
-        const render::RectF slot{center_x_dip - half_dip, icon_center_y - half_dip,
-                                 center_x_dip + half_dip, icon_center_y + half_dip};
+        const render::RectF slot{center_x_dip - half_dip, baseline_dip - icon.width / scale,
+                                 center_x_dip + half_dip, baseline_dip};
 
         if (tile.icon.valid()) {
             const render::BitmapView view{tile.icon.width, tile.icon.height,

@@ -13,6 +13,7 @@
 #include "dock/dock_view.h"
 #include "platform/composition.h"
 #include "platform/display.h"
+#include "platform/hit_region.h"
 #include "platform/window.h"
 #include "render/backend.h"
 #include "render/backdrop_capture.h"
@@ -23,6 +24,7 @@
 
 #include <d2d1helper.h>
 #include <dwmapi.h>
+#include <windowsx.h>
 
 #include <cmath>
 #include <optional>
@@ -491,8 +493,17 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         }
     }
 
+    // Set by WM_MOUSEMOVE, cleared by the tick. Mouse messages arrive faster than
+    // the frame rate, so the tick is the only place a repaint may be requested.
+    bool hover_moved = false;
+
+    // Paint cost, measured separately from the frame interval: the frame clock only
+    // says a deadline was missed, this says whether the miss was drawing or present.
+    core::FrameClock paint_clock;
+
     auto repaint = [&] {
         const float dpi = static_cast<float>(window.Dpi());
+        const std::int64_t paint_start = core::QueryPerformanceTicks();
         if (!surface.Paint(dpi, [&](ID2D1DeviceContext& dc,
                                     const platform::CompositionSurface::PaintInfo& info) {
                 render_backend->BeginFrame(dc, dpi);
@@ -504,6 +515,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                 input.backdrop_w = backdrop_w;
                 input.backdrop_h = backdrop_h;
                 input.dpi = dpi;
+                input.geometry = geometry;
                 input.hover = dock_hover;
                 if (!dock_painter.Paint(dc, *render_backend, plate, input)) {
                     DF_WARN("dock", "dock paint failed at %.0f dpi", dpi);
@@ -512,8 +524,95 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
             })) {
             return false;
         }
-        return surface.Commit();
+        const bool committed = surface.Commit();
+        // Paint cost is measured separately from frame interval. The frame clock
+        // only says a deadline was missed; this says whether the miss was ours
+        // (drawing) or the compositor's (present), and those need different fixes.
+        paint_clock.AddSample(core::QpcToMilliseconds(core::QueryPerformanceTicks() - paint_start));
+        return committed;
     };
+
+    // ---- clickable region -----------------------------------------------
+    // The window is always tall enough for a fully magnified icon, so the band
+    // above the plate is transparent dead space. It must not swallow clicks meant
+    // for the window underneath. HTTRANSPARENT does not cross processes
+    // (spikes/t010_hover question 2); SetWindowRgn does, and it clips our own
+    // composition surface too (question 3).
+    bool tracking_mouse = false;
+
+    // Runs the layout for the current hover and returns where the row actually is.
+    // Paint and region both come from this one call: SetWindowRgn clips composition
+    // content, so a region derived from a stale layout cuts off the magnified icons
+    // it was supposed to expose (measured: the row was clipped at the plate top).
+    auto layout_now = [&]() -> const dock::LayoutSummary& {
+        return dock_painter.UpdateLayout(geometry, dock_hover,
+                                         static_cast<int>(tiles.size()));
+    };
+
+    // Two regions only: the plate alone, or the plate plus the full-magnification
+    // row. Rebuilding the region every ramp frame cost real time - SetWindowRgn
+    // forces a DWM round trip, and the hover benchmark measured p99 17.3ms against
+    // a 16.7ms budget. A region is a hit-test shape, not an animation: the union
+    // over the whole ramp is a single rectangle, so computing it at full
+    // magnification covers every intermediate frame without changing per frame.
+    bool region_hovered = false;
+    auto apply_region = [&]() {
+        const float scale = window.Scale();
+        const float width_dip = geometry.window_width_dip;
+        const float height_dip = geometry.window_height_dip;
+        const float plate_top_dip = height_dip - geometry.plate_height_dip;
+
+        RECT plate{};
+        plate.left = 0;
+        plate.top = static_cast<LONG>(std::lround(plate_top_dip * scale));
+        plate.right = static_cast<LONG>(std::lround(width_dip * scale));
+        plate.bottom = static_cast<LONG>(std::lround(height_dip * scale));
+
+        // While magnified, the icons overhang above the plate. Their footprint is
+        // taken from the layout engine at full magnification, not from a guess, so a
+        // click on a lifted icon lands and a click on empty space beside it does
+        // not.
+        RECT row{};
+        bool include_row = false;
+        if (region_hovered) {
+            dock::DockHover full;
+            full.active = true;
+            full.intensity = 1.0f;
+            full.mouse_x_dip = dock_hover.mouse_x_dip;
+            const dock::LayoutSummary& layout =
+                dock_painter.UpdateLayout(geometry, full, static_cast<int>(tiles.size()));
+            if (layout.max_extent > layout.min_extent) {
+                const float row_origin_dip = (width_dip - geometry.content_width_dip) * 0.5f;
+                // Layout extents are device pixels; the region is in device pixels
+                // too, so the conversion is a single origin shift.
+                row.left = static_cast<LONG>(std::lround(row_origin_dip * scale + layout.min_extent));
+                row.right =
+                    static_cast<LONG>(std::lround(row_origin_dip * scale + layout.max_extent));
+                // Icons are bottom-aligned and grow upward, so the row reaches above
+                // the plate by the tallest icon's growth. Taking plate.top here
+                // instead would clip the very icons the region exists to expose.
+                const float icon_dip = static_cast<float>(std::max(config.dock.icon_size, 1));
+                const float row_top_dip =
+                    (height_dip - dock::kPlatePaddingDip) - icon_dip * layout.peak_scale;
+                row.top = static_cast<LONG>(
+                    std::lround(std::min(row_top_dip, plate_top_dip) * scale));
+                row.bottom = plate.bottom;
+                include_row = row.right > row.left && row.top < plate.top;
+            }
+        }
+
+        const int radius_px = static_cast<int>(std::lround(
+            std::min(static_cast<float>(config.appearance.corner_radius),
+                     std::min(width_dip, geometry.plate_height_dip) * 0.5f) *
+            scale));
+        DF_DEBUG("dock", "region plate=%ld,%ld,%ld,%ld row=%ld,%ld,%ld,%ld include_row=%d",
+                 plate.left, plate.top, plate.right, plate.bottom, row.left, row.top,
+                 row.right, row.bottom, include_row ? 1 : 0);
+        platform::ApplyWindowRegion(
+            window.Handle(),
+            platform::CreateDockRegion(plate, radius_px, row, include_row));
+    };
+    apply_region();
 
     core::EventBus bus;
     core::AppLoop loop;
@@ -530,20 +629,37 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                 dirty = true;
             }
         }
-        // T-010 replaces this with animation-driven invalidation. Until then a
-        // repaint happens only when the backdrop moved or a frame budget was
-        // missed, which keeps idle CPU at zero.
-        if (dirty || delta_ms > 100.0) {
+        // Hover drives both the magnification ramp and the clickable region. The
+        // ramp runs at frame rate, so the tick is the only place it can advance
+        // without a separate timer.
+        const bool was_hovered = region_hovered;
+        region_hovered = dock_hover.active;
+        if (hover_moved) {
+            hover_moved = false;
+            dirty = true;
+        }
+        if (dock::AdvanceHover(dock_hover, delta_ms) || region_hovered != was_hovered) {
+            dirty = true;
+            // Only when the hover state flips: the region covers the full
+            // magnification, so intermediate ramp frames need no region update.
+            // Rebuilding it every frame cost 0.6ms of p99 (measured 17.3ms).
+            if (region_hovered != was_hovered) {
+                apply_region();
+            }
+        }
+        if (dirty) {
             InvalidateRect(window.Handle(), nullptr, FALSE);
         }
     });
-    loop.SetStatsHandler([&capture](const core::FrameClock& clock) {
+    loop.SetStatsHandler([&capture, &paint_clock](const core::FrameClock& clock) {
+        const core::FrameClock& paint = paint_clock;
         const auto stats = capture.GetStats();
         DF_DEBUG("loop",
-                 "frames=%zu avg=%.2fms p50=%.2fms p99=%.2fms fps=%.1f | capture=%llu/%llu "
-                 "avg=%.1fms",
+                 "frames=%zu avg=%.2fms p50=%.2fms p99=%.2fms fps=%.1f | paint n=%zu "
+                 "avg=%.2fms p99=%.2fms | capture=%llu/%llu avg=%.1fms",
                  clock.SampleCount(), clock.AverageMs(), clock.Percentile(50.0),
-                 clock.Percentile(99.0), clock.AverageFps(),
+                 clock.Percentile(99.0), clock.AverageFps(), paint.SampleCount(),
+                 paint.AverageMs(), paint.Percentile(99.0),
                  static_cast<unsigned long long>(stats.successes),
                  static_cast<unsigned long long>(stats.attempts), stats.average_ms);
     });
@@ -608,6 +724,45 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                     capture.SetRegion(rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top);
                 }
                 return false;
+            }
+            case WM_MOUSEMOVE: {
+                // The dock never takes focus (WS_EX_NOACTIVATE), but it still gets
+                // mouse messages - measured in spikes/t010_hover question 1, along
+                // with WM_MOUSELEAVE after TrackMouseEvent(TME_LEAVE).
+                if (!tracking_mouse) {
+                    TRACKMOUSEEVENT track{};
+                    track.cbSize = sizeof(track);
+                    track.dwFlags = TME_LEAVE;
+                    track.hwndTrack = hwnd;
+                    tracking_mouse = TrackMouseEvent(&track) != FALSE;
+                    if (!tracking_mouse) {
+                        DF_WARN("dock", "TrackMouseEvent failed: %lu", GetLastError());
+                    }
+                }
+                // LPARAM is in PHYSICAL pixels: a per-monitor DPI aware window gets
+                // unscaled client coordinates, so the value has to be divided by the
+                // window scale before it means anything to the DIP-based layout.
+                const float scale = window.Scale();
+                const float x = static_cast<float>(GET_X_LPARAM(lp)) / (scale > 0.0f ? scale : 1.0f);
+                if (x != dock_hover.mouse_x_dip || !dock_hover.active) {
+                    dock_hover.mouse_x_dip = x;
+                    dock_hover.active = true;
+                    // Deliberately no InvalidateRect here. Windows delivers mouse
+                    // moves far faster than 60 Hz, and repainting per message pushed
+                    // p99 to 18.2ms against a 16.7ms budget (measured with
+                    // tools/hover_bench.ps1). The tick coalesces them into at most
+                    // one repaint per frame, capping latency at one frame.
+                    hover_moved = true;
+                }
+                out = 0;
+                return true;
+            }
+            case WM_MOUSELEAVE: {
+                tracking_mouse = false;
+                dock_hover.active = false;
+                InvalidateRect(hwnd, nullptr, FALSE);
+                out = 0;
+                return true;
             }
             case WM_KEYDOWN:
                 if (wp == 'Q' && (GetKeyState(VK_CONTROL) & 0x8000)) {

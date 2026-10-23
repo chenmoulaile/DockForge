@@ -2,13 +2,13 @@
     "project":  "DockForge",
     "schema":  1,
     "milestone":  "M1",
-    "last_task":  "T-009",
+    "last_task":  "T-010",
     "last_commit":  "pending",
     "current_module":  "dock",
     "current_task":  null,
     "counters":  {
                      "total":  16,
-                     "done":  9,
+                     "done":  10,
                      "partial":  0,
                      "blocked":  0
                  },
@@ -71,7 +71,13 @@
                           "ID2D1Bitmap1 创建时 DPI 固定打 96；打帧 DPI 会让位图在 192 DPI 下被二次缩放成 1/2 尺寸",
                           "Dock 图标存在性不能用单点采样判断：深色中心图标会读成板色，必须用 tools/dock_slots.ps1 的槽位覆盖率法（T-009）",
                           "enum class 的 ToString 重载容易在头文件声明后忘记实现，只有调用点才报 undefined reference（shell::ToString(AppKind) 曾缺失一整个 T-006 周期）",
-                          "PowerShell 编辑 .md 时可能把控制字符（U+0008/U+0009）写进正文吞掉相邻字符；收尾必须扫全文 ctrl 字符确认 0 残留"
+                          "PowerShell 编辑 .md 时可能把控制字符（U+0008/U+0009）写进正文吞掉相邻字符；收尾必须扫全文 ctrl 字符确认 0 残留",
+                          "HTTRANSPARENT 只对同线程窗口生效，跨进程点击穿透必须用 SetWindowRgn；region 同时会裁掉自绘 DComp 内容",
+                          "DOCKFORGE_DPI_OVERRIDE 只改内容布局，GetDpiForWindow 仍返回真实 DPI；验证工具必须从窗口高度反推 scale",
+                          "每条 WM_MOUSEMOVE 都 InvalidateRect 会使 p99 到 18.2ms；必须由 tick 合并成每帧一次",
+                          "每帧 SetWindowRgn 触发 DWM 往返，p99 17.3ms；region 只应有空闲/悬停两态",
+                          "region 用上一帧布局会裁掉正在放大的图标；必须按当前悬停现算",
+                          "GetWindowRgnBox 返回 int（0=ERROR 1=NULLREGION 2=SIMPLEREGION 3=COMPLEXREGION）；PtInRegion 在 gdi32.dll 不是 user32"
                       ],
-    "updated_at":  "2026-10-24T01:56:00+08:00"
+    "updated_at":  "2026-10-24T02:50:00+08:00"
 }

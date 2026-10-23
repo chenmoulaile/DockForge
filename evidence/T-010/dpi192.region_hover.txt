@@ -1,0 +1,15 @@
+window=685,1595 size=1510x213
+rgn_box=0,20,1510,213 kind=3
+note kind: 0=ERROR 1=NULLREGION 2=SIMPLEREGION 3=COMPLEXREGION (winreg.h)
+GetWindowRgn=3
+scale_from_height=2.002
+probe band_above_plate (755,38) inside=True window_from_point=dock:True
+probe band_top_edge    (755,2) inside=False window_from_point=dock:False
+probe plate_centre     (755,183) inside=True window_from_point=dock:True
+probe plate_left       (6,183) inside=True window_from_point=dock:True
+probe plate_right      (1504,183) inside=True window_from_point=dock:True
+probe corner_tl        (2,79) inside=False window_from_point=dock:False
+probe overhang         (755,57) inside=True window_from_point=dock:True
+probe overhang_far     (755,4) inside=False window_from_point=dock:False
+inside_band=1 inside_plate=3
+verdict=REGION_CORRECT

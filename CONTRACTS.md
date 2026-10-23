@@ -289,3 +289,54 @@ DPI，否则面板会按一个比例布局、装在另一个比例尺寸的窗�
 
 - 本契约只覆盖**静态图标行**。悬停放大、运行指示、拖拽、缩略图不在其中，各自单独冻结。
 - "窗口自动贴合内容宽度"指基础尺寸；悬停时窗口是否扩张属 T-010 决策，不得由本契约推定。
+
+## C-12 Dock 悬停与可点击区域（T-010 冻结）
+
+### 悬停状态
+
+```cpp
+struct DockHover { bool active = false; float intensity = 0.0f; float mouse_x_dip = 0.0f; };
+inline constexpr float kHoverRampPerSecond = 8.0f;   // 0 -> 1 in 125ms
+bool AdvanceHover(DockHover& hover, double delta_ms);
+```
+
+- `intensity` 由时间驱动，不由帧数驱动：120Hz 下 10 帧与 60Hz 下 5 帧必须得到相同值（已由测试锁定）。慢帧不得让动画跳跃。
+- `AdvanceHover` 返回 `intensity` 是否变化；不超调，`delta_ms <= 0` 时不动。
+- 布局按 `magnification_effective = 1 + (magnification - 1) * intensity` 插值。
+
+### 输入合并规则
+
+- `WM_MOUSEMOVE` **只更新状态，不请求重绘**。置 `dock_hover.active = true`、`dock_hover.mouse_x_dip`、`hover_moved = true`。
+- tick 处理器消费 `hover_moved`，每帧最多产生一次 `InvalidateRect`。
+- 依据：Windows 投递鼠标移动远快于 60Hz。每条消息都重绘时 p99 18.2ms 超预算（实测）。
+
+### 可点击区域规则
+
+- 窗口高度恒为 `icon_size * max(magnification, 1) + 2 * kPlatePaddingDip`，板高恒为 `icon_size + 2 * kPlatePaddingDip`。板上方的空白是放大图标的预留带。
+- **`HTTRANSPARENT` 不可用于跨进程穿透**（spike 实测：下层窗口收不到点击）。唯一可用机制是 `SetWindowRgn`。
+- `SetWindowRgn` 会裁掉自绘 DComp 内容，因此 region 必须覆盖所有会画出来的像素，否则图标被切断。
+- **region 只有两态**：空闲 = 圆角板；悬停 = 圆角板 ∪ 满倍率图标行矩形。不随 ramp 逐帧变化——`SetWindowRgn` 触发 DWM 往返，每帧调用时 p99 17.3ms 超预算（实测）。满倍率矩形是所有中间帧的并集，覆盖等价。
+- 悬停行矩形由 `DockPainter::UpdateLayout` 在 `intensity = 1.0` 下算出，不用上一帧结果：用上一帧会漏掉正在放大的图标，把图标在板顶齐平切断（实测 `rows_with_change` 起点等于板顶）。
+- 布局 extents 是设备像素，region 也是设备像素，换算只需加原点偏移 `row_origin_dip * scale`。**不得再除 `scale`**。
+- `include_row` 判据为 `row.right > row.left && row.top < plate.top`；退化为空时不扩宽。
+
+### 坐标规则
+
+- `WM_MOUSEMOVE` 的 `LPARAM` 是**物理像素**（per-monitor DPI aware 窗口拿到未缩放客户端坐标），必须除以 `window.Scale()` 才能喂给 DIP 布局。
+- 所有验证工具在 `DOCKFORGE_DPI_OVERRIDE` 下**必须从窗口高度反推 scale**，不能用 `GetDpiForWindow`——override 只改内容布局，窗口真实 DPI 不变。
+
+### 验证手段
+
+| 断言 | 工具 | 判据 |
+|---|---|---|
+| 图标真的放大了 | `tools/hover_measure.ps1` | `observed_scale` 与 `peak_scale` 差 < 5% |
+| 空闲不吞点击 | `tools/region_probe.ps1`（默认） | `inside_band=0 && inside_plate>=2`，且 `window_from_point` 在带外为 False |
+| 悬停不裁图标 | `tools/region_probe.ps1 -Hovered` | `inside_band>=1 && inside_plate>=2` |
+| 悬停真的改变了画面 | `tools/image_diff.ps1` | `verdict=DIFFERENT`，`changed_pct > 5` |
+| 帧时间达标 | `tools/hover_bench.ps1` | `p99_over_budget_windows=0` |
+| 点击穿透机制 | `spikes/t010_hover/region_click.cpp` | `verdict=PASS_THROUGH_OK` |
+
+### 诚实边界
+
+- `region_probe.ps1` 的 `window_from_point` 是 Windows 自己的命中测试结果，比 `PtInRegion` 更接近真实点击；但两者都不是真实点击，端到端点击验证只在 spike 的双窗口场景做过。
+- 点击穿透只在 spike 场景验证机制，未在真实第三方应用上验证点击确实落到目标控件。

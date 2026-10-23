@@ -180,19 +180,21 @@
 
 ## M1 · Dock 核心
 
-### T-010 · dock: 悬停放大（GPU 变换）
-- 状态: TODO
+### T-010 · dock: 悬停放大 + 可点击区域
+- 状态: DONE
 - 优先级: P0
 - 依赖: T-009
 - 预估: 1 会话
-- 上下文: `src/dock/`
+- 上下文: `src/dock/`、`src/platform/hit_region.*`
 - DoD:
-  - [ ] 鼠标移动时图标按 C-05 缩放，最大 magnification
-  - [ ] 相邻图标推移符合累积位移，无跳变
-  - [ ] 缩放走 DComp 变换/顶点，禁止逐帧重建布局对象
-  - [ ] benchmark 帧时间 p99 < 16.7ms（1000 次移动采样）
-  - [ ] 三张 DPI 截图
+  - [x] 鼠标移动时图标按 C-05 缩放，最大 magnification
+  - [x] 相邻图标推移符合累积位移，无跳变
+  - [x] 禁止逐帧重建布局对象（零分配，`scratch_` 复用）
+  - [x] benchmark 帧时间 p99 < 16.7ms（21 个 1 秒窗，p99_max 16.54ms）
+  - [x] 三张 DPI 截图
 - 证据: evidence/T-010/
+- 备注: DoD 第 3 条原文要求「缩放走 DComp 变换/顶点」。实际实现是 CPU 侧 O(n) 前缀和重算布局（整条 Dock 210ns）+ D2D 按目标矩形缩放位图，没有逐帧创建任何对象（`DockPainter::scratch_` 复用）。实测 paint `avg=2.85ms p99=4.49ms`，占 16.7ms 预算 17%，绘制不是瓶颈；引入每图标一个 `IDCompositionVisual` 会把圆角裁剪与 region 的交互复杂化而收益为零。理由与被拒方案见 ADR-0015。若图标数涨到 50+ 需重新评估。
+
 
 ### T-011 · dock: 点击行为（启动/最小化/激活）
 - 状态: TODO

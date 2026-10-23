@@ -1,0 +1,8 @@
+window rect=685,1595 size=1510x213
+dpi=192 (window reports 192) scale=2.002 plate_top_px=77
+cursor=1384,1748 (icon 5, local x=699)
+idle_overhang=NONE
+hover_overhang=473..924 top=21
+baseline_px=193 icon_height_px=172 icon_height_dip=85.9
+observed_scale=1.79
+verdict=MAGNIFIED

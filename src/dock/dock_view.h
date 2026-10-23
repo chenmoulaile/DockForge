@@ -1,4 +1,4 @@
-// DockForge - Dock tile model, geometry and painter (T-009).
+// DockForge - Dock tile model, geometry and painter (T-009, hover T-010).
 //
 // Split from main.cpp because the Dock is the product: the host window is
 // scaffolding around it. Everything here is expressed in DIPs at the boundary and
@@ -54,28 +54,52 @@ struct DockGeometry {
     LayoutParams params{};  // device pixels
     float scale = 1.0f;
     int tile_count = 0;
-    float content_width_dip = 0.0f;
-    float plate_width_dip = 0.0f;
-    float plate_height_dip = 0.0f;
+    float content_width_dip = 0.0f;  // idle icon row
+    float plate_width_dip = 0.0f;    // idle row + padding on both sides
+    float plate_height_dip = 0.0f;   // constant; does not grow on hover
+    // Tallest an icon can get, plus padding. The window is always this tall so
+    // magnification never resizes it: a resize would move the window under the
+    // cursor (the row is centred) and re-arm the capture region on every hover.
     float window_width_dip = 0.0f;
     float window_height_dip = 0.0f;
 };
 
 // Pure function of config + tile count + scale, so the window size can be asserted
 // in a test without creating a window.
+//
+// Costs up to 256 layout evaluations (it sweeps the pointer to find the widest row
+// the magnification can produce), so call it on config/DPI/tile-count changes only -
+// never inside the paint path (C-05a rule 3).
 DockGeometry ComputeGeometry(const core::Config& config, int tile_count, float scale);
 
-// Pointer state in dock-local DIPs. Inactive for the static dock (T-009); T-010
-// feeds it from WM_MOUSEMOVE.
+// Pointer state in dock-local DIPs.
+//
+// `intensity` ramps 0..1 on enter and back on leave rather than snapping: the peak
+// scale is `magnification` a pixel inside the plate, so entering without a ramp
+// pops the whole row from 1.0 to ~1.5 in one frame.
 struct DockHover {
     bool active = false;
     float mouse_x_dip = 0.0f;
+    float intensity = 0.0f;
 };
+
+// How fast `DockHover::intensity` follows `active`, in units per second. 8/s means
+// ~125ms to full magnification, which is inside the "feels instant, not jumpy"
+// band and short enough that a quick pass over the dock still registers.
+inline constexpr float kHoverRampPerSecond = 8.0f;
+
+// Advances `intensity` toward its target. Returns true when the value changed, so
+// the caller knows whether another frame is needed (false means the dock is at rest
+// and the frame loop can go back to sleep).
+bool AdvanceHover(DockHover& hover, double delta_ms);
 
 struct DockPaintInput {
     const core::Config* config = nullptr;
     const render::PlateStyle* style = nullptr;
     const std::vector<DockTile>* tiles = nullptr;
+    // Precomputed by the caller via ComputeGeometry. Required: recomputing it here
+    // would sweep 256 layouts on every hover frame.
+    DockGeometry geometry{};
     const std::uint8_t* backdrop = nullptr;
     int backdrop_w = 0;
     int backdrop_h = 0;
@@ -89,6 +113,16 @@ class DockPainter {
   public:
     bool Paint(ID2D1DeviceContext& dc, render::IRenderBackend& backend,
                render::PlateRenderer& plate, const DockPaintInput& input);
+
+    // Runs the layout for the given hover without painting and returns the summary.
+    //
+    // Exists so the clickable region and the drawn row are derived from ONE
+    // computation. Reading the previous frame's summary instead would make the
+    // region lag the paint by a frame, and because SetWindowRgn clips composition
+    // content, a lagging region clips the very icons it was meant to expose -
+    // measured: the magnified row was cut off exactly at the plate's top edge.
+    const LayoutSummary& UpdateLayout(const DockGeometry& geometry, const DockHover& hover,
+                                      int tile_count);
 
     const LayoutSummary& LastLayout() const { return last_; }
 

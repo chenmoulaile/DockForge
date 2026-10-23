@@ -352,3 +352,38 @@ spike 实测（`evidence/T-007/run_*.txt`）澄清了三个此前只是"以为"�
 - C-11 冻结 tile 模型、几何来源、绘制顺序、缺失图标策略、位图 DPI 打标与验证手段。
 - 悬停放大（T-010）接入时，`DockPaintInput::hover` 已预留，但窗口是否随悬停扩张尚未决定，属 T-010 的 ADR。
 - `dockforge::shell::ToString(AppKind)` 在 T-006 只声明未定义，本轮加逐 tile 日志时以链接错误暴露，已补齐。教训：`enum class` 的 `ToString` 重载容易在头文件里声明后忘记实现，且只有调用点才会报错。
+
+## ADR-0015 · Dock 悬停放大用 CPU 布局重算，不建逐图标 DComp visual
+
+- 日期：2026-10-24
+- 状态：已采纳
+- 关联：C-05、C-05a、C-11、T-010
+
+### 背景
+
+T-010 的 DoD 原文写着「缩放走 DComp 变换/顶点，禁止逐帧重建布局对象」。前半句是手段，后半句才是约束。T-008 已经交付零分配的 `LayoutDock`（整条 Dock 210ns，20 个图标），T-009 已把每个图标画成 `DrawBitmap` 的目标矩形。问题是：接入悬停时要不要把每个图标改成一个 `IDCompositionVisual`，用 `SetTransform` 做缩放与位移。
+
+### 决策
+
+**不建逐图标 DComp visual。** 保持单 visual + 单 surface，每帧在 CPU 上重算 `IconLayout[]`（复用 `DockPainter::scratch_`，零分配），把结果作为 `DrawBitmap` 的目标矩形。
+
+### 理由
+
+1. **绘制不是瓶颈**。实测 `paint n=... avg=2.85ms p99=4.49ms`，占 16.7ms 预算的 17%。引入 12 个 visual 最多把这 2.85ms 降到接近 0，而预算还剩 12ms 富余。
+2. **圆角裁剪会变复杂**。当前整块板用一个 `PushLayer` + 圆角几何裁掉溢出。改成每个图标一个 visual 后，图标的放大溢出要么裁不到（视觉破面），要么每个 visual 各带一个 clip，反而增加合成开销。
+3. **`SetWindowRgn` 与 visual 变换的交互不可控**。T-010 已证明 `SetWindowRgn` 会裁掉自绘 DComp 内容（spike question 3）。region 是按布局算出来的矩形；如果图标位置由 visual 变换决定，region 就得反推变换后的包围盒，两套几何源必然漂移。
+4. **D2D 位图缩放已经是 GPU 采样**。`DrawBitmap` 的目标矩形缩放由 D2D 在 GPU 上完成（`D2D1_INTERPOLATION_MODE_LINEAR`），并非 CPU 逐像素。所谓「CPU 布局」只是 12 次浮点乘加，真正的放大在 GPU。
+
+### 被拒方案
+
+- **每图标一个 `IDCompositionVisual` + `SetTransform`**：收益为零（绘制不是瓶颈），复杂度与几何漂移风险实打实。
+- **每图标一个 `IDCompositionVisual` + `IDCompositionScaleTransform`**：同上；且 `IDCompositionScaleTransform` 的 `CenterX/CenterY` 语义与 D2D 的 `SetTransform` 组合时容易双重缩放（T-005 的 ADR-0009 已经踩过一次同类坑）。
+- **用 `IDCompositionDevice3::CreateGaussianBlurEffect` 做图标拖影**：与悬停放大无关，属于视觉润色，不在 DoD 内。
+- **把整条 Dock 渲染成一张位图再用一个 visual 缩放**：整体缩放会连板一起放大，与 macOS 行为不符。
+
+### 后果
+
+- 悬停路径的热点是消息洪流而非绘制：**每条 `WM_MOUSEMOVE` 都 `InvalidateRect` 时 p99 18.2ms 超预算**；改为消息只置 `hover_moved` 标志、由 tick 合并成每帧最多一次重绘后，p99 降到 16.54ms（21/21 窗达标）。
+- `SetWindowRgn` 同理：**每帧重建 region 时 p99 17.3ms 超预算**；改为只有空闲/悬停两态、悬停态用满倍率矩形（所有中间帧的并集）后消除。
+- 若图标数涨到 50+ 或加入模糊拖影，需重新评估本决策——届时绘制时间会成为瓶颈，visual 方案才有意义。
+- T-010 的 DoD 第 3 条按本条 ADR 判为满足：约束是「禁止逐帧重建布局对象」，实现零分配、零对象创建，满足；手段不是 DComp 变换，已记录理由。
