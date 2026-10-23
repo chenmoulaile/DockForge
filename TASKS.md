@@ -21,37 +21,37 @@
 ## M0 · 骨架与验证
 
 ### T-001 · platform: 工程骨架 + CMake 构建链路 + 最小窗口
-- 状态: IN_PROGRESS
+- 状态: DONE
 - 优先级: P0
 - 依赖: 无
 - 预估: 1 会话
 - 上下文: 根目录、`cmake/`、`src/platform/`
 - DoD:
-  - [ ] `cmake -S . -B build -G "MinGW Makefiles"` 配置成功
-  - [ ] `cmake --build build` 生成 `DockForge.exe`
-  - [ ] 程序能创建并显示一个无边框置顶窗口，Ctrl+Q 退出
-  - [ ] 状态文件骨架（11 个）全部落盘
-  - [ ] `.gitignore` 覆盖 build/out/.vs/*.user/vcpkg_installed/*.dmp/evidence 大文件
-  - [ ] 首次 commit 完成，push 状态记录到 STATE.json
+  - [x] `cmake -S . -B build -G "MinGW Makefiles"` 配置成功
+  - [x] `cmake --build build` 生成 `DockForge.exe`
+  - [x] 程序能创建并显示一个无边框置顶窗口，Ctrl+Q 退出
+  - [x] 状态文件骨架（11 个）全部落盘
+  - [x] `.gitignore` 覆盖 build/out/.vs/*.user/vcpkg_installed/*.dmp/evidence 大文件
+  - [x] 首次 commit 完成，push 状态记录到 STATE.json
 - 证据: evidence/T-001/
 
 ### T-002 · core: 日志系统 + 配置加载/保存（C-01 / C-07）
-- 状态: TODO
+- 状态: DONE
 - 优先级: P0
 - 依赖: T-001
 - 预估: 1 会话
 - 上下文: `src/core/`、CONTRACTS.md#C-01、CONTRACTS.md#C-07
 - DoD:
-  - [ ] 日志按 `%LOCALAPPDATA%\DockForge\logs\dockforge-YYYYMMDD.log` 写入，格式符合 C-07
-  - [ ] 配置首次运行生成默认 config.json（全部 11 个键）
-  - [ ] 越界值钳制并 WARN；损坏 JSON 回退默认并另存 `.bad`
-  - [ ] 未知键写回时保留
-  - [ ] Catch2 单测覆盖：默认值、越界钳制、损坏回退、未知键保留
-  - [ ] `evidence/T-002/test.txt` 含全部用例通过输出
+  - [x] 日志按 `%LOCALAPPDATA%\DockForge\logs\dockforge-YYYYMMDD.log` 写入，格式符合 C-07
+  - [x] 配置首次运行生成默认 config.json（全部 11 个键）
+  - [x] 越界值钳制并 WARN；损坏 JSON 回退默认并另存 `.bad`
+  - [x] 未知键写回时保留
+  - [x] Catch2 单测覆盖：默认值、越界钳制、损坏回退、未知键保留
+  - [x] `evidence/T-002/test.txt` 含全部用例通过输出
 - 证据: evidence/T-002/
 
 ### T-003 · core: 事件总线 + 应用主循环骨架
-- 状态: TODO
+- 状态: IN_PROGRESS
 - 优先级: P0
 - 依赖: T-001, T-002
 - 预估: 1 会话

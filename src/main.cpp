@@ -1,4 +1,5 @@
-// DockForge entry point (T-001 skeleton).
+// DockForge entry point (T-001 skeleton, T-002 config wiring).
+#include "core/config.h"
 #include "core/log.h"
 #include "core/paths.h"
 #include "platform/window.h"
@@ -38,6 +39,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     DF_INFO("app", "config path = %s",
             core::WideToUtf8(core::ConfigPath()).c_str());
 
+    core::Config config = core::LoadConfig();
+    DF_INFO("app", "config: icon_size=%d gap=%d mag=%.2f falloff=%s material=%s corner=%d",
+            config.dock.icon_size, config.dock.gap,
+            static_cast<double>(config.dock.magnification),
+            core::ToString(config.dock.hover_falloff),
+            core::ToString(config.appearance.material), config.appearance.corner_radius);
+
     if (!platform::Window::RegisterWindowClass(instance)) {
         DF_FATAL("app", "window class registration failed");
         return 2;
@@ -45,8 +53,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
 
     platform::WindowDesc desc;
     desc.title = L"DockForge";
-    desc.width = 720;
-    desc.height = 120;
+    // Skeleton sizing follows the config so C-01 wiring is observable now;
+    // the real Dock layout engine replaces this in T-008/T-009.
+    desc.width = 480 + config.dock.icon_size * 4;
+    desc.height = config.dock.icon_size * 2 + 40;
     desc.topmost = true;
     // The skeleton window must accept keyboard focus so Ctrl+Q can be proven
     // here. The real Dock window flips this off in T-009 (it is click-driven
@@ -62,7 +72,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
 
     // T-001 skeleton: prove the window lives, can be painted, and quits cleanly.
     // The real composition surface lands in T-004/T-005.
-    window.SetMessageHook([](HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, LRESULT& out) {
+    window.SetMessageHook([&config](HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, LRESULT& out) {
         switch (msg) {
             case WM_PAINT: {
                 PAINTSTRUCT ps{};
@@ -74,7 +84,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                 DeleteObject(brush);
                 SetBkMode(dc, TRANSPARENT);
                 SetTextColor(dc, RGB(236, 240, 248));
-                const wchar_t* text = L"DockForge · skeleton window (Ctrl+Q to quit)";
+                wchar_t text[160];
+                swprintf_s(text, L"DockForge \u00b7 icon %d px \u00b7 gap %d \u00b7 mag %.1fx \u00b7 %s",
+                           config.dock.icon_size, config.dock.gap,
+                           static_cast<double>(config.dock.magnification),
+                           core::ToString(config.dock.hover_falloff));
                 DrawTextW(dc, text, -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
                 EndPaint(hwnd, &ps);
                 out = 0;

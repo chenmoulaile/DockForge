@@ -1,0 +1,23 @@
+{
+  "appearance": {
+    "corner_radius": 40,
+    "material": "acrylic"
+  },
+  "behavior": {
+    "autostart": false,
+    "hide_taskbar": false
+  },
+  "dock": {
+    "falloff_sharpness": 2.0,
+    "future_flag": true,
+    "gap": 0,
+    "hover_falloff": "sine",
+    "icon_size": 96,
+    "influence_radius": 3.0,
+    "magnification": 2.5,
+    "position": "bottom"
+  },
+  "my_extension": {
+    "a": 1
+  }
+}
