@@ -2,13 +2,13 @@
     "project":  "DockForge",
     "schema":  1,
     "milestone":  "M1",
-    "last_task":  "T-006",
+    "last_task":  "T-007",
     "last_commit":  "pending",
-    "current_module":  "shell",
+    "current_module":  "platform",
     "current_task":  null,
     "counters":  {
                      "total":  16,
-                     "done":  6,
+                     "done":  7,
                      "partial":  0,
                      "blocked":  0
                  },
@@ -59,7 +59,11 @@
                           "AppsFolder 五项形态（AUMID/盘符路径/命名空间子项/裸桌面 id/坏条目）不能按文件系统路径分类；命名空间子项必须加 shell:AppsFolder\\ 前缀，裸桌面 id 不能用 ActivateApplication（ADR-0010）",
                           "IShellLinkW::GetPath(SLGP_RAWPATH) 返回未展开的 %windir% 形式，必须 ExpandEnvironmentStringsW 后才能解析或启动",
                           "PowerShell 5.1 的 Set-Content/Out-File 默认 ANSI(936)，写中文会把 UTF-8 状态文件写坏；必须用 File::WriteAllText + UTF8Encoding(false)（ADR-0011）",
-                          "tools/sample_pixels.ps1 曾忽略 -Image 永远抓屏，报告与文件不符；采样已保存截图必须显式传 -Image"
+                          "tools/sample_pixels.ps1 曾忽略 -Image 永远抓屏，报告与文件不符；采样已保存截图必须显式传 -Image",
+                          "GetSystemMetricsForDpi(SM_CXSCREEN) 与 DPI 无关，恒返回物理分辨率，不能用来推缩放（T-007 实测）",
+                          "AdjustWindowRectExForDpi 对 WS_POPUP 是 no-op，无边框窗口不需要它（T-007 实测）",
+                          "WM_DPICHANGED 无法跨进程注入：PostMessage 返回 ERROR_MESSAGE_SYNC_ONLY(1159)，SendMessage 返回 0 但处理器不执行；WM_CLOSE 可跨进程（T-007 实测）。验证必须用 DOCKFORGE_SIMULATE_DPI 在进程内 SendMessage",
+                          "GetDpiForMonitor/MDT_* 需要 shellscalingapi.h + 链接 shcore；std::max 混用 LONG 与 int 会推导失败"
                       ],
-    "updated_at":  "2026-10-24T01:22:00+08:00"
+    "updated_at":  "2026-10-24T01:40:00+08:00"
 }

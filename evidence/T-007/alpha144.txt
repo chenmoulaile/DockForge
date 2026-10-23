@@ -1,0 +1,10 @@
+﻿window=1044,1584 size=792x228 pid=12292
+rule=unchanged means TRANSPARENT (desktop shows through); changed means PAINTED (tolerance=2)
+point        xy           shown            hidden           verdict
+center       396,114      236,240,248      0,0,0            PAINTED
+corner_tl    3,3          0,0,0            0,0,0            TRANSPARENT
+corner_tr    788,3        0,0,0            0,0,0            TRANSPARENT
+corner_bl    3,224        0,0,0            0,0,0            TRANSPARENT
+corner_br    788,224      0,0,0            0,0,0            TRANSPARENT
+top_mid      396,2        22,24,27         0,0,0            PAINTED
+summary: painted=2 transparent=4

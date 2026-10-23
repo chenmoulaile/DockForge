@@ -175,3 +175,58 @@ LEVEL ∈ TRACE/DEBUG/INFO/WARN/ERROR/FATAL。文件按天切分，保留 7 天�
 **例外**：`STATE.json` 保留 UTF-8 BOM。PowerShell 5.1 的 `Get-Content` 在无 BOM 时按 ANSI
 解码，而 GBK 尾字节可能是 `0x5C`（反斜杠），会静默破坏 JSON 字符串转义。加 BOM 让
 PowerShell 5.1 / .NET / Python 三方对同一文件达成一致。Markdown 文件仍无 BOM。
+
+## C-10 显示枚举与 Dock 放置（T-007 冻结）
+
+### 数据结构
+
+`platform::DisplayInfo`：`HMONITOR handle`、`std::wstring device`（`\\.\DISPLAYn`）、
+`RECT monitor`、`RECT work`、`UINT effective_dpi`、`UINT raw_dpi`、`bool primary`、
+`Width()/Height()/WorkWidth()/WorkHeight()/Scale()`。
+
+`platform::DockPlacement`：`RECT rect`（物理像素，窗口目标矩形）、`int width_px`、
+`int height_px`、`UINT dpi`、`float scale`、`bool clamped`。
+
+### 枚举契约
+
+- `EnumerateDisplays()` 的**返回顺序即显示索引**，主屏恒为 `[0]`，其余按 `top`、`left`、
+  `device` 字典序，保证同一台机器多次调用顺序一致（`DOCKFORGE_TARGET_DISPLAY` 依赖它）。
+- `effective_dpi` 取 `GetDpiForMonitor(MDT_EFFECTIVE_DPI)`，失败回退 `GetDpiForSystem()`；
+  `raw_dpi` 单独取 `MDT_RAW_DPI`（本机 192 / 243，两者不等，不能混用）。
+- `DisplayForWindow(HWND)` / `DisplayForPoint(POINT)` 返回 `bool`，失败时输出参数保持未定义，
+  调用方必须先判返回值。
+
+### 放置契约
+
+- **一律以 `work` 而非 `monitor` 定位**。Dock 压到任务栏底下等于裁切 bug。
+  `work` 为空（枚举异常）时回退 `monitor`。
+- 超宽/超高时缩小并置 `clamped = true`，禁止越出 `work`。调用方必须 `DF_WARN` 记录。
+- 边距单位是 DIP，`margin_px = lround(margin_dip * dpi / 96)`。
+- `Bottom`：水平居中，底边贴 `work.bottom - margin`。
+  `Left`/`Right`：垂直居中，贴 `work.left + margin` / `work.right - margin`。
+- 负原点的副屏（主屏左侧）必须正常工作，禁止假设 `left/top == 0`。
+
+### DPI 与几何必须同源
+
+`Window::Dpi()`（内容 DIP→像素的换算）与 `ComputeDockPlacement`（窗口物理尺寸）必须读同一个
+DPI，否则面板会按一个比例布局、装在另一个比例尺寸的窗口里。
+
+- `DOCKFORGE_DPI_OVERRIDE` 设置时优先级最高，且 `WM_DPICHANGED` **不得覆盖它**
+  （`main.cpp` 的 `dpi_forced_by_env` 记录该状态）。
+- 未设置 override 时，`WM_DPICHANGED` 的 `wParam`（`LOWORD` = x，`HIWORD` = y）是权威 DPI，
+  优先于重新枚举的显示器 DPI——枚举在转换瞬间可能滞后。
+- `lParam` 的建议矩形**不使用**：它按普通重叠窗口计算，与按工作区放置的 Dock 无关。
+- 放置只有一条代码路径（`main.cpp` 的 `apply_placement` lambda），启动、`WM_DPICHANGED`、
+  `ShowWindow` 之后都调它。新增定位逻辑必须并入该 lambda，禁止另开分支。
+
+### 验证手段与诚实边界
+
+- `tests/display_test.cpp` 用合成 `DisplayInfo` 覆盖：负原点副屏、96+144 混合双屏、
+  超宽/超高 clamp、`work` 全零回退、DPI 往返换算。
+- `DOCKFORGE_SIMULATE_DPI=<dpi>` 在进程内 `SendMessageW(WM_DPICHANGED)`，`tools/simulate_dpi.ps1`
+  对比前后窗口矩形。**跨进程发送该消息无效**：`PostMessage` 返回
+  `ERROR_MESSAGE_SYNC_ONLY`(1159)，`SendMessage` 返回 0 但处理器不执行（`WM_CLOSE` 可跨进程，
+  故这是系统消息特有的限制）。
+- 单显示器主机上 `GetDpiForWindow` 始终返回真实 DPI。合成消息证明的是**处理器与放置数学**，
+  不等于验证了合成器的真实跨屏缩放；不得把两者混为一谈。
+

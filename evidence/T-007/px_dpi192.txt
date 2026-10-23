@@ -1,0 +1,6 @@
+﻿source=image evidence\T-007\dpi192.png rect=(0,0) size=1056x304
+center         (528,152) rgba=(236,240,248,255)
+top_mid        (528,3) rgba=(13,15,18,255)
+corner_tl      (3,3) rgba=(0,0,0,255)
+corner_br      (1052,300) rgba=(0,0,0,255)
+edge_bottom    (528,301) rgba=(52,54,56,255)

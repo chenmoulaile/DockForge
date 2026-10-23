@@ -243,3 +243,54 @@ GBK 字节、头部仍是 UTF-8，任何严格 UTF-8 读取器都会在中间报
   `PROGRESS.md` 5383→5553B），内容人工核对无乱码。
 - 此规则写进 `CONTRACTS.md` C-09，后续所有状态文件写入都受约束。
 - `STATE.json` 例外保留 BOM：PowerShell 5.1 的 `Get-Content` 无 BOM 时按 ANSI 解码，GBK 尾字节 `0x5C` 会静默破坏 JSON 转义。
+
+## ADR-0012 · Dock 放置以显示器工作区为基准，且几何与内容必须读同一个 DPI
+
+**状态**：Accepted（2026-10-24，T-007 spike + 实测）
+
+**背景**
+T-001 至 T-006 的窗口定位是"在主屏工作区居中"，这段代码写在 `main.cpp` 末尾，与
+`WM_DPICHANGED` 分支各自算尺寸，两处迟早会不一致。T-007 要求按目标屏工作区放置，同时
+`appearance`/`dock.position` 的 `left`/`right` 也要生效。
+
+spike 实测（`evidence/T-007/run_*.txt`）澄清了三个此前只是"以为"的事实：
+- 本机只有一个显示器（`\\.\DISPLAY1` 2880x1920，有效 192 DPI，原始 243 DPI），**真实跨屏
+  DPI 转换在本机不可复现**。
+- `GetSystemMetricsForDpi(SM_CXSCREEN, 96|144|192)` 全部返回 2880——物理分辨率与 DPI 无关，
+  不能用它推缩放。
+- `AdjustWindowRectExForDpi(WS_POPUP)` 是 no-op（输入输出同为 `(0,0) 400x120`），无边框窗口
+  不需要它。
+
+**决策**
+1. 放置**以 `work`（工作区）为基准**，不以 `monitor`。压到任务栏底下等于裁切 bug。
+   `work` 为空时回退 `monitor`。
+2. 超宽/超高时**缩小并置 `clamped`**，禁止越界；调用方必须 `DF_WARN`。
+3. 放置只有**一条代码路径**：`main.cpp` 的 `apply_placement` lambda。启动、`WM_DPICHANGED`、
+   `ShowWindow` 之后都调它。`lParam` 的建议矩形不使用——它按普通重叠窗口算，与按工作区
+   放置的 Dock 无关。
+4. `Window::Dpi()`（内容布局）与 `ComputeDockPlacement`（窗口尺寸）必须读同一个 DPI。
+   未设 override 时 `WM_DPICHANGED` 的 `wParam` 是权威值，优先于重新枚举的显示器 DPI
+   （枚举在转换瞬间可能滞后）。`DOCKFORGE_DPI_OVERRIDE` 设置时优先级最高且不被覆盖，
+   否则 DPI 矩阵无法在放置生效后保持稳定。
+5. 混合 DPI 验证靠两条互补证据：`tests/display_test.cpp` 对负原点副屏与 96+144 混合双屏做
+   纯逻辑断言；`DOCKFORGE_SIMULATE_DPI` 在进程内 `SendMessageW(WM_DPICHANGED)` 证明处理器
+   会重算尺寸与位置。
+
+**拒绝的方案**
+- **用 `lParam` 建议矩形**：它给的是"保持 DIP 尺寸不变"的矩形，而 Dock 的尺寸由配置与工作区
+  决定，采用它会把窗口拉到错误的尺寸。
+- **跨进程注入 `WM_DPICHANGED` 做验证**：实测 `PostMessage` 返回
+  `ERROR_MESSAGE_SYNC_ONLY`(1159)，`SendMessage` 返回 0 但处理器不执行（同进程内
+  `SendMessage` 立即生效）。`WM_CLOSE` 可跨进程，故这是系统消息特有的限制。
+- **假装混合 DPI 已验证**：单显示器主机上 `GetDpiForWindow` 恒返回真实 DPI。合成消息证明的是
+  处理器与放置数学，不等于验证了合成器的真实跨屏缩放。证据文件里明确写了这条边界。
+
+**后果**
+- 新增 `src/platform/display.{h,cpp}`（`EnumerateDisplays`/`PrimaryDisplay`/`DisplayForWindow`/
+  `DisplayForPoint`/`ComputeDockPlacement`/`DipToPixels`/`PixelsToDip`）与
+  `tests/display_test.cpp`（13 用例），全部测试 380 断言 / 72 用例通过。
+- `CMakeLists.txt` 链接库补 `shcore`（`GetDpiForMonitor` 所在）。
+- 三档 DPI 实测窗口 528x152 / 792x228 / 1056x304，底部居中且贴工作区，三张截图与差分采样
+  全部 PASS。
+- `WM_DPICHANGED` 处理器首次获得可复现验证：528x152 与 792x228 的矩形变化均由
+  `tools/simulate_dpi.ps1` 记录（`evidence/T-007/simulate_dpi96.txt`、`simulate_dpi144.txt`）。

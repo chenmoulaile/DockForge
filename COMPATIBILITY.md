@@ -1,5 +1,8 @@
 # COMPATIBILITY.md · 兼容性矩阵
 
+状态口径：**通过** = 有证据文件；**逻辑通过** = 纯逻辑单测覆盖但未在真机复现；
+**待测** = 无证据；**不可测** = 当前硬件不具备条件。
+
 ## 系统
 
 | 版本 | 状态 | 备注 |
@@ -9,27 +12,35 @@
 | Windows 11 22H2 | 待测 | Mica 可用 |
 | Windows 11 23H2 | 待测 | |
 | Windows 11 24H2 | 待测 | |
-| Windows 11 26xxx (Insider) | 开发机 | 当前开发环境 |
+| Windows 11 26xxx (Insider) | 通过 | 开发机 build 26300；`evidence/T-005`、`T-006`、`T-007` |
 
 ## DPI
 
-| 场景 | 状态 |
-|---|---|
-| 100% 单屏 | 待测 |
-| 150% 单屏 | 待测（每 UI 任务必测） |
-| 200% 单屏 | 待测 |
-| 混合 DPI 双屏 | 待测（每 UI 任务必测） |
+开发机只有一块显示器（`\\.\DISPLAY1` 2880x1920，有效 192 DPI / 原始 243 DPI）。
+三档 DPI 通过 `DOCKFORGE_DPI_OVERRIDE` 覆盖得到，属**进程内可控验证**，非真实换屏。
+
+| 场景 | 状态 | 证据 |
+|---|---|---|
+| 100% 单屏 | 通过 | `evidence/T-007/dpi96.png`、`alpha96.txt`、`px_dpi96.txt` |
+| 150% 单屏 | 通过 | `evidence/T-007/dpi144.png`、`alpha144.txt`、`px_dpi144.txt` |
+| 200% 单屏 | 通过 | `evidence/T-007/dpi192.png`、`alpha192.txt`、`px_dpi192.txt` |
+| 混合 DPI 双屏 | **逻辑通过**（不可真机测） | `tests/display_test.cpp` 的 96+144 用例；`simulate_dpi*.txt` |
 
 ## 显示器布局
 
-| 场景 | 状态 |
-|---|---|
-| 单屏 | 待测 |
-| 双屏同分辨率 | 待测 |
-| 双屏异分辨率 | 待测 |
-| 竖屏 | 待测 |
+| 场景 | 状态 | 证据 |
+|---|---|---|
+| 单屏 | 通过 | `evidence/T-007/edge_*.png` |
+| 双屏同分辨率 | 不可测（单显示器） | — |
+| 双屏异分辨率 | 不可测（单显示器） | — |
+| 竖屏 | 不可测（单显示器） | — |
+| 负原点副屏 | 逻辑通过 | `tests/display_test.cpp` 负坐标用例 |
 
 ## 已知限制
 
 - 无 MSVC/Windows SDK：MSIX 打包暂不可做（见 BLOCKERS.md B-002）。
 - 无 Windows App SDK：不使用 WinUI 3（见 DECISIONS.md ADR-0002）。
+- **单显示器主机**：真实跨屏 DPI 转换、双屏布局、竖屏均无法在本机复现。合成 `WM_DPICHANGED`
+  只能验证处理器与放置数学（ADR-0012），不得据此外推为"混合 DPI 实测通过"。
+- **DXGI Desktop Duplication 不可用**：`DuplicateOutput` 返回 `E_ACCESSDENIED`，本机有
+  GameViewer / MuMu 两个虚拟显示适配器（见 `evidence/T-005/dupl_bench.txt`）。

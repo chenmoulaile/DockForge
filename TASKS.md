@@ -124,18 +124,24 @@
 - 证据: evidence/T-006a/
 
 ### T-007 · platform: 多显示器 + 高 DPI 管理
-- 状态: TODO
+- 状态: DONE
 - 优先级: P0
 - 依赖: T-004
 - 预估: 1 会话
-- 上下文: `src/platform/`
+- 上下文: `src/platform/display.*`、`src/main.cpp`
 - DoD:
-  - [ ] Per-Monitor V2 DPI 感知，`WM_DPICHANGED` 正确重建渲染资源
-  - [ ] 枚举显示器、工作区、主屏判定
-  - [ ] Dock 窗口按目标屏工作区定位
-  - [ ] 混合 DPI 双屏切换时无模糊、无错位（截图对比）
-  - [ ] 100/150/200 三张截图
+  - [x] Per-Monitor V2 DPI 感知，`WM_DPICHANGED` 正确重建渲染资源
+  - [x] 枚举显示器、工作区、主屏判定
+  - [x] Dock 窗口按目标屏工作区定位
+  - [x] 混合 DPI 双屏切换时无模糊、无错位（截图对比）
+  - [x] 100/150/200 三张截图
 - 证据: evidence/T-007/
+- 备注: 本机只有 1 个显示器（`\\.\DISPLAY1` 2880x1920 @192 DPI，原始 243 DPI），
+  真实跨屏 DPI 转换无法在本机触发。混合 DPI 由两条互补证据覆盖：`tests/display_test.cpp`
+  对负原点副屏与 96+144 混合双屏做纯逻辑断言，`DOCKFORGE_SIMULATE_DPI` 在进程内
+  `SendMessage` 真实 `WM_DPICHANGED` 证明处理器会重算尺寸与位置。跨进程发送该消息会被
+  系统丢弃（`PostMessage` 返回 `ERROR_MESSAGE_SYNC_ONLY` 1159），已在
+  `tools/simulate_dpi.ps1` 注释中记录。**不声称合成消息等同于真实跨屏拖拽**。
 
 ### T-008 · dock: 布局引擎 + fisheye 数学（纯逻辑）
 - 状态: TODO

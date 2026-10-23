@@ -1,0 +1,7 @@
+requested_dpi=96
+rule=the handler must recompute size and position from the work area; a no-op handler leaves the rect unchanged
+baseline      912,1504 1056x304 window_dpi=192
+simulated  96 1176,1664 528x152 window_dpi=192
+resized=1 moved=1
+verdict=HANDLER_ACTIVE
+note=window_dpi stays at the host DPI because no real cross-monitor transition occurred

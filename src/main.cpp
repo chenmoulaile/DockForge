@@ -2,7 +2,7 @@
 //
 // T-001 skeleton window, T-002 config wiring, T-003 frame-driven app loop,
 // T-004 DirectComposition surface, T-005 render backend + material tiers,
-// T-006 shell app resolution + icon cache.
+// T-006 shell app resolution + icon cache, T-007 display enumeration + placement.
 #include "core/app_loop.h"
 #include "core/config.h"
 #include "core/event_bus.h"
@@ -10,6 +10,7 @@
 #include "core/log.h"
 #include "core/paths.h"
 #include "platform/composition.h"
+#include "platform/display.h"
 #include "platform/window.h"
 #include "render/backend.h"
 #include "render/backdrop_capture.h"
@@ -47,6 +48,40 @@ void ApplyDpiOverrideFromEnvironment() {
     const int value = _wtoi(buffer);
     if (value >= 72 && value <= 480) {
         platform::Window::SetDpiOverride(static_cast<UINT>(value));
+    }
+}
+
+// DOCKFORGE_TARGET_DISPLAY=<index> pins the dock to one enumerated display.
+// Index follows platform::EnumerateDisplays() order (primary first), so it is
+// stable across runs. Without it the dock follows the primary display.
+std::optional<int> TargetDisplayFromEnvironment() {
+    wchar_t buffer[16]{};
+    const DWORD n = GetEnvironmentVariableW(L"DOCKFORGE_TARGET_DISPLAY", buffer,
+                                            ARRAYSIZE(buffer));
+    if (n == 0 || n >= ARRAYSIZE(buffer)) return std::nullopt;
+    const int value = _wtoi(buffer);
+    if (value < 0) return std::nullopt;
+    return value;
+}
+
+// DOCKFORGE_SIMULATE_DPI=<dpi> posts a synthetic WM_DPICHANGED after startup.
+// The OS drops cross-process WM_DPICHANGED (WM_CLOSE crosses, 0x02E0 does not),
+// so a single-monitor host can only exercise the handler from inside the process.
+std::optional<UINT> SimulatedDpiFromEnvironment() {
+    wchar_t buffer[16]{};
+    const DWORD n = GetEnvironmentVariableW(L"DOCKFORGE_SIMULATE_DPI", buffer,
+                                            ARRAYSIZE(buffer));
+    if (n == 0 || n >= ARRAYSIZE(buffer)) return std::nullopt;
+    const int value = _wtoi(buffer);
+    if (value >= 72 && value <= 480) return static_cast<UINT>(value);
+    return std::nullopt;
+}
+
+platform::DockEdge ToDockEdge(core::DockPosition position) {    switch (position) {
+        case core::DockPosition::Left: return platform::DockEdge::Left;
+        case core::DockPosition::Right: return platform::DockEdge::Right;
+        case core::DockPosition::Bottom:
+        default: return platform::DockEdge::Bottom;
     }
 }
 
@@ -199,6 +234,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     DF_INFO("app", "DockForge %s starting", "0.1.0");
     DF_INFO("app", "config path = %s", core::WideToUtf8(core::ConfigPath()).c_str());
     ApplyDpiOverrideFromEnvironment();
+    // Remembered separately from Window::DpiOverride() because the WM_DPICHANGED
+    // handler writes a synthetic override of its own; without this flag an
+    // operator-supplied DOCKFORGE_DPI_OVERRIDE would be silently replaced the
+    // first time the dock crossed a monitor boundary.
+    const bool dpi_forced_by_env = platform::Window::DpiOverride() != 0;
 
     core::Config config = core::LoadConfig();
     DF_INFO("app", "config: icon_size=%d gap=%d mag=%.2f falloff=%s material=%s corner=%d",
@@ -309,18 +349,84 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     int backdrop_h = 0;
     std::uint64_t backdrop_generation = 0;
 
-    // Resize to the DPI-correct physical size now that the monitor is known.
-    auto resize_to_logical = [&window, &surface](LogicalSize size) {
-        const float scale = window.Scale();
-        const int w = static_cast<int>(std::lround(size.width * scale));
-        const int h = static_cast<int>(std::lround(size.height * scale));
-        RECT rc{};
-        GetWindowRect(window.Handle(), &rc);
-        SetWindowPos(window.Handle(), nullptr, 0, 0, w, h,
-                     SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
-        surface.Resize(w, h);
+    // ---- dock placement (T-007) -----------------------------------------
+    // Placement is computed from the display's WORK AREA in physical pixels, not
+    // from the monitor rect: a dock that slides under the taskbar looks like a
+    // clipping bug. ComputeDockPlacement also clamps, so a dock bigger than the
+    // screen shrinks instead of running off the edge. This single lambda is the
+    // only place that sizes and positions the window, so WM_DPICHANGED and
+    // startup can never disagree about the geometry.
+    const auto displays = platform::EnumerateDisplays();
+    for (std::size_t i = 0; i < displays.size(); ++i) {
+        const auto& d = displays[i];
+        DF_INFO("platform",
+                "display[%zu] %s monitor=%ld,%ld,%ld,%ld work=%ld,%ld,%ld,%ld dpi=%u raw=%u "
+                "primary=%d",
+                i, core::WideToUtf8(d.device).c_str(), d.monitor.left, d.monitor.top,
+                d.monitor.right, d.monitor.bottom, d.work.left, d.work.top, d.work.right,
+                d.work.bottom, d.effective_dpi, d.raw_dpi, d.primary ? 1 : 0);
+    }
+
+    platform::DisplayInfo target_display;
+    bool have_target = false;
+    if (const auto wanted = TargetDisplayFromEnvironment()) {
+        if (*wanted < static_cast<int>(displays.size())) {
+            target_display = displays[static_cast<std::size_t>(*wanted)];
+            have_target = true;
+            DF_INFO("app", "dock pinned to display[%d] by DOCKFORGE_TARGET_DISPLAY", *wanted);
+        } else {
+            DF_WARN("app", "DOCKFORGE_TARGET_DISPLAY=%d out of range (have %zu)", *wanted,
+                    displays.size());
+        }
+    }
+    if (!have_target) have_target = platform::PrimaryDisplay(target_display);
+
+    // The DPI override exists so the DPI matrix is provable on a single-DPI
+    // machine. It must drive placement as well as content, otherwise a 96 DPI
+    // override would lay out DIPs at 96 while sizing the window at the monitor's
+    // real scale, and the panel would not fill the window. Re-applied after a
+    // WM_DPICHANGED re-resolves the display, or the override would silently
+    // disappear the first time the dock crosses a monitor boundary.
+    auto apply_dpi_override = [](platform::DisplayInfo& display) {
+        const UINT forced = platform::Window::DpiOverride();
+        if (forced != 0) display.effective_dpi = forced;
     };
-    resize_to_logical(logical);
+    if (const UINT forced = platform::Window::DpiOverride(); forced != 0 && have_target) {
+        DF_INFO("app", "dpi override %u replaces display dpi %u for placement", forced,
+                target_display.effective_dpi);
+    }
+    apply_dpi_override(target_display);
+
+    const platform::DockEdge edge = ToDockEdge(config.dock.position);
+    auto apply_placement = [&]() {
+        if (!have_target) return;
+        const auto placement = platform::ComputeDockPlacement(
+            target_display, edge, logical.width, logical.height, 8.0f);
+        if (placement.clamped) {
+            DF_WARN("platform", "dock clamped to %dx%d px on %s (work area %dx%d)",
+                    placement.width_px, placement.height_px,
+                    core::WideToUtf8(target_display.device).c_str(),
+                    target_display.WorkWidth(), target_display.WorkHeight());
+        }
+        SetWindowPos(window.Handle(), HWND_TOPMOST, placement.rect.left, placement.rect.top,
+                     placement.width_px, placement.height_px,
+                     SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        surface.Resize(placement.width_px, placement.height_px);
+        if (capture_active) {
+            capture.SetRegion(placement.rect.left, placement.rect.top, placement.width_px,
+                              placement.height_px);
+        }
+        RECT actual{};
+        GetWindowRect(window.Handle(), &actual);
+        DF_INFO("app",
+                "dock placed edge=%d work=%ld,%ld,%ld,%ld target=%ld,%ld %dx%d "
+                "rect=%ld,%ld,%ld,%ld dpi=%u",
+                static_cast<int>(edge), target_display.work.left, target_display.work.top,
+                target_display.work.right, target_display.work.bottom, placement.rect.left,
+                placement.rect.top, placement.width_px, placement.height_px, actual.left,
+                actual.top, actual.right, actual.bottom, window.Dpi());
+    };
+    apply_placement();
 
     if (plate_style.use_capture && caps.capture_available) {
         if (freeze_backdrop) {
@@ -432,14 +538,36 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                 return true;
             }
             case WM_DPICHANGED: {
-                const auto* suggested = reinterpret_cast<const RECT*>(lp);
-                if (suggested) {
-                    SetWindowPos(hwnd, nullptr, suggested->left, suggested->top,
-                                 suggested->right - suggested->left,
-                                 suggested->bottom - suggested->top,
-                                 SWP_NOZORDER | SWP_NOACTIVATE);
+                // The dock may have been dragged to a display with a different
+                // scale. wParam is authoritative for the new DPI: it is what the
+                // OS will actually render the window at, while GetDpiForMonitor
+                // can lag a transition. The suggested rect in lParam is ignored
+                // because it assumes a normal overlapped window; we place against
+                // the work area instead.
+                const UINT new_dpi = LOWORD(wp);
+                const UINT previous = target_display.effective_dpi;
+                platform::DisplayInfo hosting;
+                if (platform::DisplayForWindow(hwnd, hosting) && have_target) {
+                    target_display = hosting;
                 }
-                resize_to_logical(logical);
+                // Content layout (Window::Dpi) and window sizing must read the
+                // same DPI or the panel is laid out at one scale inside a window
+                // sized at another. wParam is what the OS will actually render
+                // at, so it wins over the enumerated monitor DPI. An explicit
+                // DOCKFORGE_DPI_OVERRIDE still wins over both, otherwise the DPI
+                // matrix could not be held stable while the dock moves.
+                if (!dpi_forced_by_env) {
+                    platform::Window::SetDpiOverride(new_dpi);
+                }
+                if (have_target) {
+                    target_display.effective_dpi = platform::Window::DpiOverride() != 0
+                                                       ? platform::Window::DpiOverride()
+                                                       : new_dpi;
+                }
+                DF_INFO("platform", "dpi changed to %u on %s (effective %u -> %u)", new_dpi,
+                        core::WideToUtf8(target_display.device).c_str(), previous,
+                        target_display.effective_dpi);
+                apply_placement();
                 InvalidateRect(hwnd, nullptr, FALSE);
                 out = 0;
                 return true;
@@ -482,21 +610,23 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     ShowWindow(window.Handle(), SW_SHOWNOACTIVATE);
     UpdateWindow(window.Handle());
 
-    // Center the window on the primary monitor's work area.
-    RECT work = window.MonitorWorkArea();
-    if (work.right > work.left) {
-        RECT rc{};
-        GetWindowRect(window.Handle(), &rc);
-        const int w = rc.right - rc.left;
-        const int h = rc.bottom - rc.top;
-        const int x = work.left + ((work.right - work.left) - w) / 2;
-        const int y = work.top + ((work.bottom - work.top) - h) / 2;
-        SetWindowPos(window.Handle(), nullptr, x, y, 0, 0,
-                     SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
-        GetWindowRect(window.Handle(), &rc);
-        DF_INFO("app", "work=%ld,%ld,%ld,%ld target=%d,%d rect=%ld,%ld,%ld,%ld dpi=%u",
-                work.left, work.top, work.right, work.bottom, x, y, rc.left, rc.top, rc.right,
-                rc.bottom, window.Dpi());
+    // Re-run placement now that the window is mapped: the first pass happened
+    // before ShowWindow, so the work area is re-read in case the taskbar changed
+    // between enumeration and mapping.
+    apply_placement();
+
+    // DOCKFORGE_SIMULATE_DPI=<dpi> posts a synthetic WM_DPICHANGED once the loop
+    // is running. A single-monitor host cannot produce a genuine per-monitor DPI
+    // transition, and the OS silently drops a WM_DPICHANGED that arrives from
+    // another process (verified: WM_CLOSE crosses, 0x02E0 does not), so the only
+    // honest way to exercise the handler is from inside the process.
+    if (const auto simulated = SimulatedDpiFromEnvironment()) {
+        DF_INFO("app", "posting synthetic WM_DPICHANGED dpi=%u", *simulated);
+        // SendMessage, not PostMessage: the OS rejects a posted WM_DPICHANGED
+        // with ERROR_MESSAGE_SYNC_ONLY (1159) because it is a system message that
+        // only has meaning when delivered synchronously.
+        SendMessageW(window.Handle(), WM_DPICHANGED, MAKEWPARAM(*simulated, *simulated), 0);
+        DF_INFO("app", "synthetic dpi change delivered");
     }
     repaint();
 
