@@ -1,48 +1,56 @@
-{
-  "project": "DockForge",
-  "schema": 1,
-  "milestone": "M0",
-  "last_task": "T-003",
-  "last_commit": "pending",
-  "current_module": "platform",
-  "current_task": null,
-  "counters": {
-    "total": 15,
-    "done": 3,
-    "partial": 0,
-    "blocked": 0
-  },
-  "remote": {
-    "name": "origin",
-    "url": null,
-    "status": "unconfigured",
-    "reason": "gh repo create 返回 exit=4（未登录）；本地 commit 正常，push 步骤 SKIPPED",
-    "retry_command": "gh auth login 后执行: gh repo create DockForge --private --source=. --remote=origin --push"
-  },
-  "toolchain": {
-    "compiler": "g++ (MSYS2 mingw-w64) 15.2.0",
-    "cmake": "4.4.2",
-    "generator": "MinGW Makefiles (mingw32-make)",
-    "build_entry": "tools/build.ps1 -Action all",
-    "sdk_headers": "mingw-w64 自带 Windows 头 (dcomp.h / dwmapi.h / d2d1_3.h 均存在)",
-    "msvc": "absent",
-    "windows_app_sdk": "absent",
-    "decision": "ADR-0002：纯 Win32 + DirectComposition + Direct2D"
-  },
-  "targets": {
-    "os": ["Windows 10 21H2+", "Windows 11 22H2+"],
-    "arch": ["x64"]
-  },
-  "known_gotchas": [
-    "WS_EX_NOREDIRECTIONBITMAP 下 GDI 绘制不可见，必须走 DComp（T-001 实测）",
-    "wWinMain 需 -municode；Catch2 需 DO_NOT_USE_WMAIN",
-    "FOLDERID_* 需链接 -luuid",
-    "日志句柄用 _wfsopen(_SH_DENYWR) 否则外部无法 tail",
-    "MsgWaitForMultipleObjectsEx 的 timeout 被系统定时器粒度(~15.6ms)量化；帧节奏必须用 CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 等待定时器（ADR-0006）",
-    "截止时间必须固定步进推进（next += interval）并落后重同步，否则抖动累积成漂移",
-    "MinGW std::ifstream 不收 wstring 路径，文件 IO 统一走 Win32 API",
-    "PowerShell 传 -Wl,--whole-archive 需用 cmd /c 包裹",
-    "新增源文件必须先跑 cmake configure，否则 GLOB mismatch"
-  ],
-  "updated_at": "2026-10-23T23:36:00+08:00"
+﻿{
+    "project":  "DockForge",
+    "schema":  1,
+    "milestone":  "M0",
+    "last_task":  "T-004",
+    "last_commit":  "pending",
+    "current_module":  "render",
+    "current_task":  null,
+    "counters":  {
+                     "total":  15,
+                     "done":  4,
+                     "partial":  0,
+                     "blocked":  0
+                 },
+    "remote":  {
+                   "name":  "origin",
+                   "url":  null,
+                   "status":  "unconfigured",
+                   "reason":  "gh repo create 返回 exit=4（未登录）；本地 commit 正常，push 步骤 SKIPPED",
+                   "retry_command":  "gh auth login 后执行: gh repo create DockForge --private --source=. --remote=origin --push"
+               },
+    "toolchain":  {
+                      "compiler":  "g++ (MSYS2 mingw-w64) 15.2.0",
+                      "cmake":  "4.4.2",
+                      "generator":  "MinGW Makefiles (mingw32-make)",
+                      "build_entry":  "tools/build.ps1 -Action all",
+                      "sdk_headers":  "mingw-w64 自带 Windows 头 (dcomp.h / dwmapi.h / d2d1_3.h 均存在)",
+                      "msvc":  "absent",
+                      "windows_app_sdk":  "absent",
+                      "decision":  "ADR-0002：纯 Win32 + DirectComposition + Direct2D"
+                  },
+    "targets":  {
+                    "os":  [
+                               "Windows 10 21H2+",
+                               "Windows 11 22H2+"
+                           ],
+                    "arch":  [
+                                 "x64"
+                             ]
+                },
+    "known_gotchas":  [
+                          "WS_EX_NOREDIRECTIONBITMAP 下 GDI 绘制不可见，必须走 DComp（T-001 实测）",
+                          "wWinMain 需 -municode；Catch2 需 DO_NOT_USE_WMAIN",
+                          "FOLDERID_* 需链接 -luuid",
+                          "日志句柄用 _wfsopen(_SH_DENYWR) 否则外部无法 tail",
+                          "MsgWaitForMultipleObjectsEx 的 timeout 被系统定时器粒度(~15.6ms)量化；帧节奏必须用 CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 等待定时器（ADR-0006）",
+                          "截止时间必须固定步进推进（next += interval）并落后重同步，否则抖动累积成漂移",
+                          "MinGW std::ifstream 不收 wstring 路径，文件 IO 统一走 Win32 API",
+                          "PowerShell 传 -Wl,--whole-archive 需用 cmd /c 包裹",
+                          "新增源文件必须先跑 cmake configure，否则 GLOB mismatch",
+                          "IDCompositionSurface::BeginDraw 返回的 offset 是物理像素，SetTransform 吃 DIP：必须乘 96/dpi 否则非 96 DPI 内容偏移出窗口",
+                          "ID2D1DeviceContext::GetPixelSize() 返回合成图集尺寸而非 surface 尺寸，布局必须用 CompositionSurface::PaintInfo 的 width_dip/height_dip",
+                          "证明 NOREDIRECTIONBITMAP 窗口透明必须差分采样（窗口在 vs 进程被杀），ShowWindow(SW_HIDE) 经 DWM 异步生效会导致误判"
+                      ],
+    "updated_at":  "2026-10-23T23:52:57+08:00"
 }

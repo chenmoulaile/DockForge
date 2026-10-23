@@ -65,17 +65,17 @@
 - 证据: evidence/T-003/
 
 ### T-004 · platform: DirectComposition 分层窗口 spike
-- 状态: TODO
+- 状态: DONE
 - 优先级: P0
 - 依赖: T-001
 - 预估: 1 会话
 - 上下文: `spikes/t004_dcomp/`、`src/platform/`
 - DoD:
-  - [ ] spike 独立可编译，创建 `WS_EX_NOREDIRECTIONBITMAP` + `WS_EX_LAYERED` 窗口
-  - [ ] `DCompositionCreateDevice2` → `IDCompositionDesktopDevice` → `CreateTargetForHwnd` 成功（HRESULT 打印）
-  - [ ] 窗口显示纯色 visual，无黑块，圆角外区域真透明
-  - [ ] 结论写入 DECISIONS.md（成功则纳入主工程）
-  - [ ] 截图 `evidence/T-004/dpi100.png`
+  - [x] spike 独立可编译，创建 `WS_EX_NOREDIRECTIONBITMAP` + `WS_EX_LAYERED` 窗口
+  - [x] `DCompositionCreateDevice2` → `IDCompositionDesktopDevice` → `CreateTargetForHwnd` 成功（HRESULT 打印）
+  - [x] 窗口显示纯色 visual，无黑块，圆角外区域真透明
+  - [x] 结论写入 DECISIONS.md（成功则纳入主工程）
+  - [x] 截图 `evidence/T-004/dpi96.png`、`dpi144.png`、`dpi192.png`（96/144/192 DPI 即 100%/150%/200% 缩放；用 `DOCKFORGE_DPI_OVERRIDE` 强制，本机单屏 192 DPI 无法靠系统设置覆盖）
 - 证据: evidence/T-004/
 
 ### T-005 · render: D2D/DWrite 后端 + 材质多级回退

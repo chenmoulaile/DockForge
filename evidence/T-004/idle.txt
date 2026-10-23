@@ -1,0 +1,5 @@
+﻿window: DockForge DComp skeleton, 60s idle, 192 DPI host, cores=18
+cpu_total_s: 0.063 -> 0.109  delta=0.047s  avg=0.0043%
+rss_mb: 65.80 -> 65.85
+handles: 249 -> 250
+threads: 5

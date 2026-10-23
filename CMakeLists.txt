@@ -43,7 +43,7 @@ target_link_libraries(dockforge_lib PUBLIC thirdparty_nlohmann)
 
 target_link_libraries(dockforge_lib PUBLIC
   user32 gdi32 shell32 shlwapi ole32 oleaut32 uuid dwmapi
-  d2d1 dwrite dcomp psapi advapi32)
+  d2d1 dwrite dcomp psapi advapi32 d3d11 dxgi)
 
 # ---------------------------------------------------------------- executable
 add_executable(DockForge ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp)

@@ -1,0 +1,33 @@
+﻿--- DPI 96 ---
+window=1176,836 size=528x152 pid=9272
+rule=unchanged means TRANSPARENT (desktop shows through); changed means PAINTED (tolerance=2)
+point        xy           shown            hidden           verdict
+center       264,76       54,51,69         191,169,241      PAINTED
+corner_tl    3,3          10,5,27          10,5,27          TRANSPARENT
+corner_tr    524,3        21,9,45          21,9,45          TRANSPARENT
+corner_bl    3,148        17,7,41          17,7,41          TRANSPARENT
+corner_br    524,148      2,1,7            2,1,7            TRANSPARENT
+top_mid      264,2        20,21,28         2,1,9            PAINTED
+summary: painted=2 transparent=4
+--- DPI 144 ---
+window=1044,798 size=792x228 pid=11996
+rule=unchanged means TRANSPARENT (desktop shows through); changed means PAINTED (tolerance=2)
+point        xy           shown            hidden           verdict
+center       396,114      54,51,69         191,169,241      PAINTED
+corner_tl    3,3          1,1,3            1,1,3            TRANSPARENT
+corner_tr    788,3        0,0,0            0,0,0            TRANSPARENT
+corner_bl    3,224        22,10,46         22,10,46         TRANSPARENT
+corner_br    788,224      5,5,5            5,5,5            TRANSPARENT
+top_mid      396,2        20,21,27         2,1,7            PAINTED
+summary: painted=2 transparent=4
+--- DPI 192 ---
+window=912,760 size=1056x304 pid=33252
+rule=unchanged means TRANSPARENT (desktop shows through); changed means PAINTED (tolerance=2)
+point        xy           shown            hidden           verdict
+center       528,152      54,51,69         191,169,241      PAINTED
+corner_tl    3,3          12,7,29          12,7,29          TRANSPARENT
+corner_tr    1052,3       28,13,56         28,13,56         TRANSPARENT
+corner_bl    3,300        10,5,27          10,5,27          TRANSPARENT
+corner_br    1052,300     126,90,190       126,90,190       TRANSPARENT
+top_mid      528,2        26,24,38         35,17,69         PAINTED
+summary: painted=2 transparent=4

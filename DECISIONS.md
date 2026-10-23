@@ -92,7 +92,6 @@
 ---
 
 ## ADR-0006 · 帧定时用高分辨率等待定时器，不用消息等待 timeout
-
 **状态**：Accepted（2026-10-23，T-003 实测）
 
 **背景**
@@ -108,3 +107,25 @@ T-003 首版把帧间隔直接作为 `MsgWaitForMultipleObjectsEx` 的 `dwMillis
 - 实测 `avg=16.00ms p50=16.00ms p99=16.66ms fps=62.5`，空闲 CPU 0.05%，满足 PERFORMANCE.md 的 60 FPS 硬指标。
 - 主循环多持有一个内核句柄（1 个），`AppLoop` 析构时关闭。
 - 后续动画任务（T-010）若需要 sub-ms 对齐，可在同一路径上缩短 `interval_ms_`，无需改结构。
+
+---
+
+## ADR-0007 · Dock 窗口用 WS_EX_NOREDIRECTIONBITMAP，不用 WS_EX_LAYERED
+
+**状态**：Accepted（2026-10-23，T-004 spike 实测）
+
+**背景**
+`spikes/t004_dcomp` 对四种扩展样式做了像素级对照（背景窗铺 `RGB(0,128,255)`，Dock 窗口 240x90 DIP / 圆角 20 DIP / 192 DPI）：
+`NOREDIRECTIONBITMAP`、`NOREDIRECTIONBITMAP|LAYERED`、`LAYERED`、`PLAIN` 四种模式下，圆角外区域采样均为背景色，圆角内为中心色，视觉上无差别。
+
+**决策**
+1. Dock / Finder Bar 等所有 DComp 内容窗口只用 `WS_EX_NOREDIRECTIONBITMAP`，不叠加 `WS_EX_LAYERED`。
+2. `WS_EX_LAYERED` 仅在需要 `UpdateLayeredWindow` 位图上传的临时场景（如拖拽 ghost 若走 GDI）使用。
+3. `DCompositionCreateDevice2` 的 renderingDevice 必须是 **ID2D1Device**，不是 IDXGIDevice——后者会让 `IDCompositionSurface::BeginDraw` 返回 `E_NOINTERFACE (0x80004002)`。
+4. 内容一律在 DIP 坐标布局，`ID2D1DeviceContext::SetDpi(dpi,dpi)` 做缩放；窗口物理尺寸按 `lround(logical * dpi / 96)`。
+5. 置顶窗口的 z 序必须用 `SetWindowPos` 显式指定，不得依赖创建顺序（spike 中两个 `WS_EX_TOPMOST` 窗口的叠放顺序与创建顺序相反）。
+
+**后果**
+- 少一次 DWM 分层合成拷贝，渲染路径更短。
+- 主工程窗口创建统一走 `WindowDesc.composition_surface = true`。
+- 拖拽 ghost 若需要半透明跟随鼠标，仍可用 DComp 自身实现，不必回到 `WS_EX_LAYERED`。

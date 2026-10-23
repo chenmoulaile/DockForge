@@ -9,6 +9,9 @@ namespace {
 
 constexpr wchar_t kWindowClass[] = L"DockForgeHostWindow";
 
+// 0 = use the real monitor DPI. See Window::SetDpiOverride.
+UINT g_dpi_override = 0;
+
 // DWMWA_USE_IMMERSIVE_DARK_MODE is 20 on 20H1+, 19 on earlier builds.
 constexpr DWORD kDwmwaUseImmersiveDarkModeLegacy = 19;
 constexpr DWORD kDwmwaUseImmersiveDarkMode = 20;
@@ -72,10 +75,15 @@ void Window::Destroy() {
 }
 
 UINT Window::Dpi() const {
+    if (g_dpi_override) return g_dpi_override;
     if (!hwnd_) return 96;
     const UINT dpi = GetDpiForWindow(hwnd_);
     return dpi ? dpi : 96;
 }
+
+void Window::SetDpiOverride(UINT dpi) { g_dpi_override = dpi; }
+
+UINT Window::DpiOverride() { return g_dpi_override; }
 
 float Window::Scale() const { return static_cast<float>(Dpi()) / 96.0f; }
 

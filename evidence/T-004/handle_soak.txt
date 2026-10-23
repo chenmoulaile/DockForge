@@ -1,0 +1,5 @@
+﻿t=  0s handles=249 threads=6 rss_mb=65.82 cpu_s=0.109
+t= 30s handles=249 threads=8 rss_mb=65.89 cpu_s=0.172
+t= 60s handles=250 threads=5 rss_mb=65.85 cpu_s=0.188
+t= 90s handles=250 threads=5 rss_mb=65.85 cpu_s=0.219
+t=120s handles=250 threads=5 rss_mb=65.85 cpu_s=0.250

@@ -51,6 +51,12 @@ public:
     UINT Dpi() const;
     float Scale() const;
 
+    // Testing hook: forces Dpi() to report `dpi` regardless of the monitor.
+    // Exists because the DPI matrix in COMPATIBILITY.md must be verifiable on a
+    // single-DPI host; 0 restores the real monitor DPI. Not user-facing.
+    static void SetDpiOverride(UINT dpi);
+    static UINT DpiOverride();
+
     // Applies rounded corners + dark-mode frame where supported.
     void ApplyRoundedCorners(int radius_px, bool dark);
 

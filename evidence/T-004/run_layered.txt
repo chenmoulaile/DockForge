@@ -1,0 +1,19 @@
+CoInitializeEx                             hr=0x00000000 OK
+D3D11CreateDevice(hardware)                hr=0x00000000 OK
+ID3D11Device -> IDXGIDevice                hr=0x00000000 OK
+D2D1CreateFactory                          hr=0x00000000 OK
+ID2D1Factory1::CreateDevice                hr=0x00000000 OK
+backdrop=on color=RGB(0,128,255)
+mode=LAYERED window=(120,140 480x180)
+DCompositionCreateDevice2(ID2D1Device)     hr=0x00000000 OK
+IDCompositionDesktopDevice::CreateTargetForHwnd hr=0x00000000 OK
+IDCompositionDesktopDevice::CreateVisual   hr=0x00000000 OK
+IDCompositionDevice2::CreateSurface        hr=0x00000000 OK
+IDCompositionVisual::SetContent            hr=0x00000000 OK
+IDCompositionTarget::SetRoot               hr=0x00000000 OK
+IDCompositionSurface::BeginDraw            hr=0x00000000 OK
+ID2D1DeviceContext::CreateSolidColorBrush  hr=0x00000000 OK
+IDCompositionSurface::EndDraw              hr=0x00000000 OK
+IDCompositionDevice2::Commit               hr=0x00000000 OK
+READY
+EXIT
