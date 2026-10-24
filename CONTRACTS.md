@@ -805,8 +805,14 @@ C-14h 承诺的"逐窗口指示依赖 T-015 的窗口列表"即此函数，但**
 | 多窗口横向 ≤8 | 同一 app 开 N 个窗口后悬停 | 日志 `windows=N`，视觉 N 槽，N>8 只出 8 |
 | 最小化不黑 | 最小化源窗后悬停 | 槽内仍是末帧（非纯黑板） |
 | UWP 枚举 | Calculator 悬停 | 日志 `frame hwnd`/`app_pid` 不同且内容正确 |
-| 句柄无泄漏 | `GetGuiResources` 前后 + 40 轮显隐 | GDIOBJECTS/USEROBJECTS 前后一致 |
-| 帧预算 | `tools/hover_bench.ps1` 变体，等 `frames=1000` | p99 ≤16.7ms |
+| 句柄无泄漏 | `tools/preview_handles.ps1`，40 轮显隐 | GDIOBJECTS/USEROBJECTS 前后一致 |
+| 帧预算 | `tools/hover_bench.ps1`，A/B 交替（预览开/关） | p99 ≤16.7ms，且 p99 差 <0.018ms（同配置运行间噪声底，T-012 实测） |
+
+`tools/hover_bench.ps1` 的实现约束（沿用 T-014/T-012 的三条教训）：
+
+1. **快门由日志驱动，不用固定 sleep**。固定 sleep 实测在事件前 ~200ms 开快门，得到 `changed_pixels=0`，会被读成"没弹预览"。
+2. **A/B 交替，单次对比不成立**。同配置运行间波动 0.018ms 与待测差值同量级（T-012 实测），必须 `DOCKFORGE_PREVIEW=1` 与 `=0` 交替跑，差值低于噪声底时判"无信号"而不是"更快"。
+3. **必须等 `frames=1000`**。`FrameClock` 是 1000 样本滚动窗，启动期首帧 309ms 会污染前 16 秒的 p99（C-15i）。
 
 视觉证据一律 `DOCKFORGE_FORCE_MATERIAL=solid`（C-16j 第 2 条同因：blur 档 `WDA_EXCLUDEFROMCAPTURE` 使 `CopyFromScreen` 拍不到 dock）。
 

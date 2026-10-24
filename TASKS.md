@@ -293,13 +293,14 @@
 - 预估: 1 会话
 - 上下文: `tools/`、`src/`
 - DoD:
-  - [ ] `tools/preview_probe.ps1`：悬停 <400ms 无 `preview shown tile=`，≥400ms 有（C-17j 第 1 行）
-  - [ ] 同一 app 开 4 窗悬停：日志 `windows=4`，视觉 4 槽；开 10 窗只出 8 槽
-  - [ ] 最小化源窗后悬停：槽内仍是末帧（非纯黑板）
-  - [ ] Calculator 悬停：日志 `source[i] hwnd/app_pid` 不同且内容正确（C-17g）
-  - [ ] `tools/hover_bench.ps1`：等 `frames=1000` 后 p99 ≤16.7ms
-  - [ ] 40 轮显隐后 `GetGuiResources` GDIOBJECTS/USEROBJECTS 前后一致
+  - [ ] `tools/preview_probe.ps1`：悬停 <400ms 无 `preview shown tile=`，≥400ms 有（C-17j 第 1 行）【脚本已写，未运行】
+  - [ ] 同一 app 开 4 窗悬停：日志 `windows=4`，视觉 4 槽；开 10 窗只出 8 槽【未做：需先开窗脚本】
+  - [ ] 最小化源窗后悬停：槽内仍是末帧（非纯黑板）【未做：需先最小化脚本】
+  - [ ] Calculator 悬停：日志 `source[i] hwnd/app_pid` 不同且内容正确（C-17g）【preview_probe.ps1 已采集 source 行，未运行】
+  - [ ] `tools/hover_bench.ps1`：等 `frames=1000` 后 p99 ≤16.7ms【脚本已写（A/B 对照 + 0.018ms 噪声门限），未运行】
+  - [ ] 40 轮显隐后 `GetGuiResources` GDIOBJECTS/USEROBJECTS 前后一致【脚本已写 preview_handles.ps1，未运行】
 - 证据: evidence/T-016/
+- 前置已就绪（本轮本地完成，未执行）：`tools/preview_probe.ps1`、`tools/hover_bench.ps1`（A/B 预览开关对照）、`tools/preview_handles.ps1`（40 轮显隐 + GetGuiResources）。执行需用户放行实机验证。
 
 ---
 
