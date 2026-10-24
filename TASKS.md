@@ -12,9 +12,11 @@
 | M0 | 骨架与验证 | 构建链路、窗口、渲染、配置、图标、布局数学全部跑通 | DONE（T-006a 帧尾延迟仍 TODO P1） |
 | M1 | Dock 核心 | 可用的 Dock 栏（放大、启动、指示、拖拽、缩略图） | DONE（T-009..T-016 全部 DONE） |
 | M2 | Finder Bar | 顶部栏 | TODO |
-| M3 | Launchpad | 全屏网格 | TODO |
+| M3 | Launchpad | 全屏网格启动器 | TODO |
 | M4 | 配置与主题 | 热重载 + 主题包 | TODO |
-| M5 | 系统集成 | 自启、隐藏任务栏、转储、更新 | TODO |
+| M5 | 系统集成 | 自启、隐藏任务栏、转储、日志轮转 | TODO |
+| M6 | Stage Manager | 窗口分组与切换 | TODO |
+| M7 | 质量加固与分发 | 冒烟测试、性能基准、安装包 | TODO |
 
 ---
 
@@ -305,6 +307,251 @@
 - 本轮修复的产品缺陷: `shell::WindowsForEntry` 的预筛用字符串比较，重犯 scoop junction 陷阱，
   导致 7-Zip 三窗口永不弹预览；已删除预筛，直接走 `shell::MatchesEntry`
 - 已知边界: 多窗口证据用 7-Zip（Win32，3-10 窗口）；Sublime/Chrome 无法开出第二窗口，未覆盖
+
+---
+
+---
+
+## M3 · Launchpad（P1）
+
+### T-040 · Launchpad 应用索引器
+- 状态: TODO
+- 优先级: P1
+- 依赖: T-006（应用解析与图标提取）
+- 预估: 1 会话
+- 上下文: `src/shell/`、`CONTRACTS.md#C-08`、`CONTRACTS.md#C-18`
+- 契约: C-18
+- DoD:
+  - [ ] 复用 `shell::ScanAppsFolder()` 作为主来源，不另写枚举
+  - [ ] 聚合 `launchpad.extra_paths`（每项递归 `shell::FindShortcuts(root, 4)`）
+  - [ ] 按 C-15a 身份去重；AppsFolder 优先于自定义目录
+  - [ ] 用 `CompareStringEx(SORTDEFAULT|NORM_LINGUISTIC_CASE)` 排序
+  - [ ] 索引结果内存缓存；`ReadDirectoryChangesW` 监视 + 500ms 防抖增量更新
+  - [ ] 单测：空目录、无权限目录、损坏 `.lnk`、UWP 项、重复身份、排序稳定性
+- 证据: `evidence/T-040/`
+
+### T-041 · Launchpad 全屏窗口与网格渲染
+- 状态: TODO
+- 优先级: P1
+- 依赖: T-040
+- 预估: 1 会话
+- 上下文: `src/platform/`、`src/render/`、`ADR-0021`
+- 契约: C-18
+- DoD:
+  - [ ] 独立无边框全屏顶层窗口（每显示器一个，ADR-0021 第 1 条），复用 `CompositionSurface` + `IRenderBackend`
+  - [ ] 自绘网格：列数按 C-18 自适应，行数 `ceil(page_size/columns)`
+  - [ ] 分页：单页 35 项（5×7），页码指示器仅在 >1 页时出现
+  - [ ] 图标悬停轻微放大；点击启动并关闭
+  - [ ] 打开/关闭动画（缩放 + 模糊淡入淡出）p99 < 16.7ms，实测数据入证据
+  - [ ] 混合 DPI 双屏按屏独立创建，禁跨屏共享合成树
+  - [ ] 截图：单屏 150% + 混合 DPI 双屏
+- 证据: `evidence/T-041/`
+
+### T-042 · Launchpad 搜索与文件夹分组
+- 状态: TODO
+- 优先级: P1
+- 依赖: T-041
+- 预估: 1 会话
+- 契约: C-18
+- DoD:
+  - [ ] 顶部搜索框，实时过滤，不区分大小写（`CompareStringEx` `NORM_IGNORECASE`）
+  - [ ] 无结果时显示空状态，不崩溃
+  - [ ] 拖图标到另一图标上创建文件夹，持久化到 `launchpad.folders`
+  - [ ] 文件夹点击展开为内嵌网格，支持重命名
+  - [ ] schema 完全符合 C-18（`id` 唯一、空 `items` 丢弃、坏身份跳过不整组失效）
+- 证据: `evidence/T-042/`
+
+## M4 · 配置与主题（P1）
+
+### T-050 · 设置窗口骨架
+- 状态: TODO
+- 优先级: P1
+- 依赖: T-002（配置加载保存）
+- 预估: 1 会话
+- 上下文: `src/core/config.*`、`ADR-0021`
+- 契约: C-20
+- DoD:
+  - [ ] 独立顶层窗口（纯 Win32 + DComp + D2D，ADR-0021），自绘左侧分区：Dock / Launchpad / 外观 / 行为 / 关于
+  - [ ] 读写 `%APPDATA%\DockForge\config.json`，遵循 C-01 全部键
+  - [ ] 任何修改 300ms 防抖后 `SaveConfig` 并发布 `ConfigChanged`
+  - [ ] 关闭窗口不退出主进程
+  - [ ] 截图：浅色 + 深色各一张
+- 证据: `evidence/T-050/`
+
+### T-051 · 配置热重载与事件总线
+- 状态: TODO
+- 优先级: P1
+- 依赖: T-050
+- 预估: 1 会话
+- 契约: C-20
+- DoD:
+  - [ ] `ReadDirectoryChangesW` 监视配置文件，300ms 防抖
+  - [ ] 变更发布 `ConfigChanged`（完整快照，C-20），Dock / Launchpad 各自订阅刷新
+  - [ ] 非法 JSON 或越界：拒绝加载，保留上一份有效配置，写 WARN
+  - [ ] 单测：合法变更、非法 JSON、部分字段缺失、范围越界、连续快速写（防抖合并）
+- 证据: `evidence/T-051/`
+
+### T-052 · 主题包加载与切换
+- 状态: TODO
+- 优先级: P1
+- 依赖: T-051
+- 预估: 1 会话
+- 契约: C-02、C-20、C-18（themeable 列）
+- DoD:
+  - [ ] 从 `themes/<name>/theme.json` 加载，`extends` 继承 `default`（C-02）
+  - [ ] `overrides` 只接受 C-18/C-01 中 `themeable: true` 的键，未知键 WARN 后忽略
+  - [ ] 内置 `default` 与 `dark` 两套主题，可在设置窗口切换
+  - [ ] 加载失败回退 `default`，Dock 不崩溃不变黑
+  - [ ] 切换后 Dock / Launchpad 200ms 内刷新，无闪烁
+- 证据: `evidence/T-052/`
+
+## M5 · 系统集成（P1）
+
+### T-060 · 开机自启（任务计划程序）
+- 状态: TODO
+- 优先级: P1
+- 依赖: T-050
+- 预估: 1 会话
+- DoD:
+  - [ ] 用任务计划程序创建登录触发任务（非注册表 Run）
+  - [ ] 设置窗口开关，默认关闭
+  - [ ] 关闭时删除任务，不残留
+  - [ ] 任务 XML 写入 `tools/autostart/` 供审计
+  - [ ] spike 先确认 `schtasks` 与 COM `ITaskService` 两条路径哪条可用（禁假设）
+- 证据: `evidence/T-060/`
+
+### T-061 · 任务栏显隐（默认关闭 + 紧急恢复）
+- 状态: TODO
+- 优先级: P1
+- 依赖: T-060
+- 预估: 1 会话
+- DoD:
+  - [ ] spike 先验证 `Shell_TrayWnd` 在 Win10 与 Win11 的行为差异（任务书反幻觉条款要求）
+  - [ ] `ShowWindow` 控制显隐，默认关闭，设置窗口显式开启
+  - [ ] 全局快捷键 `Ctrl+Alt+T` 强制恢复，不依赖设置窗口可达
+  - [ ] 退出与崩溃路径都恢复任务栏（`SetUnhandledExceptionFilter` + 正常退出）
+  - [ ] 本机版本实测一次并记录
+- 证据: `evidence/T-061/`
+
+### T-062 · 崩溃转储与日志轮转
+- 状态: TODO
+- 优先级: P1
+- 依赖: T-002（日志基础设施）
+- 预估: 1 会话
+- DoD:
+  - [ ] `MiniDumpWriteDump` 在未处理异常时写 minidump 到 `%LOCALAPPDATA%\DockForge\dumps\`
+  - [ ] 日志按天轮转，保留 14 天，单文件上限 10MB
+  - [ ] 设置窗口「关于」页提供「打开日志目录」
+  - [ ] 人为触发一次崩溃，验证 dump 生成且不阻塞退出
+- 证据: `evidence/T-062/`
+
+## M6 · Stage Manager（P2）
+
+### T-070 · Stage Manager 分组模型
+- 状态: TODO
+- 优先级: P2
+- 依赖: T-061
+- 预估: 1 会话
+- 契约: C-19
+- DoD:
+  - [ ] 分组列表：名称、HWND 集合、可选图标（C-19 schema）
+  - [ ] 从当前可见顶层窗口建议分组（按进程 / 手动选择）
+  - [ ] 持久化到 `stage.groups`
+  - [ ] 退出与进程销毁时清理无效 HWND
+  - [ ] 不接管 Z-order、不替换 Alt+Tab、不装 `WH_CBT`（DoD 显式核对）
+- 证据: `evidence/T-070/`
+
+### T-071 · Stage Manager 切换视图与 Dock 联动
+- 状态: TODO
+- 优先级: P2
+- 依赖: T-070
+- 预估: 1 会话
+- 契约: C-19
+- DoD:
+  - [ ] 侧边弹出分组条，每组显示缩略图或图标+标题
+  - [ ] 点击分组按 C-19 切换语义还原；前台权限三级回退各实测一次并记 `COMPATIBILITY.md`
+  - [ ] Dock 右侧 Stage Manager 入口，可开关
+  - [ ] 切换动画 p99 < 16.7ms
+  - [ ] 截图 + 录屏帧作为证据
+- 证据: `evidence/T-071/`
+
+## M7 · 质量加固与分发（P2）
+
+### T-079 · UI Automation 提供者（T-080 的前置）
+- 状态: TODO
+- 优先级: P2
+- 依赖: T-050、T-041
+- 预估: 1 会话
+- 上下文: 全仓无 `WM_GETOBJECT`，FlaUI 当前枚举不到任何元素（ADR-0021 第 3 条）
+- DoD:
+  - [ ] Dock / Launchpad / 设置窗口处理 `WM_GETOBJECT` 并返回 `IRawElementProviderSimple`
+  - [ ] 可交互元素（tile、网格项、设置控件）分配稳定 `AutomationId`，命名规则写入 `CONTRACTS.md`
+  - [ ] `FlaUInspect` 或 `Accessibility Insights` 实测能看到元素树（截图入证据）
+  - [ ] 元素树不暴露内部实现细节（不泄漏 HWND 数值作为 Id）
+- 证据: `evidence/T-079/`
+
+### T-080 · FlaUI 冒烟测试套件
+- 状态: BLOCKED（依赖 T-079；ADR-0021 第 3 条）
+- 优先级: P2
+- 依赖: T-079、T-050、T-041、T-061
+- 预估: 1 会话
+- DoD:
+  - [ ] xUnit 测试项目，引用 `FlaUI.UIA3`（.NET 8.0.426 与 NuGet 已确认可用）
+  - [ ] 8–12 用例：启动、Dock tile 点击、Launchpad 开/关、设置读写、主题切换、任务栏开关恢复
+  - [ ] 全部用 `AutomationId` + `Retry`，禁 `Thread.Sleep`
+  - [ ] 一键脚本运行，TRX 输出到 `evidence/T-080/`
+- 阻塞说明: 应用侧无 UIA 提供者时选择器无法存在；必须先完成 T-079
+- 证据: `evidence/T-080/`
+
+### T-081 · 性能回归基准
+- 状态: TODO
+- 优先级: P2
+- 依赖: T-041、T-071
+- 预估: 1 会话
+- DoD:
+  - [ ] 覆盖 Launchpad 开/关、Stage Manager 切换、主题热切换
+  - [ ] 输出 p50/p95/p99，对比 `PERFORMANCE.md` 预算
+  - [ ] 脚本可本地一键触发
+  - [ ] 超预算记原因并拆优化任务，不降预算标准
+  - [ ] 沿用 T-016 的方法论：等 `frames>=1000`、A/B 交替、裸定时器地板对照
+- 证据: `evidence/T-081/`
+
+### T-082 · MSIX 打包与 `.appinstaller`
+- 状态: BLOCKED（环境缺 Windows SDK：`makeappx.exe` / `signtool.exe` 全盘零命中，ADR-0021）
+- 优先级: P2
+- 依赖: T-062
+- 预估: 1–2 会话
+- DoD:
+  - [ ] 生成 x64 签名 MSIX（测试证书），合并 `.msixbundle`
+  - [ ] `.appinstaller` 描述文件配置启动时检查更新
+  - [ ] 干净环境安装、启动、卸载，卸载保留 `%APPDATA%`
+  - [ ] 证书不可自动获取则记 `DECISIONS_PENDING.md` 并继续未签名包
+- 阻塞说明: 需安装 Windows SDK（`winget install Microsoft.WindowsSDK.10.0.26100` 或 VS Build Tools）。安装属环境变更，记 `BLOCKERS.md` 待人类确认
+- 证据: `evidence/T-082/`
+
+### T-083 · Inno Setup 便携版
+- 状态: TODO
+- 优先级: P2
+- 依赖: 无（已从 T-082 解耦，ADR-0021 第 4 条）
+- 预估: 1 会话
+- DoD:
+  - [ ] Inno Setup 脚本生成单文件安装包，支持 `/SILENT`
+  - [ ] 便携模式：程序目录旁存在 `portable.flag` 时配置写入程序目录
+  - [ ] 卸载不误删 `%APPDATA%\DockForge\themes`
+  - [ ] 若 `iscc.exe` 缺失，用 `winget install JRSoftware.InnoSetup` 安装后重跑
+- 证据: `evidence/T-083/`
+
+### T-084 · 高 DPI 与多显示器矩阵自动化检查
+- 状态: TODO
+- 优先级: P2
+- 依赖: T-041、T-071
+- 预估: 1 会话
+- DoD:
+  - [ ] 脚本化切换 DPI（100/150/200）并截 Launchpad / Stage Manager / Dock
+  - [ ] 混合 DPI 双屏：主屏 150% + 副屏 100%，验证按屏独立创建且不模糊
+  - [ ] 截图按 `DPI_<值>_<场景>.png` 命名存入 `evidence/T-084/`
+  - [ ] 问题写入 `COMPATIBILITY.md` 并拆修复任务
+- 证据: `evidence/T-084/`
 
 ---
 

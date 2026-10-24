@@ -827,3 +827,120 @@ C-14h 承诺的"逐窗口指示依赖 T-015 的窗口列表"即此函数，但**
 3. **多窗口 >8 时的取舍未定**。当前截断到 8，未实现"哪 8 个"的策略（MRU 是当前顺带结果，非设计决策）。
 4. **预览内点击**。当前点击关闭预览，未实现"点击预览激活对应窗口"。
 5. **逐窗口指示未实现**。C-14h 依赖的列表已交付，指示本身仍是单圆点。
+
+## C-18 Launchpad 应用索引与文件夹（P1 冻结）
+
+**索引来源**
+
+Launchpad 的应用列表由三个来源合并，优先级从上到下：
+
+| 来源 | 实现 | 说明 |
+|---|---|---|
+| Shell AppsFolder | 复用 `shell::ScanAppsFolder()`（C-08） | 与 Dock 同一入口。已含开始菜单全部 `.lnk`、UWP 打包项、注册了 AUMID 的 Win32 项 |
+| 自定义目录 | `launchpad.extra_paths` 每项递归 `shell::FindShortcuts(root, 4)` | 复用 C-08 的 `.lnk` 解析，不另写 |
+| 用户手动添加 | `launchpad.folders[].items` 里的身份字符串 | 只在文件夹展开时解析，不进主网格 |
+
+**禁止**再写一套应用枚举。`src/shell/app_resolver` 与 `src/shell/start_menu` 是唯一入口；Launchpad 只做聚合、去重、排序。
+
+**去重规则**
+
+身份字符串按 C-15a 的优先级生成（`aumid` → `namespace_parsing` → `target_path` → `display_name`，全 LowerAscii）。同一身份只保留一条，保留先出现的（AppsFolder 优先于自定义目录）。
+
+**排序**
+
+默认按显示名做 `CompareStringEx` 的 `SORTDEFAULT|NORM_LINGUISTIC_CASE` 排序，不做 ASCII 排序——中文名与大小写混排必须符合用户预期。文件夹排在应用之前，文件夹内部按同样规则排序。
+
+**文件监视**
+
+`ReadDirectoryChangesW` 监视开始菜单两个 Programs 目录与 `launchpad.extra_paths`，防抖 500ms。监视失败只 WARN，不阻塞 Launchpad 打开（退化到"下次打开时重扫"）。
+
+**launchpad 配置块（C-01 扩展，v1 向后兼容）**
+
+| 键 | 类型 | 默认 | 范围 | themeable |
+|---|---|---|---|---|
+| launchpad.extra_paths | array\<string\> | [] | ≤16 项，每项 ≤512 字符 | 否 |
+| launchpad.columns | int | 0（自适应） | 0..12，0 = 按屏宽算 | 是 |
+| launchpad.icon_size | int | 96 | 48..192 | 是 |
+| launchpad.folders | array\<object\> | [] | ≤64 组 | 否 |
+| launchpad.page_size | int | 35 | 10..70 | 否 |
+
+`launchpad.folders` 元素：
+
+```
+{ "id": "uuid-v4-lowercase", "name": "string(≤64)", "items": ["identity", ...] }
+```
+
+约束：`id` 必须唯一且非空，重复则保留首条并 WARN；`items` 空数组的文件夹在加载时丢弃（空文件夹无意义）；`items` 内的身份在解析失败时跳过并 WARN，不使整组失效。
+
+**分页**
+
+单页最多 `page_size`（默认 35 = 5×7）。列数 = `launchpad.columns` 非 0 时取其值，否则 `clamp(floor(可用宽度 / (icon_size + gap)), 3, 12)`。行数 = `ceil(page_size / columns)`。页码指示器只在页数 > 1 时出现。
+
+## C-19 Stage Manager 分组（P2 冻结）
+
+**模型**
+
+```
+stage.groups: [
+  { "id": "uuid-v4-lowercase", "name": "string(≤64)", "hwnds": ["0x1a2b3c", ...], "icon": "path|null" }
+]
+```
+
+- `hwnds` 存**十六进制小写、无前导零补齐**的字符串（如 `"0x1a2b3c"`）。存字符串而非数字，因为 JSON 数字是 double，64 位句柄在部分序列化器上会丢精度。
+- `hwnds` 上限 32 项；重复项在加载时去重。
+- 无效句柄（`IsWindow` 为假）在每次加载与每次切换前清理；清理后为空的组保留（用户可能只是暂时关了窗口），但 UI 上标灰。
+
+**切换语义（ADR-0004 的落地细则）**
+
+点击组 G：
+
+1. 对 G 内每个有效 `hwnd` 调 `ShowWindow(hwnd, SW_RESTORE)`（若 `IsIconic`），再 `SetForegroundWindow(hwnd)`。
+2. 对**不属于 G** 的、由本应用管理过的其他组的窗口调 `ShowWindow(SW_MINIMIZE)`。
+3. 不改变 Z-order，不拦截 `Alt+Tab`，不装 `WH_CBT`。
+
+**前台权限**
+
+`SetForegroundWindow` 受前台锁定限制，失败时按顺序回退：
+
+1. `AllowSetForegroundWindow(ASFW_ANY)` 后重试一次。
+2. `AttachThreadInput(GetCurrentThreadId(), GetWindowThreadProcessId(target), TRUE)` + `SetForegroundWindow` + 立即 `AttachThreadInput(..., FALSE)`。
+3. 仍失败则 `FlashWindowEx(hwnd, FLASHW_TRAY, 3, 0)` 提示用户，并记 WARN。
+
+三条路径必须在实机上各自验证一次并把结果写进 `COMPATIBILITY.md`；不得只实现第一条就宣称可用。
+
+**与 Dock 的联动**
+
+Dock 右侧的 Stage Manager 入口是普通 tile，点击发事件；Stage Manager 模块订阅事件后显示/隐藏分组条。**Dock 不直接持有 Stage Manager 对象**（C-06 边界）。
+
+## C-20 设置窗口与主进程事件（P1 冻结）
+
+**事件名与载荷**
+
+| 事件 | 载荷 | 发布者 | 订阅者 |
+|---|---|---|---|
+| `ConfigChanged` | 完整 `core::Config` 快照 | 配置热重载模块 | Dock、Launchpad、设置窗口自身 |
+| `ThemeChanged` | `{ std::wstring name; }` | 主题模块 | Dock、Launchpad、Finder Bar |
+| `TaskbarVisibilityChanged` | `{ bool visible; }` | 任务栏显隐模块 | 设置窗口 |
+
+**载荷形态冻结为「完整快照」**，不用「变更键值对」。理由：三个订阅者都需要重新算布局，部分更新会让它们各自维护合并逻辑，而配置对象很小（约 1KB），整份复制的成本可以忽略。此条一旦冻结，不得混用两种形态。
+
+**写入路径**
+
+设置窗口的每一次修改 → 300ms 防抖 → `core::SaveConfig` → 发布 `ConfigChanged`。**只有主进程写配置文件**；设置窗口如果作为同进程内的独立 HWND 存在，则直接调 `SaveConfig`；如果将来独立成进程，则改为通过命名管道请求主进程写。当前实现取前者。
+
+**非法输入**
+
+设置窗口在提交前用 `core::ClampConfig` 钳制；钳制后的值与原值不同时，UI 立即回显钳制结果并 WARN，不静默接受。这保证「UI 显示的值 = 磁盘上的值」。
+
+## C-21 材质降级事件（P1 冻结）
+
+| 事件 | 载荷 | 触发条件 |
+|---|---|---|
+| `MaterialDegraded` | `{ core::MaterialLevel from; core::MaterialLevel to; const char* reason; }` | 省电模式开启、或 D3D 设备丢失、或捕获不可用 |
+| `MaterialRestored` | `{ core::MaterialLevel to; }` | 上述条件全部解除 |
+
+**省电检测**：`GetSystemPowerStatus` 的 `SYSTEM_POWER_STATUS.SystemStatusFlag == 1`（电池保护模式）。轮询间隔 5s，只在状态翻转时发事件，不每帧查。
+
+**降级顺序**（沿用 ADR-0008）：`mica → acrylic → blur → solid`，只降不升，`MaterialRestored` 时一次性恢复到用户配置的等级。
+
+**所有使用材质的窗口必须订阅**，不得各自轮询电源状态——否则同一台机器上不同窗口会在不同帧降级，视觉上割裂。

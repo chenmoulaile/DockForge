@@ -577,7 +577,7 @@ Dock 需要接受从资源管理器、开始菜单、桌面拖来的 `.lnk` / `.
 - `tools/drop_caret.ps1` 成为 caret 的唯一判据。整帧 `image_diff` 只能说明"有变化"，不能说明变化是 caret。
 ---
 
-## ADR-0017 · 缩略图预览用 DWM 注册表 + 独立 GDI 弹窗，不用 DirectComposition 重绘
+## ADR-0020 · 缩略图预览用 DWM 注册表 + 独立 GDI 弹窗，不用 DirectComposition 重绘
 
 **状态**：已接受（T-015）
 **日期**：2026-10-24
@@ -621,3 +621,58 @@ DWM 提供 `DwmRegisterThumbnail` 一族 API，可把任意顶层窗口的合成
 - DPI 变化时预览隐藏并让 dwell 计时器重新武装：槽矩形是 DIP 派生，重算几何比让弹窗马上扔掉更贵。
 - 弹窗 HWND 长期存活（隐藏而非销毁），故 `Destroy()` 前的注销必须是显式步骤而不是析构副作用。
 - 未验证面：跨屏 dock 上的预览定位；DWM 渲染上限的成因；>8 窗口时保留哪 8 个（当前是顺带的 MRU，非设计）。均记入 C-17l。
+
+## ADR-0021 · P1/P2 阶段按仓库真实技术栈执行，不引入 WinUI 3 / Windows App SDK
+
+**状态**：已接受（P1/P2 阶段入口自决）
+**日期**：2026-10-24
+**关联**：ADR-0001、ADR-0002、ADR-0008、C-01、C-02、C-06、C-17
+
+### 背景
+
+P1/P2 阶段的任务书假设本项目是 WinUI 3 + Windows App SDK 应用，并据此冻结了六条决策（Launchpad 用 `DesktopAcrylicBackdrop` + `ItemsRepeater`、设置窗口用 `NavigationView`、材质降级监听 `PowerManager`、冒烟测试用 FlaUI + xUnit 针对 WinUI 3 的 AutomationId、打包用 MSIX、主题用 `SystemBackdropConfiguration`）。
+
+这些假设与仓库的实际状态不符。逐条核实（2026-10-24，本机）：
+
+| 事实 | 证据 |
+|---|---|
+| 无 MSVC，无 Visual Studio 安装器 | `vswhere.exe` 不存在于 `C:\Program Files (x86)\Microsoft Visual Studio\Installer\` |
+| 编译器是 MSYS2 MinGW-w64 g++ 15.2.0 | `cmake/toolchain-mingw.cmake` 指定 `D:/MSYS2/mingw64/bin/g++.exe` |
+| 无 Windows SDK 头文件 | `C:\Program Files (x86)\Windows Kits\10\Include` 不存在 |
+| 无 Windows SDK 工具（makeappx / signtool） | `C:\Program Files (x86)\Windows Kits\10\bin` 为空，只有 `Assessment and Deployment Kit` 与 `Catalogs` 两个目录；全盘 `makeappx.exe` / `signtool.exe` 零命中 |
+| 无 Windows App SDK / WinUI 3 | 上面两条的必然结果；MinGW 也不支持 C++/WinRT 的 XAML 编译链 |
+| 无 Inno Setup | `iscc.exe` 不在 PATH，`C:\Program Files (x86)\Inno Setup 6` 不存在 |
+| 应用是纯 Win32 + DirectComposition + Direct2D | ADR-0002；`src/platform/composition.{h,cpp}` 用 `IDCompositionDevice`，`src/render/backend_d2d.cpp` 用 D2D |
+| 应用没有任何 UI Automation 支持 | 全仓 `src/**` 中 `WM_GETOBJECT` / `UIAutomation` / `IAccessible` / `AutomationId` 零命中 |
+| 有 .NET 8.0.426 SDK，NuGet 可达 | `dotnet --list-sdks` → `8.0.426`；`https://api.nuget.org/v3/index.json` → HTTP 200 |
+
+另外两条任务书前提也不成立：
+
+- **「上一阶段完成了 P0：Dock 栏 + Finder Bar」不实**。`src/finderbar` 不存在，`TASKS.md` 中 M2 Finder Bar 状态仍是 `TODO`，`CONTRACTS.md` 只在 C-06 模块边界表里提到过这个名字。已完成的 P0 范围是 M0 + M1（骨架到 Dock 缩略图预览，T-001..T-016）。
+- **任务 ID 与契约编号双重冲突**。任务书用 ADR-0003..0008，而仓库这六个编号已被占用（0003 vendoring、0004 幂衰减曲线、0005 证据策略、0006 帧定时器、0007 NOREDIRECTIONBITMAP、0008 自绘磨砂板），仓库已排到 ADR-0020。任务书用 C-05..C-08，而仓库这四个编号也已被占用（C-05 Dock 布局数学、C-06 模块边界、C-07 日志格式、C-08 应用解析），仓库已排到 C-17。任务 ID 从 T-040 起跳并依赖 T-030/T-031，而 T-020..T-039 从未存在。
+
+### 决策
+
+**按仓库真实技术栈执行 P1/P2，不引入 WinUI 3 / Windows App SDK / MSIX 工具链。**
+
+1. **Launchpad 与设置窗口用纯 Win32 + DirectComposition + Direct2D 实现**，与 Dock 共用 `src/platform/composition` 与 `src/render` 的既有后端。不新建第二个 UI 框架。全屏覆盖层仍是独立顶层窗口（任务书这一条判断是对的：Launchpad 不该内嵌进 Dock 窗口），只是渲染走 DComp 而非 XAML。
+2. **材质沿用 ADR-0008 的自绘磨砂板**，不接 `DesktopAcrylicBackdrop` / `SystemBackdropConfiguration`。省电模式的检测改用 Win32 `GetSystemPowerStatus`（`SYSTEM_POWER_STATUS.SystemStatusFlag` 的电池保护位），不用 `PowerManager`。
+3. **冒烟测试保留 FlaUI + xUnit 的方向，但必须先给应用补 UI Automation 提供者**。当前应用没有 UIA 树，FlaUI 连主窗口都枚举不到，写选择器等于凭空捏造。因此新增前置任务：在 Dock / Launchpad / 设置窗口上实现 `WM_GETOBJECT` + `IRawElementProviderSimple`，给可交互元素分配稳定的 `AutomationId`。在这条完成前，T-080 的状态是 `BLOCKED` 而非 `DONE`。
+4. **打包顺序反转**：Inno Setup 便携版先行，MSIX 顺延为 `BLOCKED`。理由是 SDK 工具缺失是环境事实，不是设计选择；而 Inno Setup 可用 winget 安装，属于可自决的环境准备。MSIX 的 DoD 保留在任务板上，状态记 `BLOCKED` 并写明缺失项。
+5. **编号让位**：新契约从 **C-18** 起编，新 ADR 从 **ADR-0021** 起编。任务书的 C-05..C-08 内容（Launchpad 文件夹 schema、Stage Manager 分组 schema、设置事件名、材质降级事件）分别落到 C-18..C-21。
+6. **任务 ID 保留任务书的 T-040 系列编号**，不重排。跳号本身无害，重排会破坏与人类任务书的对应关系；缺依赖的条目（T-040 写「依赖 T-030/T-031」）改为依赖真实存在的任务。
+7. **P0 的「Finder Bar 完成」前提按实际状态修正**：Finder Bar 仍是 M2 未开工。P1/P2 任务不依赖它，故不阻塞；但 M2 保持 `TODO`，不得在 STATE.json 里被写成已完成。
+
+### 理由
+
+- **不能靠假设写代码**。WinUI 3 的每一个 API 在本机都无法编译，写出来就是不可验证的产物，违反「禁幻觉 API」与「新 API 先写 spike」两条硬约束。
+- **MinGW 是既有事实**。ADR-0002 已经把渲染栈从 WinUI 3 切到纯 Win32 + DComp + D2D，并在当时记录了回退条款。P1/P2 没有出现推翻该决策的新证据（任务书没有提供任何 spike），因此按「契约冻结需 ADR」的规则，改栈需要证据，而改任务书不需要。
+- **FlaUI 的阻塞点不是框架而是被测对象**。FlaUI + xUnit + .NET 8 在本机全部可用（dotnet 8.0.426、NuGet 200），真正缺的是应用侧的 UIA 提供者。把这条写成 `BLOCKED` 并补前置任务，比假装能测诚实。
+- **编号冲突必须让位而非覆盖**。覆盖会让历史提交里的 `ADR-0005` 指向两份不同的决策，`git log` 的解释力就没了。
+
+### 后果
+
+- Launchpad 的网格、动画、搜索框全部要自己写，工作量比 XAML 方案大；作为补偿，它与 Dock 共用同一套 D2D 后端、同一个 DPI 处理、同一套事件总线，不需要跨框架同步状态。
+- 任务书里的 `ItemsRepeater` / `UniformGridLayout` / `NavigationView` 这些具体控件不存在，对应的 DoD 改写为「自绘网格 + 自绘分区列表」，验收标准（列数自适应、单页 35 项、p99 < 16.7ms）保持不变。
+- T-080 与 T-082 在本阶段很可能停在 `BLOCKED`。这是环境事实，不是未完成；STOP_CONDITIONS 允许 `BLOCKED` 且已记录。
+- 后续若人类决定安装 MSVC + Windows SDK + Windows App SDK，本 ADR 可被新 ADR 取代，届时 Launchpad 与设置窗口需要重写——这个成本现在就该被看见。

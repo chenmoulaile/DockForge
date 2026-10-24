@@ -135,7 +135,7 @@
 
 ## 2026-10-24T06:10+08:00 | T-015 | DONE
 
-- 做了什么：新增 `src/platform/preview_window.{h,cpp}`（自有窗口类 `DockForgePreviewWindow`，`WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE` + `WS_POPUP`，禁 `NOREDIRECTIONBITMAP`，隐藏不销毁）、`src/shell/thumbnail_host.{h,cpp}`（`DwmRegisterThumbnail` 生命周期、每 tick 1 个的分帧注册、dest 矩形物理像素、`ReleaseAll` 唯一注销入口）、`src/shell/window_list.{h,cpp}`（`WindowsForEntry` 复用 `IdentityOf` + 窗口侧身份，不另写匹配）、`src/dock/hover_timer.h`（400ms dwell latch）；`main.cpp` 接入 tick 内弹出/续推、`WM_MOVE` 跟随、`WM_DPICHANGED` 隐藏、`WM_MOUSELEAVE`/`WM_LBUTTONDOWN` 取消、收尾 `ReleaseAll` 先于 `preview.Destroy()`；新增 `tests/preview_test.cpp` 24 例。契约 C-17a..C-17l 与 ADR-0017 已冻结。
+- 做了什么：新增 `src/platform/preview_window.{h,cpp}`（自有窗口类 `DockForgePreviewWindow`，`WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE` + `WS_POPUP`，禁 `NOREDIRECTIONBITMAP`，隐藏不销毁）、`src/shell/thumbnail_host.{h,cpp}`（`DwmRegisterThumbnail` 生命周期、每 tick 1 个的分帧注册、dest 矩形物理像素、`ReleaseAll` 唯一注销入口）、`src/shell/window_list.{h,cpp}`（`WindowsForEntry` 复用 `IdentityOf` + 窗口侧身份，不另写匹配）、`src/dock/hover_timer.h`（400ms dwell latch）；`main.cpp` 接入 tick 内弹出/续推、`WM_MOVE` 跟随、`WM_DPICHANGED` 隐藏、`WM_MOUSELEAVE`/`WM_LBUTTONDOWN` 取消、收尾 `ReleaseAll` 先于 `preview.Destroy()`；新增 `tests/preview_test.cpp` 24 例。契约 C-17a..C-17l 与 ADR-0020 已冻结。
 - 证据：`evidence/T-015/`（`build.log`、`verify.txt`、`bench.txt` + spike 的 12 个 `tmp_*.txt` / `run_plain_3.txt` / `tmp_full.png`）
 - 关键发现：
   1. 冷 `DwmRegisterThumbnail` 实测 219–609ms/槽（8 槽共 594ms），比 16.7ms 帧预算高一两个数量级。因此弹窗先出框、注册按每 tick 1 个补齐，8 窗口最多约 8 帧填满；同步注册会正好在用户索要预览的那一帧吹穿预算。
