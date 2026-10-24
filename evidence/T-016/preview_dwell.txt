@@ -1,0 +1,65 @@
+dpi=192 dock=1333,1595 213x213 pid=8180
+grid=2026-10-24T22:22:54.785+08:00 INFO [app] logger started, file=C:\Users\chenk\AppData\Local\DockForge\logs\dockforge-20261024.log
+2026-10-24T22:22:54.785+08:00 INFO [app] DockForge 0.1.0 starting
+2026-10-24T22:22:54.785+08:00 INFO [app] config path = C:\Users\chenk\AppData\Roaming\DockForge\config.json
+2026-10-24T22:22:54.785+08:00 INFO [core] config loaded from C:\Users\chenk\AppData\Roaming\DockForge\config.json
+2026-10-24T22:22:54.785+08:00 INFO [app] config: icon_size=48 gap=8 mag=1.80 falloff=sine material=mica corner=22
+2026-10-24T22:22:55.354+08:00 DEBUG [shell] skip D:\Beautiful\.tools\innosetup\Examples (file-path): not-found
+2026-10-24T22:22:55.356+08:00 INFO [shell] AppsFolder scan: 215 entries (shortcut=49 uwp=43 desktop-id=69 namespace=54 skipped=1)
+2026-10-24T22:22:55.391+08:00 INFO [app] apps: 215 (shortcut=49 uwp=43 desktop-id=69 namespace=54 skipped=1) scan=570.5ms icons=24/24 in 34.8ms
+2026-10-24T22:22:55.392+08:00 INFO [app] DOCKFORGE_PIN_APPS kept 1 of 215 apps
+2026-10-24T22:22:55.396+08:00 INFO [app] dock tiles: 1 of 1 apps (limit=12 icon=256px)
+2026-10-24T22:22:55.396+08:00 DEBUG [dock] tile[0] Sublime Text kind=executable icon=ok
+2026-10-24T22:22:55.396+08:00 INFO [app] material forced to solid by DOCKFORGE_FORCE_MATERIAL
+2026-10-24T22:22:55.396+08:00 INFO [app] material: requested=solid resolved=solid os_build=26300 backdrop=1 capture=1
+2026-10-24T22:22:55.400+08:00 INFO [platform] window created hwnd=000000000040091c dpi=192
+2026-10-24T22:22:55.486+08:00 DEBUG [render] composition initialized for hwnd=000000000040091c
+2026-10-24T22:22:55.486+08:00 INFO [platform] display[0] \\.\DISPLAY1 monitor=0,0,2880,1920 work=0,0,2880,1824 dpi=192 raw=243 primary=1
+2026-10-24T22:22:55.489+08:00 DEBUG [render] surface resized to 213x213 px
+2026-10-24T22:22:55.489+08:00 INFO [app] dock placed edge=0 work=0,0,2880,1824 target=1333,1595 213x213 rect=1333,1595,1546,1808 dpi=192
+2026-10-24T22:22:55.489+08:00 INFO [preview] hover probe file=C:\Users\chenk\AppData\Local\Temp\dockforge_hover_probe.txt
+2026-10-24T22:22:55.489+08:00 DEBUG [dock] region plate=0,77,213,213 row=0,0,0,0 include_row=0
+2026-10-24T22:22:55.495+08:00 DEBUG [dock] drop grid scale=2.000 slots=1 first=53.2 last=53.2 dip
+2026-10-24T22:22:55.495+08:00 INFO [dock] drop target registered (1 slots, scale=2.000)
+2026-10-24T22:22:55.500+08:00 INFO [app] dock placed edge=0 work=0,0,2880,1824 target=1333,1595 213x213 rect=1333,1595,1546,1808 dpi=192
+2026-10-24T22:22:55.500+08:00 DEBUG [dock] drop grid scale=2.000 slots=1 first=53.2 last=53.2 dip
+2026-10-24T22:22:55.502+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-24T22:22:55.710+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-24T22:22:55.921+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-24T22:22:56.126+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-24T22:22:56.334+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-24T22:22:56.510+08:00 DEBUG [loop] frames=63 avg=16.00ms p50=16.08ms p99=19.90ms fps=62.5 | paint n=2 avg=2.93ms p99=4.90ms | capture=0/0 avg=0.0ms | run polls=4 avg=1.13ms max=1.53ms fg=1
+2026-10-24T22:22:56.542+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-24T22:22:56.750+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-24T22:22:56.958+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-24T22:22:57.166+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-24T22:22:57.374+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-24T22:22:57.518+08:00 DEBUG [loop] frames=126 avg=16.00ms p50=16.07ms p99=19.34ms fps=62.5 | paint n=2 avg=2.93ms p99=4.90ms | capture=0/0 avg=0.0ms | run polls=7 avg=0.97ms max=1.53ms fg=1
+2026-10-24T22:22:57.582+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-24T22:22:57.790+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+
+slots=1 pitch=0dip scale=2
+target=(1439,1755) tile=0 centre=53.2dip
+log=dockforge-20261024.log.FullName
+probe_file=C:\Users\chenk\AppData\Local\Temp\dockforge_hover_probe.txt
+--- case=short_dwell ---
+dwell_ms=250 shown_lines=0
+control=evidence\T-016\preview_control.png rect=455,1375 1968x236 widest_popup=1920x188 slots_cap=8
+--- case=long_dwell ---
+line=2026-10-24T22:22:59.445+08:00 INFO [preview] shown tile=0 windows=1 registered=1 pending=0 rect=1305,1399 268x188
+shown_tile=0 aimed_tile=0 match=True
+registered_sources=1 of windows=1
+popup_actual=1305,1399 268x188 predicted=1305,1399 268x188 matches_prediction=True
+shot=evidence\T-016\preview_visible.png rect=455,1375 1968x236
+diff_vs_control changed=12602/116112 ratio=0.1085
+diff_popup_only changed=12596/12596 ratio=1 rect=850,24 268x188
+shot_stats colors=614 mean_luma=230.4 max_luma=255
+source_lines=1
+2026-10-24T22:22:59.445+08:00 DEBUG [preview] source[0] hwnd=00000000000e00a0 pid=16468 app_pid=16468 class=PX_WINDOW_CLASS title=D:\Code_Source\Atcoder\AtCoder_Beginner_Contest_481\E - Most Brilliant Starry Sky.cpp 
+--- case=leave ---
+hidden_line=2026-10-24T22:23:01.007+08:00 DEBUG [preview] hidden
+--- case=rearm ---
+second_line=2026-10-24T22:23:01.474+08:00 INFO [preview] shown tile=0 windows=1 registered=1 pending=0 rect=1305,1399 268x188
+--- verdict ---
+verdict=PASS
+note=short_dwell must have zero shown_lines; long_dwell and rearm must each have one; shown_tile must equal aimed_tile; leave must emit a hidden line; popup must differ from the control frame by >10% of sampled pixels

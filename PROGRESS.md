@@ -151,3 +151,28 @@
 - 做了什么：为 T-016 实机验证写了三个脚本本体（**均未运行**，用户 m00005 指令仍在生效）：`tools/preview_probe.ps1`（三段 dwell 用例：250ms 无日志 / 900ms 有 / 离开后重新武装，快门严格等 `preview shown tile=` 日志出现再开）、`tools/hover_bench.ps1`（重写为 A/B 交替：`DOCKFORGE_PREVIEW=1` vs `0`，指针停在单 tile 不动，等 `frames=1000` 后取 p99，差值低于 0.018ms 噪声底判"无信号"）、`tools/preview_handles.ps1`（40 轮显隐 + `GetGuiResources` GDIOBJECTS/USEROBJECTS 前后对比，同时统计 `preview shown`/`hidden` 行数确认每轮都真的走过两半）。
 - 同步更新：CONTRACTS.md C-17j 验证表补 `preview_handles.ps1` 行并把帧预算判据改成 A/B + 噪声门限；C-17j 下新增三条 hover_bench 实现约束（快门由日志驱动 / A/B 交替 / 等 frames=1000）；TASKS.md T-016 DoD 标注每项的前置状态。
 - 未做（需实机放行）：三个脚本的执行、多窗口 4/10 窗用例（还需先写"开 N 个同 app 窗口"的前置脚本）、最小化用例、Calculator UWP 帧源确认。
+
+## 2026-10-24T22:35+08:00 | T-016 实机验证 | DONE（五条 DoD 全部实测通过）
+
+- 做了什么：把三个验证脚本从 `SetCursorPos` 驱动改成**文件通道**驱动（`DOCKFORGE_HOVER_PROBE_FILE` 指向一个文本文件，内容是 tile 索引），跑通全部五条 DoD，并在过程中抓到一个真实产品缺陷。
+- 为什么必须换通道：`SetCursorPos` 赢不了与真人的竞争。实测 21:12 日志里 `hovered=11 active=1 elapsed` 从 0 累积到 125.9ms 后被清零——用户的物理鼠标穿过 dock；21:05 整轮 `active=1` 行数为 0（指针整轮没进 dock）。探针只替换 hover 的**来源**，HitTest、400ms dwell、窗口查找、弹窗放置、每一次 `DwmRegisterThumbnail` 全部走生产代码，默认关闭。
+- 产品缺陷（T-015 引入，本轮修复）：`shell::WindowsForEntry` 在 `MatchesEntry` 之前加了一层字符串预筛 `IdentityOfWindow(window) != identity`。7-Zip 的 tile 身份是 `...\scoop\apps\7zip\current\7zFM.exe`，进程报 `...\26.00\7zFM.exe`，字符串永不相等 → `MatchesEntry` 从未执行 → 三窗口的 app 永不弹预览。这正是 known_gotchas T-011 记录的 scoop junction 陷阱，在预筛里重犯。修法是**彻底删除预筛**，直接 `MatchesEntry`；成本界由 `SameExecutable` 承担（仅在 lowercase 路径不等时才碰文件系统，忙桌面约 10-20 个 app 窗）。单测同步改成条件强断言：原版只断言「匹配到的必须是 hwnd 1」，空结果也通过，等于放行该 bug。
+- 自己引入的性能缺陷（本轮修复）：诊断行 `DF_DEBUG("preview", "tick hovered=... windows=%zu", ...)` 每帧执行，其中 `WindowsForEntry → MatchesEntry → SameExecutable → CreateFileW` 是同步文件 I/O。bench 实测 `paint n=2` 而 loop p99=19.7ms——测的是这行日志不是 preview。改成 200ms 节流。
+- 关键发现：
+  1. `frames>=1000` 是取 p99 的硬前提。FrameClock 是 1000 样本滚动窗，之前窗口仍含启动 309ms 首帧。实测同一进程 frames=63..377 读 p99=19.6ms，frames=1000 后读 16.5ms。差 3ms 足以把 PASS 读成 FAIL。
+  2. 帧预算必须对**裸定时器地板**比较，不能对 16.7ms 硬比。本机裸 `CreateWaitableTimerExW(HIGH_RESOLUTION)` + `timeBeginPeriod(1)` 在忙桌面下 p99=19.226ms，本身就超门槛。用 A/B 交替 + 同配置重复间 spread 作噪声底，得到 `p99_delta_ms=0.909 noise_floor_ms=3.326 → NO_SIGNAL`，同时 quietest preview_on p99=16.5ms ≤ 16.7ms 记 WITHIN。
+  3. `GetGuiResources` 是瞬时读，hide 刚结束不是稳态。实测空闲进程连续 12 次读全部 gdi=1 user=6，而 hide 后单次读会读到 user=7。必须 `Get-Settled` 取 8 次采样最小值，且加 2 轮预热把首帧惰性分配（GDI 0→1、USER 6→7）排除在基线之外。断言改成稳态对比（中点 vs 终点增量为 0），否则「泄漏」与「一次性分配」无法区分。
+  4. 差分必须裁到弹窗自身矩形再算。在「最宽可能弹窗」区域（1968x236）上算，桌面稀释使 ratio 只有 0.25-0.26；裁到弹窗矩形后 ratio 才反映真实合成（单窗口 1.0、三窗口 0.8475、UWP 0.9998）。
+  5. 最小化保留末帧得到产品侧复核：三窗口 `SW_MINIMIZE` 后重新 dwell，与可见态同矩形差分 `ratio=0.0143`（498/34780 像素变化），`colors=406 mean_luma=171.7`——不是纯黑板。DWM 确实保留末帧，应用层不需要缓存。
+  6. 槽位数按 `kMaxThumbnails` 钳制是正确行为：十窗口 `windows=10` 但 `registered_sources=8 of expected=8`，弹窗 1920x188。探针若拿原始窗口数比较会误判 FAIL。
+  7. UWP 的 `hwnd` 是 frame host（pid 9680 `ApplicationFrameHost`），真实 `app_pid=2152`，`class=ApplicationFrameWindow`。C-17g 的「同时记录两者」在实机成立。
+- 工具链踩坑（PowerShell 5.1，三条都是致命且静默的）：
+  1. **变量名大小写不敏感**。`function Compare-Shots([string]$A, ...)` 里写 `$a = New-Object Bitmap($A)`，`$a` 就是参数 `$A`，`[string]` 类型约束把 Bitmap 强制转回路径字符串 → 报 "The property 'Width' cannot be found on this object"。参数名必须 `$PathA/$PathB`。
+  2. `List[string] += 数组` 会把变量重绑成 `Object[]`，之后 `.Add()` 抛 "Collection was of a fixed size"。必须 `foreach ($l in $x) { $report.Add($l) }`。
+  3. `Get-DockRect([int]$Pid)` 与只读自动变量 `$PID` 冲突 → "Cannot overwrite variable Pid because it is read-only"。改 `$TargetPid`。
+  4. 无 BOM 的 `.ps1` 按 ANSI(936) 解码，中文字面量在解析阶段就炸。定型的做法是脚本正文纯 ASCII，所有中文放外部 UTF-8 文件用 `ReadAllText($p, $utf8)` 读入。
+  5. `$env:X` 必须在 `Start-Process` **之前**设置，否则子进程拿不到。`$startOffset = (Get-LatestLog).Length` 同理必须在启动前取。
+  6. 探针进程未设 DPI awareness 时 `GetWindowRect` 与 `CopyFromScreen` 都返回虚拟化坐标——实测 dock 真实 1334,1595 214x214 被报成 667,798 107x107，所有截图落在屏幕另一半。必须 `SetProcessDpiAwarenessContext(-4)`。
+- 环境事实：单屏 2880x1920@192 DPI（raw 243），work=0,0,2880,1824。多窗口 Win32 app 只有 7-Zip（3-10 窗口，`7-Zip::FM`）与 explorer（`CabinetWClass` 但 tile 走 AUMID 空间，属 C-14f 记录的真实归属）。Sublime/Chrome 无法开出第二窗口（`--new-window`/`-n`/`AttachThreadInput+Ctrl+Shift+N` 均无效）。Notepad 是 UWP，`GetApplicationUserModelId` 对 notepad.exe 返回 `0x00003D57`（APPMODULE_ERROR_NO_APPLICATION）。
+- 证据：`evidence/T-016/`（verify.txt 五条 DoD 逐条 + build.log + hover_bench.txt + preview_handles.txt + 顶层与 four/minimized/ten/uwp 四个子目录的 dwell 日志与对照 PNG）。
+- 下轮开始于：解决 P1/P2 brief 的栈假设冲突，然后 T-040

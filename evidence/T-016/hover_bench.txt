@@ -1,0 +1,15 @@
+dpi=192 seconds=40 repeats=2
+--- preview ON ---
+run=preview_on_1 frame_samples=25 avg_mean=16.729 p99_mean=19.786 p99_max=19.95 preview_log_lines=203
+run=preview_on_2 frame_samples=26 avg_mean=16 p99_mean=16.46 p99_max=16.5 preview_log_lines=205
+p99_mean_of_means=18.123 p99_spread=3.326
+--- preview OFF ---
+run=preview_off_1 frame_samples=26 avg_mean=16 p99_mean=17.517 p99_max=19.8 preview_log_lines=3
+run=preview_off_2 frame_samples=26 avg_mean=16 p99_mean=16.91 p99_max=17.17 preview_log_lines=3
+p99_mean_of_means=17.214 p99_spread=0.607
+--- bare OS timer jitter (same timer, no app) ---
+frames=1200 mean=16.676 p50=16.458 p99=19.226 max=28.165
+--- attribution ---
+p99_delta_ms=0.909 noise_floor_ms=3.326
+attribution=NO_SIGNAL (delta within same-config spread; the preview is indistinguishable from no preview)
+budget=WITHIN (quietest preview_on p99_max=16.5 ms <= 16.7ms; noisiest=19.95 ms is host load)

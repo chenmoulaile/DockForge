@@ -134,19 +134,7 @@ std::wstring Lowercase(std::wstring text) {
 // Settings would resolve to the same window and the dock would raise the wrong app.
 // An entry that declares an identity is therefore matched by identity only; the path
 // is a fallback for entries that have none (a plain .exe).
-bool MatchesEntry(const AppEntry& app, const AppWindow& window) {
-    if (!app.aumid.empty()) {
-        return !window.aumid.empty() && Lowercase(app.aumid) == Lowercase(window.aumid);
-    }
-    // Win32 apps registered in AppsFolder (kind ShellItem) carry an AUMID the process
-    // does not report and have no path either, so they fall through to a miss here.
-    // Their window is found by the launching path they do have, if any.
-    if (!app.target_path.empty() && !window.exe_path.empty()) {
-        return SameExecutable(app.target_path, window.exe_path);
-    }
-    return false;
-}
-
+//
 // Volume serial + file index for a path, or false when the file cannot be opened.
 //
 // Comparing paths as strings is not enough, and the failure is silent. Measured on
@@ -169,6 +157,19 @@ bool FileIdentity(const std::wstring& path, BY_HANDLE_FILE_INFORMATION& out) {
 }
 
 }  // namespace
+
+bool MatchesEntry(const AppEntry& app, const AppWindow& window) {
+    if (!app.aumid.empty()) {
+        return !window.aumid.empty() && Lowercase(app.aumid) == Lowercase(window.aumid);
+    }
+    // Win32 apps registered in AppsFolder (kind ShellItem) carry an AUMID the process
+    // does not report and have no path either, so they fall through to a miss here.
+    // Their window is found by the launching path they do have, if any.
+    if (!app.target_path.empty() && !window.exe_path.empty()) {
+        return SameExecutable(app.target_path, window.exe_path);
+    }
+    return false;
+}
 
 std::vector<AppWindow> EnumerateAppWindows() {
     std::vector<AppWindow> windows;

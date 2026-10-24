@@ -1,0 +1,7 @@
+cycles=40 warmup=2 dpi=192 pid=34296
+gdi_objects_before=1 mid=1 after=1
+user_objects_before=7 mid=6 after=6
+log_shown_lines=42 log_hidden_lines=42 log_registered_lines=42
+--- verdict ---
+gdi_steady_growth=0 user_steady_growth=0 over_cycles=20
+verdict=PASS

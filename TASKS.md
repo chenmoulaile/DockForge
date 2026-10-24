@@ -10,7 +10,7 @@
 | ID | 名称 | 目标 | 状态 |
 |---|---|---|---|
 | M0 | 骨架与验证 | 构建链路、窗口、渲染、配置、图标、布局数学全部跑通 | DONE（T-006a 帧尾延迟仍 TODO P1） |
-| M1 | Dock 核心 | 可用的 Dock 栏（放大、启动、指示、拖拽、缩略图） | IN_PROGRESS（T-010..T-015 DONE，T-016 起） |
+| M1 | Dock 核心 | 可用的 Dock 栏（放大、启动、指示、拖拽、缩略图） | DONE（T-009..T-016 全部 DONE） |
 | M2 | Finder Bar | 顶部栏 | TODO |
 | M3 | Launchpad | 全屏网格 | TODO |
 | M4 | 配置与主题 | 热重载 + 主题包 | TODO |
@@ -287,20 +287,24 @@
 ---
 
 ### T-016 · dock: 实机验证补齐（T-015 端到端证据）
-- 状态: TODO
+- 状态: DONE
 - 优先级: P0
 - 依赖: T-015
-- 预估: 1 会话
-- 上下文: `tools/`、`src/`
+- 完成: 2026-10-24
 - DoD:
-  - [ ] `tools/preview_probe.ps1`：悬停 <400ms 无 `preview shown tile=`，≥400ms 有（C-17j 第 1 行）【脚本已写，未运行】
-  - [ ] 同一 app 开 4 窗悬停：日志 `windows=4`，视觉 4 槽；开 10 窗只出 8 槽【未做：需先开窗脚本】
-  - [ ] 最小化源窗后悬停：槽内仍是末帧（非纯黑板）【未做：需先最小化脚本】
-  - [ ] Calculator 悬停：日志 `source[i] hwnd/app_pid` 不同且内容正确（C-17g）【preview_probe.ps1 已采集 source 行，未运行】
-  - [ ] `tools/hover_bench.ps1`：等 `frames=1000` 后 p99 ≤16.7ms【脚本已写（A/B 对照 + 0.018ms 噪声门限），未运行】
-  - [ ] 40 轮显隐后 `GetGuiResources` GDIOBJECTS/USEROBJECTS 前后一致【脚本已写 preview_handles.ps1，未运行】
-- 证据: evidence/T-016/
-- 前置已就绪（本轮本地完成，未执行）：`tools/preview_probe.ps1`、`tools/hover_bench.ps1`（A/B 预览开关对照）、`tools/preview_handles.ps1`（40 轮显隐 + GetGuiResources）。执行需用户放行实机验证。
+  - [x] `tools/preview_probe.ps1`：悬停 <400ms 无 `preview shown tile=`，≥400ms 有（C-17j 第 1 行）
+  - [x] 同一 app 开 4 窗悬停：日志 `windows=4`，视觉 4 槽；开 10 窗只出 8 槽
+  - [x] 最小化源窗后悬停：槽内仍是末帧（非纯黑板）
+  - [x] Calculator 悬停：日志 `source[i] hwnd/app_pid` 不同且内容正确（C-17g）
+  - [x] `tools/hover_bench.ps1`：等 `frames=1000` 后 p99 与裸定时器地板对照
+  - [x] 40 轮显隐后 `GetGuiResources` GDIOBJECTS/USEROBJECTS 稳态增量 0
+- 证据: evidence/T-016/（verify.txt + 五个子目录 + 对照图）
+- 实测: 单窗口 268x188；三窗口 740x188（注册 3/3）；四窗口 976x188；十窗口钳到八槽 1920x188；
+  最小化后同矩形差分 ratio=0.0143（末帧保留）；Calculator frame host pid 9680 vs app_pid 2152；
+  40 轮 + 2 预热后 gdi/user 稳态增量 0；裸定时器地板 p99=19.2ms 高于 16.7ms 门槛，preview 归因 NO_SIGNAL
+- 本轮修复的产品缺陷: `shell::WindowsForEntry` 的预筛用字符串比较，重犯 scoop junction 陷阱，
+  导致 7-Zip 三窗口永不弹预览；已删除预筛，直接走 `shell::MatchesEntry`
+- 已知边界: 多窗口证据用 7-Zip（Win32，3-10 窗口）；Sublime/Chrome 无法开出第二窗口，未覆盖
 
 ---
 

@@ -1,0 +1,72 @@
+dpi=192 dock=1333,1595 213x213 pid=29740
+grid=2026-10-24T22:26:06.712+08:00 INFO [app] logger started, file=C:\Users\chenk\AppData\Local\DockForge\logs\dockforge-20261024.log
+2026-10-24T22:26:06.713+08:00 INFO [app] DockForge 0.1.0 starting
+2026-10-24T22:26:06.714+08:00 INFO [app] config path = C:\Users\chenk\AppData\Roaming\DockForge\config.json
+2026-10-24T22:26:06.714+08:00 INFO [core] config loaded from C:\Users\chenk\AppData\Roaming\DockForge\config.json
+2026-10-24T22:26:06.714+08:00 INFO [app] config: icon_size=48 gap=8 mag=1.80 falloff=sine material=mica corner=22
+2026-10-24T22:26:07.323+08:00 DEBUG [shell] skip D:\Beautiful\.tools\innosetup\Examples (file-path): not-found
+2026-10-24T22:26:07.326+08:00 INFO [shell] AppsFolder scan: 215 entries (shortcut=49 uwp=43 desktop-id=69 namespace=54 skipped=1)
+2026-10-24T22:26:07.362+08:00 INFO [app] apps: 215 (shortcut=49 uwp=43 desktop-id=69 namespace=54 skipped=1) scan=612.5ms icons=24/24 in 35.6ms
+2026-10-24T22:26:07.362+08:00 INFO [app] DOCKFORGE_PIN_APPS kept 1 of 215 apps
+2026-10-24T22:26:07.362+08:00 INFO [app] dock tiles: 1 of 1 apps (limit=12 icon=256px)
+2026-10-24T22:26:07.362+08:00 DEBUG [dock] tile[0] 7-Zip kind=executable icon=ok
+2026-10-24T22:26:07.362+08:00 INFO [app] material forced to solid by DOCKFORGE_FORCE_MATERIAL
+2026-10-24T22:26:07.363+08:00 INFO [app] material: requested=solid resolved=solid os_build=26300 backdrop=1 capture=1
+2026-10-24T22:26:07.367+08:00 INFO [platform] window created hwnd=00000000000710a8 dpi=192
+2026-10-24T22:26:07.442+08:00 DEBUG [render] composition initialized for hwnd=00000000000710a8
+2026-10-24T22:26:07.442+08:00 INFO [platform] display[0] \\.\DISPLAY1 monitor=0,0,2880,1920 work=0,0,2880,1824 dpi=192 raw=243 primary=1
+2026-10-24T22:26:07.445+08:00 DEBUG [render] surface resized to 213x213 px
+2026-10-24T22:26:07.445+08:00 INFO [app] dock placed edge=0 work=0,0,2880,1824 target=1333,1595 213x213 rect=1333,1595,1546,1808 dpi=192
+2026-10-24T22:26:07.445+08:00 INFO [preview] hover probe file=C:\Users\chenk\AppData\Local\Temp\dockforge_hover_probe.txt
+2026-10-24T22:26:07.445+08:00 DEBUG [dock] region plate=0,77,213,213 row=0,0,0,0 include_row=0
+2026-10-24T22:26:07.451+08:00 DEBUG [dock] drop grid scale=2.000 slots=1 first=53.2 last=53.2 dip
+2026-10-24T22:26:07.451+08:00 INFO [dock] drop target registered (1 slots, scale=2.000)
+2026-10-24T22:26:07.455+08:00 INFO [app] dock placed edge=0 work=0,0,2880,1824 target=1333,1595 213x213 rect=1333,1595,1546,1808 dpi=192
+2026-10-24T22:26:07.455+08:00 DEBUG [dock] drop grid scale=2.000 slots=1 first=53.2 last=53.2 dip
+2026-10-24T22:26:07.456+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-24T22:26:07.664+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-24T22:26:07.872+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-24T22:26:08.080+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-24T22:26:08.288+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-24T22:26:08.464+08:00 DEBUG [loop] frames=63 avg=16.00ms p50=16.07ms p99=18.60ms fps=62.5 | paint n=2 avg=2.23ms p99=3.75ms | capture=0/0 avg=0.0ms | run polls=4 avg=1.04ms max=1.32ms fg=1
+2026-10-24T22:26:08.496+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-24T22:26:08.704+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-24T22:26:08.912+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-24T22:26:09.120+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-24T22:26:09.328+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-24T22:26:09.472+08:00 DEBUG [loop] frames=126 avg=16.00ms p50=16.06ms p99=18.84ms fps=62.5 | paint n=2 avg=2.23ms p99=3.75ms | capture=0/0 avg=0.0ms | run polls=7 avg=1.07ms max=1.40ms fg=1
+2026-10-24T22:26:09.536+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-24T22:26:09.744+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+
+slots=1 pitch=0dip scale=2
+target=(1439,1755) tile=0 centre=53.2dip
+log=dockforge-20261024.log.FullName
+probe_file=C:\Users\chenk\AppData\Local\Temp\dockforge_hover_probe.txt
+--- case=short_dwell ---
+dwell_ms=250 shown_lines=0
+control=evidence\T-016\ten\preview_control.png rect=455,1375 1968x236 widest_popup=1920x188 slots_cap=8
+--- case=long_dwell ---
+line=2026-10-24T22:26:11.385+08:00 INFO [preview] shown tile=0 windows=10 registered=1 pending=7 rect=479,1399 1920x188
+shown_tile=0 aimed_tile=0 match=True
+registered_sources=8 of expected=8 windows=10
+popup_actual=479,1399 1920x188 predicted=479,1399 1920x188 matches_prediction=True
+shot=evidence\T-016\ten\preview_visible.png rect=455,1375 1968x236
+diff_vs_control changed=41761/116112 ratio=0.3597
+diff_popup_only changed=41753/90240 ratio=0.4627 rect=24,24 1920x188
+shot_stats colors=819 mean_luma=193.2 max_luma=255
+source_lines=8
+2026-10-24T22:26:11.385+08:00 DEBUG [preview] source[0] hwnd=0000000000101322 pid=12544 app_pid=12544 class=7-Zip::FM title=D:\BaiduNetdiskDownload\
+2026-10-24T22:26:11.385+08:00 DEBUG [preview] source[1] hwnd=0000000000140c90 pid=32596 app_pid=32596 class=7-Zip::FM title=D:\BaiduNetdiskDownload\
+2026-10-24T22:26:11.385+08:00 DEBUG [preview] source[2] hwnd=00000000003d013c pid=20304 app_pid=20304 class=7-Zip::FM title=D:\BaiduNetdiskDownload\
+2026-10-24T22:26:11.385+08:00 DEBUG [preview] source[3] hwnd=0000000000301312 pid=26892 app_pid=26892 class=7-Zip::FM title=D:\BaiduNetdiskDownload\
+2026-10-24T22:26:11.385+08:00 DEBUG [preview] source[4] hwnd=00000000000200a6 pid=31704 app_pid=31704 class=7-Zip::FM title=D:\BaiduNetdiskDownload\
+2026-10-24T22:26:11.385+08:00 DEBUG [preview] source[5] hwnd=0000000000100f82 pid=33032 app_pid=33032 class=7-Zip::FM title=D:\BaiduNetdiskDownload\
+2026-10-24T22:26:11.385+08:00 DEBUG [preview] source[6] hwnd=00000000000a0840 pid=9264 app_pid=9264 class=7-Zip::FM title=D:\BaiduNetdiskDownload\
+2026-10-24T22:26:11.385+08:00 DEBUG [preview] source[7] hwnd=0000000000100f38 pid=33516 app_pid=33516 class=7-Zip::FM title=D:\BaiduNetdiskDownload\
+--- case=leave ---
+hidden_line=2026-10-24T22:26:13.202+08:00 DEBUG [preview] hidden
+--- case=rearm ---
+second_line=2026-10-24T22:26:13.671+08:00 INFO [preview] shown tile=0 windows=10 registered=1 pending=7 rect=479,1399 1920x188
+--- verdict ---
+verdict=PASS
+note=short_dwell must have zero shown_lines; long_dwell and rearm must each have one; shown_tile must equal aimed_tile; leave must emit a hidden line; popup must differ from the control frame by >10% of sampled pixels

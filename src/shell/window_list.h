@@ -6,13 +6,22 @@
 //
 // It is deliberately NOT a new matching rule. dock::IdentityOf (C-15a) already
 // defines what makes two entries "the same app" - AUMID, else namespace parsing
-// name, else path, else display name - and shell::FindAppWindow already applies
+// name, else path, else display name - and shell::MatchesEntry already applies
 // the window half. This function reuses both: the tile's identity is computed
-// with dock::IdentityOf, and a window matches when its own identity (AUMID when
-// the window reports one, else its executable path) equals it after the same
-// lowercasing. Reimplementing the comparison here would be exactly the
-// "second matching implementation" C-14f forbids, and would silently diverge the
-// first time the identity rules change.
+// with dock::IdentityOf, and a window matches when shell::MatchesEntry accepts
+// it. Reimplementing the comparison here would be exactly the "second matching
+// implementation" C-14f forbids, and would silently diverge the first time the
+// identity rules change.
+//
+// The tile's identity is used for one thing only: skipping windows whose own
+// identity is unrelated to the tile's. MatchesEntry then does the real decision,
+// because it - unlike a string comparison of identities - applies
+// SameExecutable's file-identity comparison, which is what survives a scoop
+// version junction: the AppsFolder entry stores
+//   C:\Users\chenk\scoop\apps\7zip\current\7zFM.exe
+// while the running process reports
+//   C:\Users\chenk\scoop\apps\7zip\26.00\7zFM.exe
+// and a plain string match silently returns nothing (known_gotchas, T-011).
 //
 // The source HWND for the thumbnail falls out of the same enumeration:
 //   * a plain Win32 app's own top-level window is the source;

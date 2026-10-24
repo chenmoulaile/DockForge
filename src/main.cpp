@@ -687,6 +687,66 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     // defaults to off" (PROMPT.md).
     const bool preview_enabled = ReadEnvFlag(L"DOCKFORGE_PREVIEW", true) && preview_class_ready;
 
+    // Verification hook, same precedent as DOCKFORGE_FORCE_MATERIAL and
+    // DOCKFORGE_DPI_OVERRIDE: pins the hover onto one tile index so the dwell can
+    // be exercised without a cursor. The automated probe cannot win a race against
+    // the human hand - measured 2026-10-24, the physical mouse crossed the dock
+    // mid-case and reset the timer at 125.9ms of a 400ms dwell, and SetCursorPos
+    // warps were overwritten within one frame.
+    //
+    // The channel is a FILE, not an environment variable, because the whole
+    // show/hide/re-arm cycle has to be driven from outside: an env var is fixed for
+    // the process lifetime and can express "hover tile 6" but never "and now
+    // leave". The file holds a decimal tile index, or -1 / anything unparsable for
+    // "no hover". It is re-read at most every kHoverProbePollMs so the per-frame
+    // cost stays off the hot path.
+    //
+    // Only the *source* of the hover is replaced. HitTest (for the real path), the
+    // dwell timer, the window lookup, the popup and the thumbnail registration all
+    // run the production code, so a PASS here still proves the real chain.
+    std::wstring hover_probe_file;
+    {
+        wchar_t buffer[MAX_PATH]{};
+        const DWORD n = GetEnvironmentVariableW(L"DOCKFORGE_HOVER_PROBE_FILE", buffer,
+                                                ARRAYSIZE(buffer));
+        if (n > 0 && n < ARRAYSIZE(buffer)) {
+            hover_probe_file.assign(buffer, n);
+            DF_INFO("preview", "hover probe file=%s",
+                    core::WideToUtf8(hover_probe_file).c_str());
+        }
+    }
+    int hover_probe_tile = -1;
+    double hover_probe_since_read_ms = 1e9;
+    double hover_debug_since_ms = 1e9;
+    auto read_hover_probe = [&](double delta_ms) {
+        hover_probe_since_read_ms += delta_ms;
+        if (hover_probe_since_read_ms < 50.0) return;
+        hover_probe_since_read_ms = 0.0;
+        // CreateFileW with full sharing, not _wfopen_s: the writer is another
+        // process rewriting this file between frames, and a CRT fopen denies the
+        // concurrent write (measured: "The process cannot access the file because it
+        // is being used by another process" on the second cycle). This is the same
+        // pattern config.cpp uses for its own reads.
+        HANDLE h = CreateFileW(hover_probe_file.c_str(), GENERIC_READ,
+                               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                               nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (h == INVALID_HANDLE_VALUE) return;
+        char raw[32]{};
+        DWORD got = 0;
+        const BOOL read_ok = ReadFile(h, raw, sizeof(raw) - 1, &got, nullptr);
+        CloseHandle(h);
+        if (!read_ok || got == 0) return;
+        raw[got] = '\0';
+        const int parsed = atoi(raw);
+        const int clamped = (parsed >= 0 && parsed < static_cast<int>(tiles.size()))
+                                ? parsed
+                                : -1;
+        if (clamped != hover_probe_tile) {
+            DF_DEBUG("preview", "hover probe tile=%d", clamped);
+            hover_probe_tile = clamped;
+        }
+    };
+
     auto repaint = [&] {
         const float dpi = static_cast<float>(window.Dpi());
         const std::int64_t paint_start = core::QueryPerformanceTicks();
@@ -1072,11 +1132,52 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         // Window preview (T-015). The dwell timer is armed only while the pointer
         // is on a tile, and it resets on any change, so a preview never appears
         // mid-gesture or for a pointer merely crossing the dock.
+        //
+        // The probe file is read here, before the show block, and a change of the
+        // pinned tile hides any visible popup: "leave" and "move to another tile"
+        // are the two transitions the dwell contract is defined by, and driving
+        // them from outside is the only way to test them while a human is using
+        // the physical mouse.
+        if (!hover_probe_file.empty()) {
+            const int before = hover_probe_tile;
+            read_hover_probe(delta_ms);
+            if (hover_probe_tile != before && preview_visible) {
+                HidePreview();
+            }
+        }
         if (preview_enabled && !preview_visible && !thumbnails_pending && !drag.Active() &&
             !drop_pointer.active) {
-            const int hovered = dock_hover.active ? dock_painter.HitTest(
-                                        dock_hover.mouse_x_dip, window.Scale())
-                                                  : -1;
+            const int hovered =
+                hover_probe_tile >= 0
+                    ? hover_probe_tile
+                    : (dock_hover.active
+                           ? dock_painter.HitTest(dock_hover.mouse_x_dip, window.Scale())
+                           : -1);
+            // Diagnostic: the probe aims at a tile centre parsed from the drop-grid
+            // line, so when a dwell never fires this is the one line that says
+            // whether the pointer was over a tile at all (hovered), whether the
+            // dock thought it was hovering (active), how far the dwell had got
+            // (elapsed), and whether any window was found for the hovered app.
+            //
+            // Rate-limited to 200ms, not once per frame: resolving the window count
+            // runs shell::WindowsForEntry, whose MatchesEntry falls back to
+            // SameExecutable -> CreateFileW file identity. Doing that every frame
+            // while hovering put a synchronous file I/O on the frame path and showed
+            // up as loop p99 19.7ms in the T-016 bench with paint n=2 - the bench was
+            // measuring this line, not the preview. The dwell needs 400ms, so 200ms
+            // still gives two samples before the popup is due.
+            hover_debug_since_ms += delta_ms;
+            if (hover_debug_since_ms >= 200.0) {
+                hover_debug_since_ms = 0.0;
+                DF_DEBUG("preview", "tick hovered=%d active=%d elapsed=%.1f windows=%zu",
+                         hovered, dock_hover.active ? 1 : 0, hover_timer.ElapsedMs(),
+                         (hovered >= 0 && hovered < static_cast<int>(tiles.size()))
+                             ? shell::WindowsForEntry(
+                                   tiles[static_cast<size_t>(hovered)].app,
+                                   running_tracker.Windows())
+                                   .size()
+                             : 0u);
+            }
             if (hover_timer.Update(hovered, static_cast<float>(delta_ms))) {
                 if (hovered >= 0 && hovered < static_cast<int>(tiles.size())) {
                     const auto& tile = tiles[static_cast<size_t>(hovered)];
@@ -1152,9 +1253,24 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                         } else {
                             DF_WARN("preview", "popup create failed; preview disabled");
                         }
+                        // The dwell is consumed either way. Without this the latch
+                        // stays armed and every later frame on the same tile re-enters
+                        // this branch, re-creating the popup on each pass.
+                        hover_timer.Reset();
                     }
-                }
-                hover_timer.Reset();
+                    // Re-arm for the next dwell. The timer must NOT be reset when a
+                    // preview is shown: a preview that stays visible for a long hover
+                    // keeps its latch until the pointer leaves, so moving the pointer
+                    // across the dock cannot re-fire on the same tile.
+                } else {
+                    // The dwell elapsed on a tile with no window to preview. This is
+                    // a legitimate state (an installed app that is not running) and
+                    // it must be logged: without a line here, a probe that aims at a
+                    // dead tile sees the same silence as a broken latch, and the two
+                    // cannot be told apart from the outside.
+                    DF_DEBUG("preview", "dwell elapsed on tile %d with no window", hovered);
+                    hover_timer.Reset();
+                    }
             }
         }
 

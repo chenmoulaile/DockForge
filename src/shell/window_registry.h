@@ -46,6 +46,13 @@ struct AppWindow {
 // how the shell parks windows on other virtual desktops.
 std::vector<AppWindow> EnumerateAppWindows();
 
+// The one window-matching rule (C-14f: there must be exactly one). An entry that
+// declares an AUMID matches by AUMID alone; otherwise the executable path is
+// compared by file identity, which survives scoop junctions and symlinks.
+// Exposed so the per-tile window list (T-015, C-17h) reuses it instead of
+// writing a second comparison.
+bool MatchesEntry(const AppEntry& app, const AppWindow& window);
+
 // Finds the window that belongs to `app`. Matches by AUMID first (packaged apps and
 // AppsFolder entries), then by executable path (Win32 apps). Returns false when the
 // app has no window, which the caller reads as "not running".

@@ -1,0 +1,66 @@
+dpi=192 dock=1333,1595 213x213 pid=23112
+grid=2026-10-24T22:29:22.206+08:00 INFO [app] logger started, file=C:\Users\chenk\AppData\Local\DockForge\logs\dockforge-20261024.log
+2026-10-24T22:29:22.206+08:00 INFO [app] DockForge 0.1.0 starting
+2026-10-24T22:29:22.207+08:00 INFO [app] config path = C:\Users\chenk\AppData\Roaming\DockForge\config.json
+2026-10-24T22:29:22.207+08:00 INFO [core] config loaded from C:\Users\chenk\AppData\Roaming\DockForge\config.json
+2026-10-24T22:29:22.207+08:00 INFO [app] config: icon_size=48 gap=8 mag=1.80 falloff=sine material=mica corner=22
+2026-10-24T22:29:22.656+08:00 DEBUG [shell] skip D:\Beautiful\.tools\innosetup\Examples (file-path): not-found
+2026-10-24T22:29:22.658+08:00 INFO [shell] AppsFolder scan: 215 entries (shortcut=49 uwp=43 desktop-id=69 namespace=54 skipped=1)
+2026-10-24T22:29:22.683+08:00 INFO [app] apps: 215 (shortcut=49 uwp=43 desktop-id=69 namespace=54 skipped=1) scan=450.9ms icons=24/24 in 25.0ms
+2026-10-24T22:29:22.683+08:00 INFO [app] DOCKFORGE_PIN_APPS kept 1 of 215 apps
+2026-10-24T22:29:22.685+08:00 INFO [app] dock tiles: 1 of 1 apps (limit=12 icon=256px)
+2026-10-24T22:29:22.685+08:00 DEBUG [dock] tile[0] 计算器 kind=uwp icon=ok
+2026-10-24T22:29:22.685+08:00 INFO [app] material forced to solid by DOCKFORGE_FORCE_MATERIAL
+2026-10-24T22:29:22.685+08:00 INFO [app] material: requested=solid resolved=solid os_build=26300 backdrop=1 capture=1
+2026-10-24T22:29:22.690+08:00 INFO [platform] window created hwnd=00000000000a10a8 dpi=192
+2026-10-24T22:29:22.747+08:00 DEBUG [render] composition initialized for hwnd=00000000000a10a8
+2026-10-24T22:29:22.747+08:00 INFO [platform] display[0] \\.\DISPLAY1 monitor=0,0,2880,1920 work=0,0,2880,1824 dpi=192 raw=243 primary=1
+2026-10-24T22:29:22.749+08:00 DEBUG [render] surface resized to 213x213 px
+2026-10-24T22:29:22.749+08:00 INFO [app] dock placed edge=0 work=0,0,2880,1824 target=1333,1595 213x213 rect=1333,1595,1546,1808 dpi=192
+2026-10-24T22:29:22.749+08:00 INFO [preview] hover probe file=C:\Users\chenk\AppData\Local\Temp\dockforge_hover_probe.txt
+2026-10-24T22:29:22.749+08:00 DEBUG [dock] region plate=0,77,213,213 row=0,0,0,0 include_row=0
+2026-10-24T22:29:22.754+08:00 DEBUG [dock] drop grid scale=2.000 slots=1 first=53.2 last=53.2 dip
+2026-10-24T22:29:22.754+08:00 INFO [dock] drop target registered (1 slots, scale=2.000)
+2026-10-24T22:29:22.758+08:00 INFO [app] dock placed edge=0 work=0,0,2880,1824 target=1333,1595 213x213 rect=1333,1595,1546,1808 dpi=192
+2026-10-24T22:29:22.758+08:00 DEBUG [dock] drop grid scale=2.000 slots=1 first=53.2 last=53.2 dip
+2026-10-24T22:29:22.759+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-24T22:29:22.968+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-24T22:29:23.176+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-24T22:29:23.383+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-24T22:29:23.591+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-24T22:29:23.767+08:00 DEBUG [loop] frames=63 avg=16.00ms p50=16.05ms p99=18.48ms fps=62.5 | paint n=2 avg=2.50ms p99=4.21ms | capture=0/0 avg=0.0ms | run polls=4 avg=1.29ms max=2.61ms fg=1
+2026-10-24T22:29:23.799+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-24T22:29:24.010+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-24T22:29:24.215+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-24T22:29:24.423+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-24T22:29:24.632+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-24T22:29:24.776+08:00 DEBUG [loop] frames=126 avg=16.00ms p50=16.04ms p99=18.87ms fps=62.5 | paint n=2 avg=2.50ms p99=4.21ms | capture=0/0 avg=0.0ms | run polls=7 avg=1.06ms max=2.61ms fg=1
+2026-10-24T22:29:24.839+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-24T22:29:25.047+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-24T22:29:25.256+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+
+slots=1 pitch=0dip scale=2
+target=(1439,1755) tile=0 centre=53.2dip
+log=dockforge-20261024.log.FullName
+probe_file=C:\Users\chenk\AppData\Local\Temp\dockforge_hover_probe.txt
+--- case=short_dwell ---
+dwell_ms=250 shown_lines=0
+control=evidence\T-016\uwp\preview_control.png rect=455,1375 1968x236 widest_popup=1920x188 slots_cap=8
+--- case=long_dwell ---
+line=2026-10-24T22:29:26.906+08:00 INFO [preview] shown tile=0 windows=1 registered=1 pending=0 rect=1305,1399 268x188
+shown_tile=0 aimed_tile=0 match=True
+registered_sources=1 of expected=1 windows=1
+popup_actual=1305,1399 268x188 predicted=1305,1399 268x188 matches_prediction=True
+shot=evidence\T-016\uwp\preview_visible.png rect=455,1375 1968x236
+diff_vs_control changed=17687/116112 ratio=0.1523
+diff_popup_only changed=12594/12596 ratio=0.9998 rect=850,24 268x188
+shot_stats colors=1881 mean_luma=221.3 max_luma=255
+source_lines=1
+2026-10-24T22:29:26.906+08:00 DEBUG [preview] source[0] hwnd=0000000000960682 pid=9680 app_pid=2152 class=ApplicationFrameWindow title=
+--- case=leave ---
+hidden_line=2026-10-24T22:29:28.344+08:00 DEBUG [preview] hidden
+--- case=rearm ---
+second_line=2026-10-24T22:29:28.810+08:00 INFO [preview] shown tile=0 windows=1 registered=1 pending=0 rect=1305,1399 268x188
+--- verdict ---
+verdict=PASS
+note=short_dwell must have zero shown_lines; long_dwell and rearm must each have one; shown_tile must equal aimed_tile; leave must emit a hidden line; popup must differ from the control frame by >10% of sampled pixels

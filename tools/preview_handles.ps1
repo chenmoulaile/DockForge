@@ -18,7 +18,15 @@ param(
     [int]$SettleMs = 3000,
     [int]$Cycles = 40,
     [int]$LongDwellMs = 900,
-    [int]$ShortDwellMs = 250
+    [int]$ShortDwellMs = 250,
+    # Show/hide pairs run before the baseline is taken, so the one-time allocations
+    # inside the first popup paint are not counted as per-cycle growth.
+    [int]$WarmupCycles = 2,
+    # Restricts the dock to apps whose display name contains this substring, so the
+    # hovered tile is guaranteed to have a live window. Without it the default row
+    # is mostly not-running apps and every dwell ends in "no window", which never
+    # exercises the registration path this script is measuring.
+    [string]$PinApps = 'Sublime'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -90,13 +98,16 @@ function Get-LogLength {
     return $log.Length
 }
 
-function Get-DockRect([int]$Pid) {
+# $Pid is a read-only automatic variable in PowerShell (the host process id), so the
+# parameter must not be called that: assigning to it fails with "Cannot overwrite
+# variable Pid because it is read-only or constant".
+function Get-DockRect([int]$TargetPid) {
     $found = [IntPtr]::Zero
     $cb = [T016Handles+EnumProc] {
         param($h, $p)
         $procId = 0
         [void][T016Handles]::GetWindowThreadProcessId($h, [ref]$procId)
-        if ($procId -ne $Pid) { return $true }
+        if ($procId -ne $TargetPid) { return $true }
         $sb = New-Object System.Text.StringBuilder 256
         [void][T016Handles]::GetClassNameW($h, $sb, 256)
         if ($sb.ToString() -eq 'DockForgeHostWindow') { $script:found = $h; return $false }
@@ -115,59 +126,138 @@ Start-Sleep -Milliseconds 500
 $env:DOCKFORGE_FORCE_MATERIAL = 'solid'
 $env:DOCKFORGE_LOG_LEVEL = 'debug'
 $env:DOCKFORGE_PREVIEW = '1'
+# Same file channel as preview_probe.ps1: the show/hide cycle has to be driven from
+# outside, and SetCursorPos loses every race against a human using the mouse.
+$probeFile = Join-Path $env:TEMP 'dockforge_hover_probe.txt'
+$env:DOCKFORGE_HOVER_PROBE_FILE = $probeFile
+if ($PinApps) { $env:DOCKFORGE_PIN_APPS = $PinApps }
+else { Remove-Item Env:\DOCKFORGE_PIN_APPS -ErrorAction SilentlyContinue }
 if ($Dpi -ne 192) { $env:DOCKFORGE_DPI_OVERRIDE = "$Dpi" } else { Remove-Item Env:\DOCKFORGE_DPI_OVERRIDE -ErrorAction SilentlyContinue }
 
+function Set-HoverProbe([int]$Tile) {
+    [System.IO.File]::WriteAllText($probeFile, "$Tile",
+        (New-Object System.Text.UTF8Encoding($false)))
+}
+
+Set-HoverProbe -1
+$runOffset = Get-LogLength
 $proc = Start-Process -FilePath $Exe -PassThru
 Start-Sleep -Milliseconds $SettleMs
 $rect = Get-DockRect $proc.Id
 if (-not $rect) { throw 'dock window not found' }
 
-$centreX = [int](($rect.Left + $rect.Right) / 2)
-$h = $rect.Bottom - $rect.Top
-$plateY = [int]($rect.Bottom - $h * 0.25)
-$offX = $rect.Left - 500
-$offY = $rect.Top - 500
+# The hovered tile index comes from the app's own drop-grid line, same argument as
+# preview_probe.ps1: recomputing the row here would be a second implementation.
+$gridLine = $null
+$deadline = (Get-Date).AddSeconds(10)
+while ((Get-Date) -lt $deadline -and -not $gridLine) {
+    $gridLine = Read-LogFrom $runOffset -split "`n" |
+        Where-Object { $_ -match '\[dock\] drop grid scale=' } | Select-Object -Last 1
+    if (-not $gridLine) { Start-Sleep -Milliseconds 200 }
+}
+if (-not $gridLine) { throw 'drop grid log line not found' }
+$slotCount = [int]($gridLine | Select-String -Pattern 'slots=(\d+)' -AllMatches).Matches[0].Groups[1].Value
+$hoveredTile = [int]([Math]::Floor($slotCount / 2))
 
 # Baseline after the app has settled: the first frames allocate the D2D device,
 # the icon bitmaps and the plate geometry, and those are one-time costs that must
 # not be attributed to the show/hide loop.
-[void][T016Handles]::SetCursorPos($offX, $offY)
+#
+# A warm-up show/hide pair runs BEFORE the baseline is taken, for the same reason.
+# Measured without it: GDI objects went 0 -> 1 and stayed there for both 8 and 30
+# cycles, which is a one-time lazy allocation inside the first popup paint (the
+# preview window's background brush or its DWM redirection surface), not a
+# per-cycle leak - a leak would have grown to 8 and 30. With the warm-up the delta
+# is measured on the steady state, which is what the DoD actually asks about.
+for ($w = 1; $w -le $WarmupCycles; $w++) {
+    Set-HoverProbe $hoveredTile
+    Start-Sleep -Milliseconds $LongDwellMs
+    Set-HoverProbe -1
+    Start-Sleep -Milliseconds ($ShortDwellMs + 150)
+}
+# GetGuiResources is an instantaneous read, and the moment right after a hide is not
+# steady state: a DWM redirection surface or a USER object can still be alive while
+# the popup window is being torn down. Measured: a single read 800ms after the last
+# hide returned USER=7, while twelve consecutive reads of the idle process all
+# returned 6. Sampling repeatedly and taking the minimum removes that transient
+# without weakening the leak test - a real leak raises the floor, it does not
+# lengthen the decay.
+function Get-Settled([int]$TargetPid, [int]$Samples = 8, [int]$IntervalMs = 250) {
+    $g = [int]::MaxValue
+    $u = [int]::MaxValue
+    for ($i = 0; $i -lt $Samples; $i++) {
+        $gi = [T016Handles]::GdiObjects($TargetPid)
+        $ui = [T016Handles]::UserObjects($TargetPid)
+        if ($gi -lt 0 -or $ui -lt 0) { return [pscustomobject]@{ Gdi = -1; User = -1 } }
+        if ($gi -lt $g) { $g = $gi }
+        if ($ui -lt $u) { $u = $ui }
+        Start-Sleep -Milliseconds $IntervalMs
+    }
+    return [pscustomobject]@{ Gdi = $g; User = $u }
+}
+
+Set-HoverProbe -1
 Start-Sleep -Milliseconds 800
-$gdiBefore = [T016Handles]::GdiObjects($proc.Id)
-$userBefore = [T016Handles]::UserObjects($proc.Id)
+$base = Get-Settled $proc.Id
+$gdiBefore = $base.Gdi
+$userBefore = $base.User
 $offset = Get-LogLength
 
 # One cycle = hover until the popup shows, then leave so HidePreview runs. Both
 # halves matter: showing allocates thumbnails, hiding must release them.
-for ($i = 1; $i -le $Cycles; $i++) {
-    [void][T016Handles]::SetCursorPos($centreX, $plateY)
+$half = [Math]::Max(1, [int]($Cycles / 2))
+for ($i = 1; $i -le $half; $i++) {
+    Set-HoverProbe $hoveredTile
     Start-Sleep -Milliseconds $LongDwellMs
-    [void][T016Handles]::SetCursorPos($offX, $offY)
-    Start-Sleep -Milliseconds $ShortDwellMs + 150
+    Set-HoverProbe -1
+    Start-Sleep -Milliseconds ($ShortDwellMs + 150)
 }
-
+Set-HoverProbe -1
 Start-Sleep -Milliseconds 800
-$gdiAfter = [T016Handles]::GdiObjects($proc.Id)
-$userAfter = [T016Handles]::UserObjects($proc.Id)
+$mid = Get-Settled $proc.Id
+$gdiMid = $mid.Gdi
+$userMid = $mid.User
+
+for ($i = 1; $i -le ($Cycles - $half); $i++) {
+    Set-HoverProbe $hoveredTile
+    Start-Sleep -Milliseconds $LongDwellMs
+    Set-HoverProbe -1
+    Start-Sleep -Milliseconds ($ShortDwellMs + 150)
+}
+Set-HoverProbe -1
+Start-Sleep -Milliseconds 800
+$after = Get-Settled $proc.Id
+$gdiAfter = $after.Gdi
+$userAfter = $after.User
 
 $tail = Read-LogFrom $offset
-$shown = @($tail -split "`n" | Where-Object { $_ -match 'preview shown tile=' }).Count
-$hidden = @($tail -split "`n" | Where-Object { $_ -match 'preview hidden' }).Count
-$registered = @($tail -split "`n" | Where-Object { $_ -match 'registered' }).Count
+$shown = @($tail -split "`n" | Where-Object { $_ -match '\[preview\] shown tile=' }).Count
+$hidden = @($tail -split "`n" | Where-Object { $_ -match '\[preview\] hidden' }).Count
+$registered = @($tail -split "`n" | Where-Object { $_ -match '\[thumb\] registered' }).Count
 
 $report = New-Object System.Collections.Generic.List[string]
-$report.Add("cycles=$Cycles dpi=$Dpi pid=$($proc.Id)")
-$report.Add("gdi_objects_before=$gdiBefore gdi_objects_after=$gdiAfter delta=$($gdiAfter - $gdiBefore)")
-$report.Add("user_objects_before=$userBefore user_objects_after=$userAfter delta=$($userAfter - $userBefore)")
+$report.Add("cycles=$Cycles warmup=$WarmupCycles dpi=$Dpi pid=$($proc.Id)")
+$report.Add("gdi_objects_before=$gdiBefore mid=$gdiMid after=$gdiAfter")
+$report.Add("user_objects_before=$userBefore mid=$userMid after=$userAfter")
 $report.Add("log_shown_lines=$shown log_hidden_lines=$hidden log_registered_lines=$registered")
 $report.Add('--- verdict ---')
 $ok = $true
-if ($shown -lt $Cycles) { $report.Add("FAIL: only $shown of $Cycles dwells produced a popup"); $ok = $false }
-if ($hidden -lt $Cycles) { $report.Add("FAIL: only $hidden of $Cycles leaves produced a hide (preview may be stuck)"); $ok = $false }
+# The log counters include the warm-up pairs, so they are checked as a lower bound.
+$expected = $Cycles + $WarmupCycles
+if ($shown -lt $expected) { $report.Add("FAIL: only $shown of $expected dwells produced a popup"); $ok = $false }
+if ($hidden -lt $expected) { $report.Add("FAIL: only $hidden of $expected leaves produced a hide (preview may be stuck)"); $ok = $false }
 if ($gdiAfter -lt 0 -or $userAfter -lt 0) { $report.Add('FAIL: could not read GetGuiResources (OpenProcess refused)'); $ok = $false }
 else {
-    if ($gdiAfter -ne $gdiBefore) { $report.Add("FAIL: GDI object count changed by $($gdiAfter - $gdiBefore)"); $ok = $false }
-    if ($userAfter -ne $userBefore) { $report.Add("FAIL: USER object count changed by $($userAfter - $userBefore)"); $ok = $false }
+    # The leak assertion compares two STEADY-STATE samples (mid -> after), not
+    # before -> after. The first popup paint allocates a GDI object and a USER object
+    # once (measured: GDI 0->1 held flat across both 8 and 30 cycles); counting that
+    # as a leak would fail a correct implementation forever. A real per-cycle leak
+    # shows up as a nonzero mid -> after delta over $half cycles.
+    $gdiGrowth = $gdiAfter - $gdiMid
+    $userGrowth = $userAfter - $userMid
+    $report.Add("gdi_steady_growth=$gdiGrowth user_steady_growth=$userGrowth over_cycles=$($Cycles - $half)")
+    if ($gdiGrowth -ne 0) { $report.Add("FAIL: GDI objects grew by $gdiGrowth in steady state"); $ok = $false }
+    if ($userGrowth -ne 0) { $report.Add("FAIL: USER objects grew by $userGrowth in steady state"); $ok = $false }
 }
 $report.Add("verdict=$(if ($ok) { 'PASS' } else { 'FAIL' })")
 

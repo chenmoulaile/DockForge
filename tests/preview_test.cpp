@@ -7,6 +7,8 @@
 
 #include <windows.h>
 
+#include <algorithm>
+
 using namespace dockforge;
 
 // ---------------------------------------------------------------------------
@@ -217,7 +219,52 @@ shell::AppWindow MakeWindow(HWND hwnd, const wchar_t* exe, const wchar_t* aumid)
     return w;
 }
 
+// True when both paths resolve to the same file on disk, i.e. when the scoop
+// junction is present and FileIdentity can prove the two strings are one file.
+bool SameFileOnDisk(const wchar_t* a, const wchar_t* b) {
+    return shell::SameExecutable(a, b) && std::wstring(a) != std::wstring(b);
+}
+
 }  // namespace
+
+TEST_CASE("WindowsForEntry matches an exe entry by file identity, not string equality",
+          "[preview][windows]") {
+    // The AppsFolder entry stores the scoop junction path and the process reports
+    // the versioned path. A string comparison of identities silently returns
+    // nothing, which is exactly how T-011's dock launched a second copy. The
+    // per-tile list must survive the same junction (known_gotchas).
+    //
+    // Both paths point at the same file on this machine, so FileIdentity agrees;
+    // the strings do not.
+    shell::AppEntry app;
+    app.kind = shell::AppKind::Shortcut;
+    app.display_name = L"7-Zip";
+    app.target_path = L"C:\\Users\\chenk\\scoop\\apps\\7zip\\current\\7zFM.exe";
+
+    std::vector<shell::AppWindow> windows;
+    windows.push_back(MakeWindow(reinterpret_cast<HWND>(1),
+                                 L"C:\\Users\\chenk\\scoop\\apps\\7zip\\26.00\\7zFM.exe",
+                                 nullptr));
+    windows.push_back(MakeWindow(reinterpret_cast<HWND>(2), L"C:\\Tools\\other.exe", nullptr));
+
+    const auto matches = shell::WindowsForEntry(app, windows);
+    // The junction path only resolves on this machine; on a machine without scoop
+    // FileIdentity cannot open either path and SameExecutable falls back to string
+    // comparison, which legitimately yields no match. So the assertion is
+    // conditional on the junction resolving - but when it does, the match MUST be
+    // found. The earlier version of this test only asserted "whatever matched was
+    // hwnd 1", which passes trivially when nothing matches and let a string-comparing
+    // pre-filter ship (measured: three live 7-Zip windows, windows=0, no popup).
+    if (SameFileOnDisk(L"C:\\Users\\chenk\\scoop\\apps\\7zip\\current\\7zFM.exe",
+                       L"C:\\Users\\chenk\\scoop\\apps\\7zip\\26.00\\7zFM.exe")) {
+        REQUIRE(matches.size() == 1);
+        REQUIRE(matches[0].hwnd == reinterpret_cast<HWND>(1));
+    } else {
+        for (const auto& match : matches) {
+            REQUIRE(match.hwnd == reinterpret_cast<HWND>(1));
+        }
+    }
+}
 
 TEST_CASE("WindowsForEntry matches an exe entry by path identity", "[preview][windows]") {
     shell::AppEntry app;

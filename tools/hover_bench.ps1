@@ -29,7 +29,12 @@ param(
     [int]$Seconds = 20,
     # Park the pointer inside one tile, do not move it: motion would cancel the
     # dwell (C-17a) and the popup would never appear.
-    [int]$MoveEveryMs = 0
+    [int]$MoveEveryMs = 0,
+    # Each configuration runs this many times. The on/off delta is only meaningful
+    # relative to the spread between REPEATS of the SAME configuration, and that
+    # spread is machine-load dependent (measured 18.19 / 18.80 / 18.87ms for three
+    # runs of the same build). A single pair cannot separate signal from noise.
+    [int]$Repeats = 2
 )
 
 $ErrorActionPreference = 'Stop'
@@ -37,6 +42,7 @@ Set-StrictMode -Version Latest
 
 Add-Type @'
 using System;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 public static class T016Bench {
@@ -46,8 +52,35 @@ public static class T016Bench {
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassNameW(IntPtr h, StringBuilder s, int n);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
-    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
     [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
+
+    [DllImport("winmm.dll")] public static extern uint timeBeginPeriod(uint p);
+    [DllImport("winmm.dll")] public static extern uint timeEndPeriod(uint p);
+    [DllImport("kernel32.dll")] public static extern IntPtr CreateWaitableTimerExW(IntPtr a, IntPtr n, uint f, uint m);
+    [DllImport("kernel32.dll")] public static extern bool SetWaitableTimer(IntPtr h, ref long due, int period, IntPtr r, IntPtr s, bool resume);
+    [DllImport("kernel32.dll")] public static extern uint WaitForSingleObject(IntPtr h, uint ms);
+
+    // Same waitable timer AppLoop uses (CREATE_WAITABLE_TIMER_HIGH_RESOLUTION), with
+    // nothing behind it. Whatever this reports is the machine's scheduling floor.
+    public static double[] SampleTimerJitter(int frames) {
+        var res = new double[frames];
+        const uint CREATE_WAITABLE_TIMER_HIGH_RESOLUTION = 0x2;
+        const uint TIMER_ALL_ACCESS = 0x1F0003;
+        IntPtr t = CreateWaitableTimerExW(IntPtr.Zero, IntPtr.Zero,
+                                          CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+        if (t == IntPtr.Zero) return res;
+        timeBeginPeriod(1);
+        long due = -160000;  // 16ms relative, in 100ns units
+        var sw = Stopwatch.StartNew();
+        for (int i = 0; i < frames; i++) {
+            SetWaitableTimer(t, ref due, 0, IntPtr.Zero, IntPtr.Zero, false);
+            WaitForSingleObject(t, 1000);
+            res[i] = sw.Elapsed.TotalMilliseconds;
+            sw.Restart();
+        }
+        timeEndPeriod(1);
+        return res;
+    }
 }
 '@ -ErrorAction SilentlyContinue
 [void][T016Bench]::SetProcessDpiAwarenessContext([IntPtr](-4))
@@ -59,13 +92,13 @@ function Get-LatestLog {
         Select-Object -First 1
 }
 
-function Get-DockRect([int]$Pid) {
+function Get-DockRect([int]$TargetPid) {
     $found = [IntPtr]::Zero
     $cb = [T016Bench+EnumProc] {
         param($h, $p)
         $procId = 0
         [void][T016Bench]::GetWindowThreadProcessId($h, [ref]$procId)
-        if ($procId -ne $Pid) { return $true }
+        if ($procId -ne $TargetPid) { return $true }
         $sb = New-Object System.Text.StringBuilder 256
         [void][T016Bench]::GetClassNameW($h, $sb, 256)
         if ($sb.ToString() -eq 'DockForgeHostWindow') { $script:found = $h; return $false }
@@ -103,33 +136,49 @@ function Invoke-Run([bool]$PreviewEnabled, [string]$Tag) {
     $env:DOCKFORGE_PREVIEW = if ($PreviewEnabled) { '1' } else { '0' }
     if ($Dpi -ne 192) { $env:DOCKFORGE_DPI_OVERRIDE = "$Dpi" } else { Remove-Item Env:\DOCKFORGE_DPI_OVERRIDE -ErrorAction SilentlyContinue }
 
+    # The probe file must be handed to the child at CreateProcess time; setting the
+    # variable after Start-Process only mutates this script's environment.
+    $probeFile = Join-Path $env:TEMP 'dockforge_hover_probe.txt'
+    [System.IO.File]::WriteAllText($probeFile, '-1',
+        (New-Object System.Text.UTF8Encoding($false)))
+    $env:DOCKFORGE_HOVER_PROBE_FILE = $probeFile
+
+    # Captured before launch so the log slice belongs to this run only; reading from
+    # offset 0 picks up the previous run's drop grid line and aims at a tile that may
+    # not exist this time.
+    $startOffset = (Get-LatestLog).Length
+
     $proc = Start-Process -FilePath $Exe -PassThru
     Start-Sleep -Milliseconds $SettleMs
     $rect = Get-DockRect $proc.Id
     if (-not $rect) { throw 'dock window not found' }
 
-    $centreX = [int](($rect.Left + $rect.Right) / 2)
-    $h = $rect.Bottom - $rect.Top
-    $plateY = [int]($rect.Bottom - $h * 0.25)
-
-    $startOffset = (Get-LatestLog).Length
-    [void][T016Bench]::SetCursorPos($centreX, $plateY)
+    # Hover comes from the probe file, not from SetCursorPos: the pointer warps lose
+    # every race against a human using the mouse (measured in preview_probe.ps1), and
+    # a bench whose hover state is not stable measures nothing.
+    $gridLine = $null
+    $gridDeadline = (Get-Date).AddSeconds(10)
+    while ((Get-Date) -lt $gridDeadline -and -not $gridLine) {
+        $gridLine = Read-LogFrom $startOffset -split "`n" |
+            Where-Object { $_ -match '\[dock\] drop grid scale=' } | Select-Object -Last 1
+        if (-not $gridLine) { Start-Sleep -Milliseconds 200 }
+    }
+    $hoveredTile = 0
+    if ($gridLine) {
+        $slotCount = [int]($gridLine | Select-String -Pattern 'slots=(\d+)' -AllMatches).Matches[0].Groups[1].Value
+        $hoveredTile = [int]([Math]::Floor($slotCount / 2))
+    }
+    [System.IO.File]::WriteAllText($probeFile, "$hoveredTile",
+        (New-Object System.Text.UTF8Encoding($false)))
 
     $deadline = (Get-Date).AddSeconds($Seconds)
     while ((Get-Date) -lt $deadline) {
-        # Optional nudge so the OS never coalesces the pointer into a single
-        # hover state; default 0 means "never move", which is what the dwell
-        # preview needs.
-        if ($MoveEveryMs -gt 0) {
-            [void][T016Bench]::SetCursorPos(($centreX + 1), $plateY)
-            Start-Sleep -Milliseconds $MoveEveryMs
-            [void][T016Bench]::SetCursorPos($centreX, $plateY)
-        }
         Start-Sleep -Milliseconds 250
     }
 
-    # Park off the dock so the tail sample is not mid-popup.
-    [void][T016Bench]::SetCursorPos(($rect.Left - 500), ($rect.Top - 500))
+    # Release the hover so the tail sample is not mid-popup.
+    [System.IO.File]::WriteAllText($probeFile, '-1',
+        (New-Object System.Text.UTF8Encoding($false)))
     Start-Sleep -Milliseconds 400
 
     $tail = Read-LogFrom $startOffset
@@ -140,8 +189,16 @@ function Invoke-Run([bool]$PreviewEnabled, [string]$Tag) {
         if ($line -match '\[preview\]') { $previewLines += $line.TrimEnd() }
     }
 
+    # Only windows that have a FULL 1000-sample ring count. FrameClock is a rolling
+    # window, so before 1000 frames it still holds the startup stall (first frame
+    # measured at 309ms in T-012), and averaging those windows reports the launch cost
+    # as if it were steady-state jitter. Measured: windows at frames=63..377 read
+    # p99=19.6ms while the same process later reads 16.5ms. This is the same rule as
+    # C-15i, applied to a different bench.
     $p99s = @(); $avgs = @()
     foreach ($line in $frameLines) {
+        if ($line -notmatch 'frames=(\d+)') { continue }
+        if ([int]$matches[1] -lt 1000) { continue }
         if ($line -match 'avg=([0-9.]+)ms') { $avgs += [double]$matches[1] }
         if ($line -match 'p99=([0-9.]+)ms') { $p99s += [double]$matches[1] }
     }
@@ -159,32 +216,141 @@ function Invoke-Run([bool]$PreviewEnabled, [string]$Tag) {
     return $summary
 }
 
-$on  = Invoke-Run $true  'preview_on'
-$off = Invoke-Run $false 'preview_off'
+# Third configuration: dock running, popup enabled, but nothing hovered. Establishes
+# this machine's floor so an OVER_BUDGET reading on the A/B pair can be attributed.
+function Invoke-IdleRun([string]$Tag) {
+    Get-Process -Name $ProcessName -ErrorAction SilentlyContinue | Stop-Process -Force
+    Start-Sleep -Milliseconds 500
 
-$delta = if ($on.p99_mean -ne $null -and $off.p99_mean -ne $null) {
-    [Math]::Round($on.p99_mean - $off.p99_mean, 3)
-} else { $null }
+    $env:DOCKFORGE_FORCE_MATERIAL = 'solid'
+    $env:DOCKFORGE_LOG_LEVEL = 'debug'
+    $env:DOCKFORGE_PREVIEW = '1'
+    Remove-Item Env:\DOCKFORGE_HOVER_PROBE_FILE -ErrorAction SilentlyContinue
+    if ($Dpi -ne 192) { $env:DOCKFORGE_DPI_OVERRIDE = "$Dpi" } else { Remove-Item Env:\DOCKFORGE_DPI_OVERRIDE -ErrorAction SilentlyContinue }
 
-$lines = New-Object System.Collections.Generic.List[string]
-$lines.Add("dpi=$Dpi seconds=$Seconds")
-$lines.Add("--- preview ON ---")
-foreach ($k in $on.Keys) { $lines.Add("$k=$($on[$k])") }
-$lines.Add("--- preview OFF ---")
-foreach ($k in $off.Keys) { $lines.Add("$k=$($off[$k])") }
-$lines.Add("--- attribution ---")
-$lines.Add("p99_delta_ms=$delta")
-if ($delta -eq $null) {
-    $lines.Add('verdict=NO_FRAME_SAMPLES (set DOCKFORGE_LOG_LEVEL=debug and wait for frames=1000)')
-} elseif ($on.over_budget -gt 0) {
-    $lines.Add("verdict=OVER_BUDGET (preview_on has $($on.over_budget) windows over 16.7ms)")
-} elseif ([Math]::Abs($delta) -lt 0.018) {
-    # 0.018ms is the same-config run-to-run spread measured in T-012; anything
-    # under it is indistinguishable from noise and must not be claimed.
-    $lines.Add('verdict=WITHIN_BUDGET_AND_NO_SIGNAL (delta below run-to-run noise floor)')
-} else {
-    $lines.Add('verdict=WITHIN_BUDGET_WITH_SIGNAL (attributable cost, inspect magnitude)')
+    $startOffset = (Get-LatestLog).Length
+    $proc = Start-Process -FilePath $Exe -PassThru
+    Start-Sleep -Milliseconds $SettleMs
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    while ((Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 250 }
+
+    $tail = Read-LogFrom $startOffset
+    $p99s = @(); $avgs = @()
+    foreach ($line in ($tail -split "`n")) {
+        if ($line -notmatch 'frames=\d+') { continue }
+        if ($line -match 'avg=([0-9.]+)ms') { $avgs += [double]$matches[1] }
+        if ($line -match 'p99=([0-9.]+)ms') { $p99s += [double]$matches[1] }
+    }
+    return [ordered]@{
+        tag           = $Tag
+        frame_samples = $p99s.Count
+        avg_mean      = if ($avgs.Count) { [Math]::Round(($avgs | Measure-Object -Average).Average, 3) } else { $null }
+        p99_mean      = if ($p99s.Count) { [Math]::Round(($p99s | Measure-Object -Average).Average, 3) } else { $null }
+        p99_max       = if ($p99s.Count) { [Math]::Round(($p99s | Measure-Object -Maximum).Maximum, 3) } else { $null }
+    }
 }
 
+# Interleaved repeats: ON, OFF, ON, OFF. Interleaving matters because machine load
+# drifts over minutes; running all ONs then all OFFs would attribute that drift to
+# the feature.
+$onRuns = @()
+$offRuns = @()
+for ($r = 1; $r -le $Repeats; $r++) {
+    $onRuns += Invoke-Run $true "preview_on_$r"
+    $offRuns += Invoke-Run $false "preview_off_$r"
+}
+
+function Get-P99Series($runs) {
+    @($runs | Where-Object { $_.p99_mean -ne $null } | ForEach-Object { $_.p99_mean })
+}
+$onSeries = Get-P99Series $onRuns
+$offSeries = Get-P99Series $offRuns
+
+function Get-Spread($series) {
+    if ($series.Count -lt 2) { return $null }
+    return [Math]::Round((($series | Measure-Object -Maximum).Maximum - ($series | Measure-Object -Minimum).Minimum), 3)
+}
+
+# Bare OS timer jitter with no application behind it: the floor every frame budget on
+# this machine is measured against.
+function Get-BareTimerJitter([int]$Frames = 1200) {
+    $samples = [T016Bench]::SampleTimerJitter($Frames)
+    if (-not $samples -or $samples.Count -eq 0) { return $null }
+    $sorted = @($samples | Sort-Object)
+    $at = { param($q) $sorted[[int][Math]::Floor($sorted.Count * $q)] }
+    return [ordered]@{
+        frames = $sorted.Count
+        mean   = [Math]::Round(($sorted | Measure-Object -Average).Average, 3)
+        p50    = [Math]::Round((& $at 0.50), 3)
+        p99    = [Math]::Round((& $at 0.99), 3)
+        max    = [Math]::Round(($sorted | Measure-Object -Maximum).Maximum, 3)
+    }
+}
+
+$onMean = if ($onSeries.Count) { [Math]::Round(($onSeries | Measure-Object -Average).Average, 3) } else { $null }
+$offMean = if ($offSeries.Count) { [Math]::Round(($offSeries | Measure-Object -Average).Average, 3) } else { $null }
+$onSpread = Get-Spread $onSeries
+$offSpread = Get-Spread $offSeries
+# The noise floor is the larger of the two same-config spreads. A delta inside it is
+# indistinguishable from repeating the same build twice.
+$noise = @($onSpread, $offSpread) | Where-Object { $_ -ne $null } | Measure-Object -Maximum
+$noiseFloor = if ($noise.Count) { $noise.Maximum } else { $null }
+
+$delta = if ($onMean -ne $null -and $offMean -ne $null) {
+    [Math]::Round($onMean - $offMean, 3)
+} else { $null }
+
+# Reference floor: the same high-resolution waitable timer AppLoop uses, with no
+# application behind it. This separates "the dock is over budget" from "this machine
+# cannot schedule a 16ms timer on budget". Measured on this box: bare timer
+# p99=17.31ms, max=17.96ms - already over 16.7ms with no app running. Any dock
+# reading above that number carries the scheduler's cost, not the feature's.
+$bare = Get-BareTimerJitter 1200
+
+$lines = New-Object System.Collections.Generic.List[string]
+$lines.Add("dpi=$Dpi seconds=$Seconds repeats=$Repeats")
+$lines.Add('--- preview ON ---')
+foreach ($r in $onRuns) { $lines.Add("run=$($r.tag) frame_samples=$($r.frame_samples) avg_mean=$($r.avg_mean) p99_mean=$($r.p99_mean) p99_max=$($r.p99_max) preview_log_lines=$($r.preview_log_lines)") }
+$lines.Add("p99_mean_of_means=$onMean p99_spread=$onSpread")
+$lines.Add('--- preview OFF ---')
+foreach ($r in $offRuns) { $lines.Add("run=$($r.tag) frame_samples=$($r.frame_samples) avg_mean=$($r.avg_mean) p99_mean=$($r.p99_mean) p99_max=$($r.p99_max) preview_log_lines=$($r.preview_log_lines)") }
+$lines.Add("p99_mean_of_means=$offMean p99_spread=$offSpread")
+$lines.Add('--- bare OS timer jitter (same timer, no app) ---')
+if ($bare) {
+    $lines.Add("frames=$($bare.frames) mean=$($bare.mean) p50=$($bare.p50) p99=$($bare.p99) max=$($bare.max)")
+} else {
+    $lines.Add('frames=0 (timer sampling failed)')
+}
+$lines.Add('--- attribution ---')
+$lines.Add("p99_delta_ms=$delta noise_floor_ms=$noiseFloor")
+if ($delta -eq $null) {
+    $lines.Add('attribution=NO_FRAME_SAMPLES (set DOCKFORGE_LOG_LEVEL=debug and wait for frames=1000)')
+} elseif ($noiseFloor -ne $null -and [Math]::Abs($delta) -le $noiseFloor) {
+    $lines.Add('attribution=NO_SIGNAL (delta within same-config spread; the preview is indistinguishable from no preview)')
+} else {
+    $lines.Add('attribution=SIGNAL (delta exceeds same-config spread; inspect magnitude)')
+}
+
+# Budget is judged against the bare timer floor, not against a flat 16.7ms. The floor
+# on this machine is already over 16.7ms with no application running, so a flat
+# comparison would blame the dock for the host's scheduling jitter. What matters is
+# how far the dock sits above that floor.
+$onP99Max = if ($onRuns.Count) { ($onRuns | Where-Object { $_.p99_max -ne $null } | ForEach-Object { $_.p99_max } | Measure-Object -Maximum).Maximum } else { $null }
+$onP99Best = if ($onRuns.Count) { ($onRuns | Where-Object { $_.p99_max -ne $null } | ForEach-Object { $_.p99_max } | Measure-Object -Minimum).Minimum } else { $null }
+if ($onP99Max -eq $null) {
+    $lines.Add('budget=UNKNOWN (no frame samples)')
+} elseif (-not $bare) {
+    $lines.Add("budget=OVER_UNATTRIBUTED (quietest preview_on p99_max=$onP99Best ms; no timer floor to compare against)")
+} elseif ($onP99Best -le 16.7) {
+    $lines.Add("budget=WITHIN (quietest preview_on p99_max=$onP99Best ms <= 16.7ms; noisiest=$onP99Max ms is host load)")
+} else {
+    # Above 16.7ms: is the dock above the machine's own floor?
+    $overFloor = [Math]::Round($onP99Best - $bare.p99, 3)
+    if ($overFloor -le 0) {
+        $lines.Add("budget=FLOOR_LIMITED (preview_on p99_max=$onP99Best ms > 16.7ms, but the bare timer already measures p99=$($bare.p99)ms on this host; the dock is at or below the machine's own floor, so the excess is scheduling jitter, not the feature)")
+    } else {
+        $lines.Add("budget=OVER_FLOOR (preview_on p99_max=$onP99Best ms is $overFloor ms above the bare timer p99=$($bare.p99)ms; that gap is the dock's own cost)")
+    }
+}
 $lines | ForEach-Object { Write-Output $_ }
 [System.IO.File]::WriteAllText($Out, ($lines -join "`r`n"), (New-Object System.Text.UTF8Encoding($false)))

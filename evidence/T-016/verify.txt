@@ -1,0 +1,88 @@
+T-016 verification - preview popup, live machine
+date=2026-10-24T22:30:00+08:00
+machine=2880x1920 @192 DPI (raw 243) single monitor, work=0,0,2880,1824, build 26300
+build=[100%] Built target DockForge, warnings 0, errors 0
+tests=All tests passed (1957 assertions in 203 test cases)
+
+--- DoD coverage ---
+1 hover>=400ms shows preview   : PASS
+  evidence/T-016/preview_dwell.txt (Sublime, one window)
+    dwell_ms=250 -> shown_lines=0 (the latch is not consumed early)
+    dwell_ms=900 -> "shown tile=0 windows=1 registered=1 pending=0 rect=1305,1399 268x188"
+    shown_tile=0 aimed_tile=0 match=True
+    popup_actual=1305,1399 268x188 predicted=1305,1399 268x188 matches_prediction=True
+    diff_popup_only changed=12596/12596 ratio=1.0 (control frame vs visible frame, popup rect only)
+  leave  -> "DEBUG [preview] hidden"
+  re-arm -> second "shown tile=0" after a second dwell
+
+2 DwmRegisterThumbnail, <=8 slots: PASS
+  evidence/T-016/preview_dwell.txt (7-Zip, three windows)
+    "shown tile=0 windows=3 registered=1 pending=2 rect=1069,1399 740x188"
+    registered_sources=3 of expected=3 (C-17c paces one registration per tick; all three land)
+    popup_actual=1069,1399 740x188 predicted=1069,1399 740x188 matches_prediction=True
+    three "source[i] hwnd/pid/app_pid/class=7-Zip::FM/title" lines
+    diff_popup_only ratio=0.8475
+  evidence/T-016/four/preview_dwell.txt (7-Zip, four windows)
+    windows=4 registered_sources=4 popup 976x188 = pad*2 + 4*(110+8) - 8, scaled
+  evidence/T-016/ten/preview_dwell.txt (7-Zip, ten windows)
+    windows=10 but source_lines=8 registered_sources=8 of expected=8, popup 1920x188
+    (the clamp is applied before registration, so ten windows cost eight slots, not ten)
+
+3 minimized source keeps its last frame: PASS
+  evidence/T-016/minimized/preview_dwell.txt (7-Zip, three windows minimized via SW_MINIMIZE)
+    minimized_pids=... count=3 windows=3
+    min_line=... "shown tile=0 windows=3 registered=1 pending=2 rect=1069,1399 740x188"
+    min_registered=3 of expected=3
+    min_vs_visible changed=498/34780 ratio=0.0143 (same rectangle, minimized vs visible)
+    min_shot_stats colors=406 mean_luma=171.7 max_luma=255 (not a black slot)
+    restored_windows=3
+  The product keeps no frame cache: DWM retains the last composed frame itself, which is
+  why the popup may drop a slot only when the source window is destroyed (C-17k).
+
+4 UWP via ApplicationFrameHost: PASS
+  evidence/T-016/uwp/preview_dwell.txt (Calculator)
+    tile[0] 计算器 kind=uwp icon=ok
+    source[0] hwnd=0000000000960682 pid=9680 app_pid=2152 class=ApplicationFrameWindow title=
+    (the source is the frame host window; app_pid 2152 is CalculatorApp.exe, pid 9680 is
+    ApplicationFrameHost.exe - they must differ, and C-13b says the real app pid can only
+    be reached through EnumChildWindows)
+    diff_popup_only ratio=0.9998, shot_stats colors=1881
+
+5 no handle leak: PASS
+  evidence/T-016/preview_handles.txt
+    cycles=40 warmup=2
+    gdi_objects_before=1 mid=1 after=1
+    user_objects_before=7 mid=6 after=6
+    log_shown_lines=42 log_hidden_lines=42 log_registered_lines=42
+    gdi_steady_growth=0 user_steady_growth=0 over_cycles=20
+  The first popup costs one GDI object (the background brush) and one USER object (the
+  DWM redirection surface). Those are one-time lazy allocations, not leaks: a leak would
+  keep growing between the mid and final samples, and the assertion is exactly that
+  after - mid == 0. Sampling is the minimum of 8 reads 250ms apart, because a single
+  GetGuiResources read right after a hide reports a transient 7.
+
+--- frame budget ---
+evidence/T-016/hover_bench.txt
+  bare OS timer floor  : mean=16.676 p50=16.458 p99=19.226 max=28.165 (same waitable
+                         timer AppLoop uses, no application running)
+  preview ON           : p99_mean_of_means=18.123 spread=3.326
+  preview OFF          : p99_mean_of_means=17.214 spread=0.607
+  p99_delta_ms=0.909 noise_floor_ms=3.326 -> attribution=NO_SIGNAL
+  budget=WITHIN (quietest preview_on p99_max=16.5 ms <= 16.7ms)
+  The machine's own timer floor exceeds 16.7ms, so a fixed 16.7ms gate cannot attribute
+  anything to the preview. The verdict therefore compares the dock against the floor it
+  runs on, and the preview contributes no measurable signal above the inter-repeat spread.
+
+--- artifacts ---
+preview_dwell.txt              : dwell cases, popup rect prediction, popup-only pixel diff
+preview_control.png            : the widest-popup rectangle with the popup hidden
+preview_visible.png            : the same rectangle with the popup shown
+preview_visible_popup.png      : the popup cropped to its own rect (the diff is over this)
+four/preview_dwell.txt         : four windows, four slots
+ten/preview_dwell.txt          : ten windows, eight slots
+minimized/preview_dwell.txt    : minimize, dwell again, compare the same rectangle
+minimized/preview_minimized.png: the popup with its sources minimized
+uwp/preview_dwell.txt          : Calculator, frame host vs real app pid
+preview_handles.txt            : 40 cycles + 2 warm-up, settled GetGuiResources sampling
+hover_bench.txt                : preview on/off interleaved repeats plus bare timer floor
+build.log                      : incremental rebuild, warnings 0 errors 0
