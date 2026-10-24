@@ -3,7 +3,7 @@
     "schema":  1,
     "milestone":  "M3",
     "last_task":  "T-041",
-    "last_commit":  "870b495",
+    "last_commit":  "3b10574",
     "current_module":  "dock",
     "current_task":  "T-042",
     "counters":  {
@@ -130,5 +130,5 @@
                           "FrameClock 是 1000 样本滚动窗，p99 必须在 frames\u003e=1000 之后读，否则仍含启动首帧（实测 frames=377 时 19.6ms，frames=1000 后 16.5ms）",
                           "TASKS.md / CONTRACTS.md 在 HEAD 中是 UTF-8 无 BOM + LF；用 WriteAllText 写中文后必须把 CRLF 归一化成 LF，否则 git diff 会把整文件标成改动"
                       ],
-    "updated_at":  "2026-10-25T00:36:22+08:00"
+    "updated_at":  "2026-10-25T00:39:09+08:00"
 }
