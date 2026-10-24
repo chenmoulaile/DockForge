@@ -1,0 +1,49 @@
+sources=4
+client rect=0,0..1704,196
+dest=plain rect=588,1644 1704x196 dip=852x98 scale=2 slot=200x70 gap=8
+source 0 rect=40,60..300,220 visible=1 iconic=0 cloaked=0 screen_mid=(34,52,172)
+register 0 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=28,28..428,168
+source 1 rect=316,60..576,220 visible=1 iconic=0 cloaked=0 screen_mid=(71,107,145)
+register 1 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=444,28..844,168
+source 2 rect=592,60..852,220 visible=1 iconic=0 cloaked=0 screen_mid=(108,163,124)
+register 2 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=860,28..1260,168
+source 3 rect=868,60..1128,220 visible=1 iconic=0 cloaked=0 screen_mid=(143,82,104)
+register 3 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=1276,28..1676,168
+thumbs=4
+register_cost_ms=297
+--- scan t300 y=1742 ---
+run source=0 x=616..1015 width=400
+run source=1 x=1032..1431 width=400
+run source=2 x=1448..1829 width=382
+--- box t300 ---
+box source=0 x=28..427 y=28..167 size=400x140 hits=56000
+box source=1 x=444..843 y=28..167 size=400x140 hits=56000
+box source=2 x=860..1241 y=28..167 size=382x140 hits=53480
+box source=3 ABSENT
+source 0 rect=40,60..300,220 visible=1 iconic=0 cloaked=0 screen_mid=(34,51,169)
+register 0 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=28,28..428,168
+source 1 rect=316,60..576,220 visible=1 iconic=0 cloaked=0 screen_mid=(71,107,145)
+register 1 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=444,28..844,168
+source 2 rect=592,60..852,220 visible=1 iconic=0 cloaked=0 screen_mid=(108,163,124)
+register 2 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=860,28..1260,168
+source 3 rect=868,60..1128,220 visible=1 iconic=0 cloaked=0 screen_mid=(143,82,104)
+register 3 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=1276,28..1676,168
+thumbs=4
+--- box after_reregister ---
+box source=0 x=28..427 y=28..167 size=400x140 hits=56000
+box source=1 x=444..843 y=28..167 size=400x140 hits=56000
+box source=2 x=860..1241 y=28..167 size=382x140 hits=53480
+box source=3 ABSENT
+--- sample before_minimize scale=2 ---
+slot 0 centre=(816,1742) got=(40,60,200) best_delta=0 at_x=666 want=(40,60,200) verdict=THUMBNAIL_VISIBLE
+slot 1 centre=(1232,1742) got=(87,131,177) best_delta=0 at_x=1082 want=(87,131,177) verdict=THUMBNAIL_VISIBLE
+slot 2 centre=(1648,1742) got=(134,202,154) best_delta=0 at_x=1498 want=(134,202,154) verdict=THUMBNAIL_VISIBLE
+slot 3 centre=(2064,1742) got=(8,9,11) best_delta=387 at_x=1914 want=(181,103,131) verdict=NO_THUMBNAIL
+--- sample before_teardown scale=2 ---
+slot 0 centre=(816,1742) got=(40,60,200) best_delta=0 at_x=666 want=(40,60,200) verdict=THUMBNAIL_VISIBLE
+slot 1 centre=(1232,1742) got=(87,131,177) best_delta=0 at_x=1082 want=(87,131,177) verdict=THUMBNAIL_VISIBLE
+slot 2 centre=(1648,1742) got=(134,202,154) best_delta=0 at_x=1498 want=(134,202,154) verdict=THUMBNAIL_VISIBLE
+slot 3 centre=(2064,1742) got=(8,9,11) best_delta=387 at_x=1914 want=(181,103,131) verdict=NO_THUMBNAIL
+gui_objects 8 -> 8, user_objects 17 -> 17
+gui_objects after 40 register/unregister: 8 -> 8
+exit code=0

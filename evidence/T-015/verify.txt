@@ -1,0 +1,14 @@
+Randomness seeded to: 80511957
+===============================================================================
+All tests passed (1939 assertions in 202 test cases)
+
+
+cmake --build D:/MacDock/build -j 8 : [100%] Built target DockForge, dockforge_lib, layout_bench, dockforge_tests
+warnings: 0 errors: 0
+
+machine: single display 2880x1920 @ 192 DPI, build 26300 (Windows 11 Pro)
+captured: 2026-10-24 (local time)
+runner:  build/bin/dockforge_tests.exe (Catch2 v3, no --order or tag filters)
+All tests passed (1947 assertions in 202 test cases)
+post-logging rebuild: same 202 cases / 1947 assertions, no new warnings
+

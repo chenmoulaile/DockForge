@@ -1,0 +1,21 @@
+sources=3
+dest=plain rect=788,1524 1304x316 dip=652x158 scale=2
+source 0 rect=40,60..300,220 visible=1 iconic=0 cloaked=0 screen_mid=(0,0,0)
+register 0 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=28,28..428,288
+source 1 rect=316,60..576,220 visible=1 iconic=0 cloaked=0 screen_mid=(87,131,177)
+register 1 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=452,28..852,288
+source 2 rect=592,60..852,220 visible=1 iconic=0 cloaked=0 screen_mid=(134,202,154)
+register 2 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=876,28..1276,288
+thumbs=3
+register_cost_ms=219
+--- sample before_minimize scale=2 ---
+slot 0 at=(1016,1682) want=(40,60,200) got=(40,60,200) delta=0 verdict=THUMBNAIL_VISIBLE
+slot 1 at=(1440,1682) want=(87,131,177) got=(87,131,177) delta=0 verdict=THUMBNAIL_VISIBLE
+slot 2 at=(1864,1682) want=(134,202,154) got=(8,9,11) delta=462 verdict=NO_THUMBNAIL
+--- sample before_teardown scale=2 ---
+slot 0 at=(1016,1682) want=(40,60,200) got=(40,60,200) delta=0 verdict=THUMBNAIL_VISIBLE
+slot 1 at=(1440,1682) want=(87,131,177) got=(87,131,177) delta=0 verdict=THUMBNAIL_VISIBLE
+slot 2 at=(1864,1682) want=(134,202,154) got=(8,9,11) delta=462 verdict=NO_THUMBNAIL
+gui_objects 8 -> 8, user_objects 16 -> 16
+gui_objects after 40 register/unregister: 8 -> 8
+exit code=0

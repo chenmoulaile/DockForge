@@ -13,11 +13,13 @@
 #include "dock/dock_view.h"
 #include "dock/drop_target.h"
 #include "dock/drag_controller.h"
+#include "dock/hover_timer.h"
 #include "dock/running_tracker.h"
 #include "dock/tile_order.h"
 #include "platform/composition.h"
 #include "platform/display.h"
 #include "platform/hit_region.h"
+#include "platform/preview_window.h"
 #include "platform/window.h"
 #include "render/backend.h"
 #include "render/backdrop_capture.h"
@@ -26,7 +28,9 @@
 #include "shell/drop_resolver.h"
 #include "shell/icon_cache.h"
 #include "shell/start_menu.h"
+#include "shell/thumbnail_host.h"
 #include "shell/window_actions.h"
+#include "shell/window_list.h"
 #include "shell/window_registry.h"
 
 #include <d2d1helper.h>
@@ -112,11 +116,18 @@ platform::DockEdge ToDockEdge(core::DockPosition position) {    switch (position
     }
 }
 
-bool ReadEnvFlag(const wchar_t* name) {
+// Reads a boolean environment flag. `default_on` is what the flag reports when
+// the variable is unset, which is what makes a feature opt-OUT rather than
+// opt-IN without the caller having to spell out both cases at every call site.
+bool ReadEnvFlag(const wchar_t* name, bool default_on) {
     wchar_t buffer[8]{};
     const DWORD n = GetEnvironmentVariableW(name, buffer, ARRAYSIZE(buffer));
-    if (n == 0 || n >= ARRAYSIZE(buffer)) return false;
+    if (n == 0 || n >= ARRAYSIZE(buffer)) return default_on;
     return buffer[0] != L'0' && buffer[0] != L'\0';
+}
+
+bool ReadEnvFlag(const wchar_t* name) {
+    return ReadEnvFlag(name, false);
 }
 
 // DOCKFORGE_FORCE_MATERIAL=<mica|acrylic|blur|solid> overrides the configured
@@ -410,6 +421,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         return 2;
     }
 
+    // The preview popup has its own class, registered here rather than lazily in
+    // PreviewWindow::Create: a failure at registration time is a startup problem
+    // worth reporting once, not a per-preview failure the user only sees as "the
+    // preview never appeared".
+    const bool preview_class_ready = platform::PreviewWindow::RegisterWindowClass(instance);
+
     // Geometry needs the tile count, which needs the scan, which happens above.
     // The scale is unknown until the HWND exists, so start at 1.0 and recompute
     // inside apply_placement once Window::Dpi() is readable.
@@ -544,6 +561,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     // because it needs the HWND. A null check here is cheaper than reordering the
     // whole startup so that one consumer comes first.
     std::function<void()> geometry_changed;
+
+    // Dock screen rectangle, refreshed by apply_placement. The tick needs it to
+    // place the preview popup on top of the dock, and the preview needs the same
+    // "the scale comes from geometry, never from a raw DPI query" rule the drop
+    // target already follows (C-16d).
+    RECT dock_rect{};
+    float safe_scale = 1.0f;
+
     auto apply_placement = [&]() {
         if (!have_target) return;
         // Recompute geometry here, not once at startup: the window DPI is only
@@ -568,6 +593,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         }
         RECT actual{};
         GetWindowRect(window.Handle(), &actual);
+        // The preview popup is positioned relative to the dock, so it needs the
+        // dock's real screen rectangle. Read here, next to the placement that
+        // produces it, rather than re-querying per frame.
+        dock_rect = actual;
+        safe_scale = window.Scale() > 0.0f ? window.Scale() : 1.0f;
         DF_INFO("app",
                 "dock placed edge=%d work=%ld,%ld,%ld,%ld target=%ld,%ld %dx%d "
                 "rect=%ld,%ld,%ld,%ld dpi=%u",
@@ -632,6 +662,30 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     // Paint cost, measured separately from the frame interval: the frame clock only
     // says a deadline was missed, this says whether the miss was drawing or present.
     core::FrameClock paint_clock;
+
+    // Window preview popup (T-015). Three pieces, in the modules that own them:
+    //   * platform::PreviewWindow is the popup HWND and its window class;
+    //   * shell::ThumbnailHost owns every DwmRegisterThumbnail lifetime and the
+    //     DWM slot rectangles;
+    //   * dock::HoverTimer is the 400ms dwell that decides when to show it.
+    // The popup is deliberately NOT part of the dock's CompositionSurface: DWM
+    // composites thumbnails into the destination window's own redirection
+    // surface, and the dock's surface is a DirectComposition visual that would
+    // swallow them.
+    platform::PreviewWindow preview;
+    shell::ThumbnailHost thumbnails;
+    dock::HoverTimer hover_timer;
+    bool preview_visible = false;
+    int preview_tile = -1;
+    // Set when a registration is queued and pumped over later ticks. A cold
+    // DwmRegisterThumbnail costs 219..609ms per slot (spikes/t015_thumb), so the
+    // whole set can never be registered inside one frame.
+    bool thumbnails_pending = false;
+
+    // Switches the preview off without touching the config: the dock is a system
+    // tray-level feature, and "changed system behaviour must have a switch that
+    // defaults to off" (PROMPT.md).
+    const bool preview_enabled = ReadEnvFlag(L"DOCKFORGE_PREVIEW", true) && preview_class_ready;
 
     auto repaint = [&] {
         const float dpi = static_cast<float>(window.Dpi());
@@ -930,6 +984,27 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         running_tracker.Invalidate();
     };
 
+    // Hides the preview popup and releases every DWM registration.
+    //
+    // The order is not negotiable. DWM renders into the destination window's
+    // redirection surface, so a registration that outlives its destination is a
+    // dangling reference inside the desktop compositor; and a registration that
+    // outlives the SOURCE is a thumbnail of a dead window, which reads as a black
+    // rectangle. Releasing first, hiding second, keeps both invariants.
+    //
+    // The popup HWND itself survives so the next preview does not pay for window
+    // creation again - only the registrations are expensive to redo.
+    auto HidePreview = [&] {
+        if (!preview_visible && !thumbnails_pending) return;
+        thumbnails.ReleaseAll();
+        thumbnails_pending = false;
+        preview.Hide();
+        preview_visible = false;
+        preview_tile = -1;
+        hover_timer.Reset();
+        DF_DEBUG("preview", "hidden");
+    };
+
     core::EventBus bus;
     core::AppLoop loop;
     loop.SetTargetIntervalMs(16);  // 60 FPS target (PERFORMANCE.md)
@@ -993,6 +1068,110 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                 apply_region();
             }
         }
+
+        // Window preview (T-015). The dwell timer is armed only while the pointer
+        // is on a tile, and it resets on any change, so a preview never appears
+        // mid-gesture or for a pointer merely crossing the dock.
+        if (preview_enabled && !preview_visible && !thumbnails_pending && !drag.Active() &&
+            !drop_pointer.active) {
+            const int hovered = dock_hover.active ? dock_painter.HitTest(
+                                        dock_hover.mouse_x_dip, window.Scale())
+                                                  : -1;
+            if (hover_timer.Update(hovered, static_cast<float>(delta_ms))) {
+                if (hovered >= 0 && hovered < static_cast<int>(tiles.size())) {
+                    const auto& tile = tiles[static_cast<size_t>(hovered)];
+                    // The window list comes from the running tracker's last poll,
+                    // which is at most 300ms old and already paid for. Polling here
+                    // would add an EnumWindows to a frame that just decided to show
+                    // a preview.
+                    const auto windows =
+                        shell::WindowsForEntry(tile.app, running_tracker.Windows());
+                    if (!windows.empty()) {
+                        std::vector<HWND> sources;
+                        sources.reserve(windows.size());
+                        for (const auto& window : windows) {
+                            sources.push_back(window.hwnd);
+                        }
+                        // Show the popup immediately, then register thumbnails over
+                        // the following ticks: the alternative is a 594ms stall for
+                        // eight slots (spikes/t015_thumb), which would blow the frame
+                        // budget on the very frame the user asked for a preview.
+                        if (preview.Create(instance)) {
+                            thumbnails.SetDestination(preview.Handle());
+                            const int registered = thumbnails.SetSources(sources);
+                            thumbnails_pending = thumbnails.PendingCount() > 0;
+                            const float scale = window.Scale();
+                            const int slots = std::min(static_cast<int>(windows.size()),
+                                                       shell::kMaxThumbnails);
+                            const int width_px = static_cast<int>(lroundf(
+                                (shell::kSlotPaddingDip * 2.0f +
+                                 static_cast<float>(slots) *
+                                         (shell::kSlotWidthDip + shell::kSlotGapDip) -
+                                 shell::kSlotGapDip) *
+                                scale));
+                            const int height_px = static_cast<int>(lroundf(
+                                (shell::kSlotPaddingDip * 2.0f + shell::kSlotHeightDip) * scale));
+                            // Horizontally centred on the hovered icon, vertically
+                            // sitting on top of the dock with an 8px gap. Both use
+                            // the dock's real screen rectangle (dock_rect), not
+                            // the placement request, so a clamped dock still puts
+                            // the preview in the right place.
+                            const auto centres = dock_painter.IdleCentersDip(safe_scale);
+                            const int left_px =
+                                dock_rect.left +
+                                static_cast<int>(lroundf(
+                                    centres[static_cast<size_t>(hovered)] * scale)) -
+                                width_px / 2;
+                            const int top_px = dock_rect.top - height_px - 8;
+                            preview.Place(left_px, top_px, width_px, height_px);
+                            thumbnails.UpdateDestinations(left_px, top_px, scale);
+                            preview_visible = true;
+                            preview_tile = hovered;
+                            DF_INFO("preview",
+                                    "shown tile=%d windows=%zu registered=%d pending=%zu "
+                                    "rect=%d,%d %dx%d",
+                                    hovered, windows.size(), (size_t)registered,
+                                    (size_t)thumbnails.PendingCount(), left_px, top_px,
+                                    width_px, height_px);
+                            // C-17g: for packaged apps the visible top-level window is
+                            // owned by ApplicationFrameHost, so hwnd and app_pid
+                            // differ by design. Logging both is the DoD proof that
+                            // the source was chosen through the frame enumeration
+                            // rather than by accident.
+                            for (size_t i = 0; i < sources.size() && i < shell::kMaxThumbnails;
+                                 ++i) {
+                                DF_DEBUG("preview",
+                                         "source[%zu] hwnd=%p pid=%lu app_pid=%lu class=%ls "
+                                         "title=%ls",
+                                         i, (void*)sources[i],
+                                         (unsigned long)windows[i].pid,
+                                         (unsigned long)windows[i].app_pid,
+                                         windows[i].class_name.c_str(),
+                                         windows[i].title.c_str());
+                            }
+                        } else {
+                            DF_WARN("preview", "popup create failed; preview disabled");
+                        }
+                    }
+                }
+                hover_timer.Reset();
+            }
+        }
+
+        // Registrations that did not fit in the showing frame land here, one per
+        // tick, so a preview with eight windows fills in over ~8 frames instead of
+        // stalling one.
+        if (thumbnails_pending) {
+            const int registered = thumbnails.PumpPending();
+            if (registered > 0) {
+                thumbnails.UpdateDestinations(dock_rect.left, dock_rect.top, window.Scale());
+                dirty = true;
+            }
+            if (thumbnails.PendingCount() == 0) {
+                thumbnails_pending = false;
+            }
+        }
+
         if (dirty) {
             InvalidateRect(window.Handle(), nullptr, FALSE);
         }
@@ -1057,6 +1236,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                         core::WideToUtf8(target_display.device).c_str(), previous,
                         target_display.effective_dpi);
                 apply_placement();
+                // The preview's slot rectangles are DIP-derived, so a DPI change
+                // invalidates every one of them. Hiding and letting the dwell
+                // timer re-arm is cheaper than re-deriving geometry the popup is
+                // about to throw away anyway.
+                if (preview_visible) {
+                    HidePreview();
+                }
                 InvalidateRect(hwnd, nullptr, FALSE);
                 out = 0;
                 return true;
@@ -1072,6 +1258,29 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                     RECT rc{};
                     GetWindowRect(hwnd, &rc);
                     capture.SetRegion(rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top);
+                }
+                // The preview sits on top of the dock, so it has to follow the
+                // dock. WM_MOVE is the only message that says the dock moved;
+                // WM_DISPLAYCHANGE and WM_SETTINGCHANGE both re-enter through
+                // apply_placement, which already re-places the preview.
+                if (preview_visible) {
+                    const float scale = window.Scale();
+                    const int slots = static_cast<int>(thumbnails.Slots().size());
+                    const int width_px = static_cast<int>(lroundf(
+                        (shell::kSlotPaddingDip * 2.0f +
+                         static_cast<float>(slots) * (shell::kSlotWidthDip + shell::kSlotGapDip) -
+                         shell::kSlotGapDip) *
+                        scale));
+                    const int height_px = static_cast<int>(lroundf(
+                        (shell::kSlotPaddingDip * 2.0f + shell::kSlotHeightDip) * scale));
+                    const auto centres = dock_painter.IdleCentersDip(safe_scale);
+                    const int left_px = dock_rect.left +
+                                        static_cast<int>(lroundf(
+                                            centres[static_cast<size_t>(preview_tile)] * scale)) -
+                                        width_px / 2;
+                    const int top_px = dock_rect.top - height_px - 8;
+                    preview.Place(left_px, top_px, width_px, height_px);
+                    thumbnails.UpdateDestinations(left_px, top_px, scale);
                 }
                 return false;
             }
@@ -1115,6 +1324,17 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                 }
 
                 if (x != dock_hover.mouse_x_dip || !dock_hover.active) {
+                    // Moving to a different tile re-arms the dwell timer, so a
+                    // preview only ever appears for the tile the pointer is
+                    // actually resting on. The popup itself is hidden by the
+                    // tick once the timer re-arms.
+                    const int previous_hover =
+                        dock_hover.active ? dock_painter.HitTest(dock_hover.mouse_x_dip, safe_scale)
+                                          : -1;
+                    const int next_hover = dock_painter.HitTest(x, safe_scale);
+                    if (preview_visible && next_hover != previous_hover) {
+                        HidePreview();
+                    }
                     dock_hover.mouse_x_dip = x;
                     dock_hover.active = true;
                     // Deliberately no InvalidateRect here. Windows delivers mouse
@@ -1138,6 +1358,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                     DF_WARN("dock", "WM_MOUSELEAVE arrived during a drag; ignoring hover reset");
                 } else {
                     dock_hover.active = false;
+                    // The dwell timer must reset with the hover: the pointer is
+                    // gone, so whatever it was about to preview is no longer
+                    // wanted, and leaving the timer armed would let the preview
+                    // fire on the frame the pointer entered another tile.
+                    hover_timer.Reset();
+                    if (preview_visible) {
+                        HidePreview();
+                    }
                 }
                 InvalidateRect(hwnd, nullptr, FALSE);
                 out = 0;
@@ -1173,6 +1401,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                 // removal. Capture is taken now so the pointer can leave the window
                 // without ending the gesture.
                 drag.Begin(index, x_dip, y_dip);
+                // A press means the user wants this tile, not its preview.
+                if (preview_visible) {
+                    HidePreview();
+                }
                 SetCapture(hwnd);
                 // The region has to widen to the whole window the moment the drag
                 // starts, not on the next hover transition. It is trimmed to the plate
@@ -1296,6 +1528,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     // Revoked before the window is destroyed: OLE keeps a reference to the HWND, and a
     // destroyed window still registered is the classic shutdown hang.
     drop_target.Revoke();
+    // Same reasoning for the DWM thumbnails, and the ordering inside matters:
+    // ReleaseAll() before Destroy() so no registration outlives its destination
+    // window. A registration pointing at a destroyed HWND is a dangling reference
+    // inside the desktop compositor, and it is invisible until shutdown hangs.
+    thumbnails.ReleaseAll();
+    preview.Destroy();
     capture.Stop();
     plate.Reset();
     render_backend->Shutdown();

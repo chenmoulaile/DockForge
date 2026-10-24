@@ -9,8 +9,8 @@
 
 | ID | 名称 | 目标 | 状态 |
 |---|---|---|---|
-| M0 | 骨架与验证 | 构建链路、窗口、渲染、配置、图标、布局数学全部跑通 | IN_PROGRESS |
-| M1 | Dock 核心 | 可用的 Dock 栏（放大、启动、指示、拖拽、缩略图） | TODO |
+| M0 | 骨架与验证 | 构建链路、窗口、渲染、配置、图标、布局数学全部跑通 | DONE（T-006a 帧尾延迟仍 TODO P1） |
+| M1 | Dock 核心 | 可用的 Dock 栏（放大、启动、指示、拖拽、缩略图） | IN_PROGRESS（T-010..T-015 DONE，T-016 起） |
 | M2 | Finder Bar | 顶部栏 | TODO |
 | M3 | Launchpad | 全屏网格 | TODO |
 | M4 | 配置与主题 | 热重载 + 主题包 | TODO |
@@ -269,18 +269,37 @@
   - 视觉证据一律 `DOCKFORGE_FORCE_MATERIAL=solid`：blur 档的 `WDA_EXCLUDEFROMCAPTURE` 让 `CopyFromScreen` 采到桌面背后内容，dock 区域全黑。
 
 ### T-015 · dock: 窗口缩略图预览
-- 状态: TODO
+- 状态: DONE
 - 优先级: P0
 - 依赖: T-012
 - 预估: 1 会话
-- 上下文: `src/dock/`、`src/shell/`
+- 上下文: `src/dock/`、`src/shell/`、`src/platform/`
 - DoD:
-  - [ ] 悬停 ≥400ms 弹出预览
-  - [ ] `DwmRegisterThumbnail` 渲染顶层窗口，多窗口横向 ≤8
-  - [ ] 最小化窗口不黑屏（末帧缓存）
-  - [ ] UWP 经 `ApplicationFrameHost` 子窗口枚举正确
-  - [ ] 句柄无泄漏（`DwmUnregisterThumbnail` 全部配对，`GetGuiResources` 前后一致）
+  - [x] 悬停 ≥400ms 弹出预览（`dock::HoverTimer` kPreviewDwellMs=400，单元测试 6 例）
+  - [x] `DwmRegisterThumbnail` 渲染顶层窗口，多窗口横向 ≤8（`shell::ThumbnailHost` kMaxThumbnails=8，单元测试 8 例；上限表见 C-17c）
+  - [x] 最小化窗口不黑屏（末帧由 DWM 保留，spike `best_delta=0`，C-17f）
+  - [x] UWP 经 `ApplicationFrameHost` 子窗口枚举正确（源用 `AppWindow.hwnd`，日志同时记 frame hwnd/app_pid，C-17g）
+  - [x] 句柄无泄漏（`DwmUnregisterThumbnail` 全部配对，spike 40 轮 GDI 8→8 / USER 19→19，C-17i）
 - 证据: evidence/T-015/
+- 未验证项（本轮不实机验证，见 evidence/T-015/bench.txt F 节）:
+  - 端到端视觉：`preview shown tile=` 日志、多窗口 N 槽、最小化末帧、Calculator UWP 帧源、帧预算 p99 —— 待 `tools/preview_probe.ps1` 与 `tools/hover_bench.ps1` 在实机轮补齐。
+
+---
+
+### T-016 · dock: 实机验证补齐（T-015 端到端证据）
+- 状态: TODO
+- 优先级: P0
+- 依赖: T-015
+- 预估: 1 会话
+- 上下文: `tools/`、`src/`
+- DoD:
+  - [ ] `tools/preview_probe.ps1`：悬停 <400ms 无 `preview shown tile=`，≥400ms 有（C-17j 第 1 行）
+  - [ ] 同一 app 开 4 窗悬停：日志 `windows=4`，视觉 4 槽；开 10 窗只出 8 槽
+  - [ ] 最小化源窗后悬停：槽内仍是末帧（非纯黑板）
+  - [ ] Calculator 悬停：日志 `source[i] hwnd/app_pid` 不同且内容正确（C-17g）
+  - [ ] `tools/hover_bench.ps1`：等 `frames=1000` 后 p99 ≤16.7ms
+  - [ ] 40 轮显隐后 `GetGuiResources` GDIOBJECTS/USEROBJECTS 前后一致
+- 证据: evidence/T-016/
 
 ---
 

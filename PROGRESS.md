@@ -132,3 +132,17 @@
   5. caret 探针本身错两次：整帧 bbox 被行回落主导（96 DPI 报 `0,57..754,105` 跨整行），必须按列统计并只认 ≤12px 宽的单 run；颜色取 run 首个合格列会读到抗锯齿边缘 `(46,28,29)`，把 reject 判成 accept，必须取 run 内峰值像素 `(219,98,89)`。
 - 遗留：多文件拖入只有单测无端到端截图；跨屏拖入未测（单显示器）；blur 档无法截图（`WDA_EXCLUDEFROMCAPTURE`），视觉证据一律 solid。
 - 下轮开始于：T-015
+
+## 2026-10-24T06:10+08:00 | T-015 | DONE
+
+- 做了什么：新增 `src/platform/preview_window.{h,cpp}`（自有窗口类 `DockForgePreviewWindow`，`WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE` + `WS_POPUP`，禁 `NOREDIRECTIONBITMAP`，隐藏不销毁）、`src/shell/thumbnail_host.{h,cpp}`（`DwmRegisterThumbnail` 生命周期、每 tick 1 个的分帧注册、dest 矩形物理像素、`ReleaseAll` 唯一注销入口）、`src/shell/window_list.{h,cpp}`（`WindowsForEntry` 复用 `IdentityOf` + 窗口侧身份，不另写匹配）、`src/dock/hover_timer.h`（400ms dwell latch）；`main.cpp` 接入 tick 内弹出/续推、`WM_MOVE` 跟随、`WM_DPICHANGED` 隐藏、`WM_MOUSELEAVE`/`WM_LBUTTONDOWN` 取消、收尾 `ReleaseAll` 先于 `preview.Destroy()`；新增 `tests/preview_test.cpp` 24 例。契约 C-17a..C-17l 与 ADR-0017 已冻结。
+- 证据：`evidence/T-015/`（`build.log`、`verify.txt`、`bench.txt` + spike 的 12 个 `tmp_*.txt` / `run_plain_3.txt` / `tmp_full.png`）
+- 关键发现：
+  1. 冷 `DwmRegisterThumbnail` 实测 219–609ms/槽（8 槽共 594ms），比 16.7ms 帧预算高一两个数量级。因此弹窗先出框、注册按每 tick 1 个补齐，8 窗口最多约 8 帧填满；同步注册会正好在用户索要预览的那一帧吹穿预算。
+  2. 同目标窗注册多槽存在经验上限：110x70/120x90/130x70/130x130/140x70 DIP 全 8/8；150x70/160x70/170x70 报 7；180x70 报 6；200x130 只 4/5/6。已排除注册节奏、重注册、脏区、源重绘、TOPMOST、布局方向、注册顺序、槽高；非总像素预算、非窗口宽度。未定因，工程取 110x70+gap8 绕开（spike 三次全 8/8 稳定）。
+  3. `rcDestination` 必须是 dest 客户端物理像素，传 DIP 在 200% 屏整体半偏移——与 T-004 `BeginDraw` offset、T-014 `UpdatePointer` 是同一类错误的第三次。
+  4. 最小化源窗后 DWM 保留末帧（`best_delta=0`），应用层无需缓存；但进程退出后缩略图空白，故来源列表每次 dwell 从 `RunningTracker::Windows()` 重取。
+  5. 预览窗不能复用 `platform::Window`：同类 WndProc 在 `WM_DESTROY` 时 `PostQuitMessage` 会结束 dock 消息循环，且其消息 hook 属主 dock。
+  6. `ThumbnailHost::PumpPending` 对 `!dest` 或 `!IsWindow(source)` 必须 `break` 保留队列而非 `erase`：erase 会把无 dest 期的排队静默清空（单测 `PendingCount==2` 抓到），且死源永不重试。
+- 遗留：本轮按用户要求不实机验证，端到端四项（400ms 日志、多窗口 N 槽、Calculator UWP 帧源、帧预算 p99）待 `tools/preview_probe.ps1` + `tools/hover_bench.ps1` 在实机轮补齐；`GetGuiResources` 前后一致已在 spike 验证（40 轮 GDI 8→8 / USER 19→19），产品侧需实机复核一次。
+- 下轮开始于：T-016

@@ -723,3 +723,101 @@ OLE 回调运行在源进程的模态拖拽循环里，是**对我们消息循�
 2. **blur 档无法截图**。该档 `WDA_EXCLUDEFROMCAPTURE` 让 `CopyFromScreen` 返回桌面背后内容，dock 区域是黑的。视觉证据一律 `DOCKFORGE_FORCE_MATERIAL=solid`；这是快门的限制，不是 caret 的限制。
 3. **多文件拖入未做视觉证据**。`ClassifyDroppedPaths` 的整体拒绝逻辑有单元测试，但没有真实多选拖拽的端到端截图。
 4. **单显示器主机**。跨屏拖入未测。
+
+---
+
+## C-17 窗口缩略图预览（T-015 冻结）
+
+C-11 只覆盖静态图标行。悬停放大（C-12）、运行指示（C-14）、拖拽（C-15）、外部拖入（C-16）各自单独冻结，缩略图预览同样单独冻结，本节即其契约。
+
+### C-17a 触发条件
+
+悬停同一 tile 连续 **400ms**（`dock::kPreviewDwellMs`）才弹出预览。400ms 是设计常量，不进配置表——与 `kHoverRampPerSecond` 同例：它是交互节奏而非用户偏好。
+
+下列任一发生即取消并重置计时：指针离开 dock、切换到另一 tile、按下左键、拖拽开始、外部 OLE 拖入、DPI 变化。预览只对"静止指向"响应，不对手势响应。
+
+### C-17b 预览窗口是独立顶层窗口，不是 dock 的一部分
+
+| 属性 | 取值 | 理由 |
+| --- | --- | --- |
+| 所属 | `platform::PreviewWindow`，自有窗口类 `DockForgePreviewWindow` | 不能复用 `platform::Window`：同类 WndProc 在 `WM_DESTROY` 时 `PostQuitMessage`，会结束 dock 消息循环；其消息 hook 属主 dock |
+| 扩展样式 | `WS_EX_TOOLWINDOW \| WS_EX_NOACTIVATE`，`WS_POPUP` | 不进 Alt-Tab、不抢焦点 |
+| **禁止** `WS_EX_NOREDIRECTIONBITMAP` | 不加 | DWM 把缩略图合成在 dest 的 redirection surface 之上，GDI 底必须保持可见（spike 实测结论 1） |
+| 不用 `CompositionSurface` | 是 | dock 的 surface 是 DComp visual，会吞掉 DWM 合成层；预览窗用普通 GDI 画底 |
+| 生命周期 | 隐藏而非销毁，`Place()` 才显示 | 窗口创建成本不重复付；但 DWM 注册必须在隐藏前释放 |
+| 区域 | 不设 `SetWindowRgn` | dock 的 region 会裁掉弹窗且高度固定 |
+
+### C-17c 槽位几何（常量，来自 spike 实测）
+
+| 常量 | 值 | 来源 |
+| --- | --- | --- |
+| `kMaxThumbnails` | 8 | DoD 上限，也是 spike 实测稳定数 |
+| `kSlotWidthDip` | 110 | 8/8 渲染的最大槽宽 |
+| `kSlotHeightDip` | 70 | 同上 |
+| `kSlotGapDip` | 8 | 同上 |
+| `kSlotPaddingDip` | 12 | 槽与弹窗边的间距 |
+
+**渲染数量经验上限**（192 DPI，同目标窗注册 N 个后按槽实测）：110x70 / 120x90 / 130x70 / 130x130 / 140x70 DIP 均 8/8；150x70 / 160x70 / 170x70 报 7；180x70 报 6；200x130 只 4/5/6。已排除注册节奏、重注册、脏区、源重绘、TOPMOST、布局方向、注册顺序、槽高。未定因（非总像素预算，非窗口宽度）。**工程结论即取 110x70 + gap 8，不追因**——spike 三次全 8/8 稳定。
+
+弹窗尺寸（DIP）：`宽 = 2*padding + n*(slot_w+gap) - gap`，`高 = 2*padding + slot_h`。水平中心对准悬停图标的静止栅格中心，垂直置于 dock 上方 8px。
+
+### C-17d 注册必须分帧，不可同步
+
+冷 `DwmRegisterThumbnail` 实测 **219–609ms/槽**（8 槽共 594ms）。同步注册会在一帧内吹穿 16.7ms 预算——而那一帧正是用户索要预览的一帧。
+
+规则：**弹窗先显示（空槽），注册按每 tick 1 个的速率补齐**（`kRegistrationsPerTick = 1`）。`ThumbnailHost::SetSources` 返回立即完成数，余下进 `pending_`，由 `PumpPending()` 在后续 tick 消费。预览因此先出框后出图，最多约 8 帧填满。
+
+注册失败的槽静默跳过并记 `DF_WARN`，不影响其余槽；来源窗口已死（`!IsWindow`）直接跳过。
+
+### C-17e DWM 矩形单位是 dest 客户端物理像素
+
+`DWM_THUMBNAIL_PROPERTIES::rcDestination` 用**物理像素**。传 DIP 在 200% 屏上整体半偏移（spike 注释实测）。槽矩形由 `kSlotPaddingDip + i*(slot_w+gap)` 乘 `scale` 得出，`scale` 与几何同源（`window.Scale()`），禁 `GetDpiForWindow`——与 C-16d 同一条规则。
+
+`fSourceClientAreaOnly = FALSE`：窗口框属于缩略图内容，裁掉会让预览读成"丢了标题栏"。
+
+### C-17f 最小化不黑屏
+
+`ShowWindow(SW_MINIMIZE)` 后泵 700ms 采样仍是末帧（`got=(134,202,154) best_delta=0`）——**DWM 保留末帧，应用层不缓存**。但进程退出后缩略图空白，故来源窗口销毁时应用层必须移除槽位（`SetSources` 重算时自然处理）。
+
+### C-17g UWP 经 ApplicationFrameHost 枚举正确
+
+打包应用的可见顶层窗口由 `ApplicationFrameHost.exe` 托管，真实 `app_pid` 只能经 `EnumChildWindows` 跨进程拿到（C-13b）。`window_registry.cpp` 已在 `AppWindow.app_pid` 记录该真实 pid，而 `AppWindow.hwnd` 是 frame host 的 HWND。
+
+**缩略图源 HWND 用 `AppWindow.hwnd`**（frame host）。DWM 对 frame host 与真实窗都返回 S_OK，且缩略 frame host 才显示应用真实内容。日志同时记录 frame hwnd / app_pid / 选中源，作为 DoD 第 4 条的证明。
+
+### C-17h 窗口列表归属，且不得另写匹配逻辑
+
+多窗口列表 = `shell::WindowsForEntry`：对每个 tile，所有匹配该 `AppEntry` 的顶层窗口，按 z 序（MRU 优先）。
+
+它**复用** `dock::IdentityOf`（C-15a 的身份字段顺序）与 `window_registry` 的窗口侧身份（AUMID 优先，否则 exe 路径，同样 Lowercase），不实现第二套匹配——C-14f 已冻结该禁令。窗口列表来源是 `RunningTracker::Windows()`（距上次轮询 ≤300ms、且已付费），预览帧内不再 `EnumWindows`。
+
+C-14h 承诺的"逐窗口指示依赖 T-015 的窗口列表"即此函数，但**逐窗口指示本身不在 T-015 范围内**——本任务只交付列表与预览。
+
+### C-17i 句柄无泄漏
+
+每个 `DwmRegisterThumbnail` 必须与 `DwmUnregisterThumbnail` 配对，且在 dest 窗口销毁**之前**调用。`ThumbnailHost::ReleaseAll()` 是唯一注销入口，`HidePreview()` 与进程收尾都走它；`preview.Destroy()` 在其后。指向已销毁 HWND 的注册是桌面合成器内的悬空引用，只在关机挂起时才暴露。
+
+### C-17j 验证手段
+
+| 项 | 手段 | 判据 |
+| --- | --- | --- |
+| 悬停 400ms | `tools/preview_probe.ps1` 读日志 `preview shown tile=` | 悬停 <400ms 无该行；≥400ms 有 |
+| 多窗口横向 ≤8 | 同一 app 开 N 个窗口后悬停 | 日志 `windows=N`，视觉 N 槽，N>8 只出 8 |
+| 最小化不黑 | 最小化源窗后悬停 | 槽内仍是末帧（非纯黑板） |
+| UWP 枚举 | Calculator 悬停 | 日志 `frame hwnd`/`app_pid` 不同且内容正确 |
+| 句柄无泄漏 | `GetGuiResources` 前后 + 40 轮显隐 | GDIOBJECTS/USEROBJECTS 前后一致 |
+| 帧预算 | `tools/hover_bench.ps1` 变体，等 `frames=1000` | p99 ≤16.7ms |
+
+视觉证据一律 `DOCKFORGE_FORCE_MATERIAL=solid`（C-16j 第 2 条同因：blur 档 `WDA_EXCLUDEFROMCAPTURE` 使 `CopyFromScreen` 拍不到 dock）。
+
+### C-17k 开关
+
+`DOCKFORGE_PREVIEW=0` 关闭预览。默认开启，关闭时零成本（tick 内一次布尔短路，不建窗、不注册）。
+
+### C-17l 诚实边界
+
+1. **单显示器主机**。跨屏 dock 上的预览定位未测；`dock_rect` 已用虚拟屏坐标，但未验证副屏负原点场景。
+2. **DWM 渲染上限未定因**。110x70 稳定 8/8，但为何更大槽位掉槽未查清；契约选择绕开而非解释。
+3. **多窗口 >8 时的取舍未定**。当前截断到 8，未实现"哪 8 个"的策略（MRU 是当前顺带结果，非设计决策）。
+4. **预览内点击**。当前点击关闭预览，未实现"点击预览激活对应窗口"。
+5. **逐窗口指示未实现**。C-14h 依赖的列表已交付，指示本身仍是单圆点。

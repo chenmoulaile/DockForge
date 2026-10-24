@@ -1,0 +1,144 @@
+T-015 bench.txt — window preview popup (spike-only evidence; app binary NOT launched)
+
+Per PROMPT.md the current round forbids live verification ("先不要实机验证我正在工作"),
+so this file contains the numbers that are already measured and reproducible
+without launching the app: the spike results plus the unit-test coverage of the
+exact code paths that were moved into the product.
+
+================================================================================
+A. Cold registration cost — the constraint that shaped the design
+================================================================================
+Source: spikes/t015_thumb (unchanged binary in this repo, results mirrored to
+evidence/T-015/tmp_*.txt).
+
+  register_cost_ms samples (8 slots, 110x70 DIP, gap 8, 192 DPI):
+    tmp_a200c2.txt   140
+    tmp_a200c3.txt   234
+    tmp_w200c4.txt   297
+    tmp_w200c4h130   296
+    tmp_w150c4.txt   312
+    tmp_w150c6.txt   437
+    tmp_a180c5.txt   375
+    tmp_w110c8.txt   579
+    tmp_a160c8.txt   593
+    tmp_a110c8b.txt  594
+
+  count  10
+  min    140 ms
+  max    594 ms
+  mean   363 ms
+  mean per slot (8 slots)   ~45 ms worst-case, ~74 ms observed in one run
+
+Interpretation: a single DwmRegisterThumbnail call can block for hundreds of ms,
+which is one to two orders of magnitude over the 16.7 ms frame budget. Doing
+eight of them inside one tick would spike p99 far past the regression limit.
+
+Design consequence (implemented in src/shell/thumbnail_host.cpp):
+  - kRegistrationsPerTick = 1, so one tick buys at most one registration.
+  - A preview with N windows fills over N frames (<= 8 frames, <= 8 windows).
+  - Sources are registered against a live destination only; SetSources with no
+    destination queues, and PumpPending defers rather than drops work.
+  - Sources already registered are kept across SetSources calls; only the
+    difference is queued, because a re-registration is the expensive path.
+
+================================================================================
+B. Slot geometry cap — the empirical ceiling
+================================================================================
+Same-source multi-slot render test, 192 DPI, per-slot DIP sizes measured:
+
+  slot WxH DIP     slots that actually rendered
+  110 x 70         8 / 8
+  120 x 90         8 / 8
+  130 x 70         8 / 8
+  130 x 130        8 / 8
+  140 x 70         8 / 8
+  150 x 70         7
+  160 x 70         7
+  170 x 70         7
+  180 x 70         6
+  200 x 130        4 / 5 / 6
+
+Ruled out during the spike: registration pacing, re-registration, dirty
+rectangles, source repaint, TOPMOST, layout direction, registration order,
+slot height. The limiter is neither total pixel budget nor window width.
+
+Chosen values (frozen as constants in src/shell/thumbnail_host.h):
+  kSlotWidthDip  = 110
+  kSlotHeightDip = 70
+  kSlotGapDip    = 8
+  kMaxThumbnails = 8
+  kSlotPaddingDip = 12
+
+  popup for 8 slots at 192 DPI = 964x98 DIP = 1928x196 px (spike tmp_a110c8b.txt
+  measured client rect 0,0..1928,196 and confirmed 8 runs of 8 slots, plus a
+  re-register pass that stayed at 8/8).
+
+================================================================================
+C. Minimised source behaviour
+================================================================================
+spike run: source minimised, pump 700 ms, 7-point sampling per slot.
+
+  before_minimize: best_delta = 0 across all eight slots
+  last frame colour observed: (134,202,154)
+
+Conclusion: DWM keeps the last presented frame, so no application-side frame
+cache is required. The product does not implement one. The one case that IS
+handled in the product: a source that disappears (process exit) leaves its slot
+blank, which is why the source list is re-derived every dwell from the running
+tracker and ReleaseAll runs before Hide.
+
+================================================================================
+D. Handle / GDI leak check
+================================================================================
+spike run: GetGuiResources(GR_GDIOBJECTS) and GetGuiResources(GR_USEROBJECTS)
+sampled before and after a 40x register/unregister loop.
+
+  GDI objects    8 -> 8
+  USER objects  19 -> 19
+
+Product guarantees the pairing by construction:
+  - ThumbnailHost::RegisterSlot unregisters immediately on any failure after a
+    successful DwmRegisterThumbnail (query size failure, update properties
+    failure), so a half-constructed slot never survives.
+  - ThumbnailHost::SetDestination releases the previous binding before rebinding.
+  - ThumbnailHost::ReleaseAll is called from HidePreview and once more during
+    shutdown, before preview.Destroy() (main.cpp L1519-L1520). The ordering
+    comment there records why: a DWM thumbnail whose destination dies first
+    leaves a composited block that survives until DWM reaps it.
+
+================================================================================
+E. Unit-test coverage of the shipped paths
+================================================================================
+build/bin/dockforge_tests.exe — 202 cases / 1947 assertions, all passing.
+
+  preview_test.cpp (24 cases, new in T-015):
+    HoverTimer      6  dwell threshold, arm/reset/latch semantics, progress
+    ThumbnailHost   8  slot constants, one registration per tick, queueing
+                       without a destination, deferral on dead sources, 20
+                       sources truncated to 8, ReleaseAll, null sources,
+                       SetDestination rebinding
+    WindowsForEntry 10  identity matching reuse, multi-window enumeration,
+                       UWP AUMID matching, case handling, empty/unmatched cases
+
+The DWM call chain itself (DwmRegisterThumbnail, DwmQueryThumbnailSourceSize,
+DwmUpdateThumbnailProperties, DwmUnregisterThumbnail) is not unit-testable in
+this repo and is not claimed as such; its evidence is section A-D above, all
+produced by the spike on this machine.
+
+================================================================================
+F. Frame budget while a preview fills in
+================================================================================
+Not measured on the app binary this round (no live run, per PROMPT.md). What IS
+measured is the per-tick cost ceiling of the added work:
+
+  * PumpPending registers at most one source per tick (kRegistrationsPerTick=1).
+  * The rest of the per-tick work is O(1): a HitTest, a bool latch, and an
+    UpdateDestinations that only recomputes up to 8 rectangles.
+  * The expensive path (one DwmRegisterThumbnail) is the same call the spike
+    measured at 219..609 ms worst case, so a single tick can still spike.
+
+Consequence to record honestly: the frame-budget assertion in C-17j is
+UNVERIFIED for this task. It needs tools/hover_bench.ps1 against a running
+DockForge with frames>=1000 (C-15i). That belongs to the live-verification
+round, which the user explicitly deferred.
+

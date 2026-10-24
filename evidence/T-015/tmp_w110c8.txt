@@ -1,0 +1,86 @@
+sources=8
+client rect=0,0..1928,196
+dest=plain rect=476,1644 1928x196 dip=964x98 scale=2 slot=110x70 gap=8
+source 0 rect=40,60..300,220 visible=1 iconic=0 cloaked=0 screen_mid=(40,60,200)
+register 0 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=28,28..248,168
+source 1 rect=316,60..576,220 visible=1 iconic=0 cloaked=0 screen_mid=(87,131,177)
+register 1 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=264,28..484,168
+source 2 rect=592,60..852,220 visible=1 iconic=0 cloaked=0 screen_mid=(134,202,154)
+register 2 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=500,28..720,168
+source 3 rect=868,60..1128,220 visible=1 iconic=0 cloaked=0 screen_mid=(181,103,131)
+register 3 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=736,28..956,168
+source 4 rect=40,236..300,396 visible=1 iconic=0 cloaked=0 screen_mid=(227,173,108)
+register 4 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=972,28..1192,168
+source 5 rect=316,236..576,396 visible=1 iconic=0 cloaked=0 screen_mid=(12,12,12)
+register 5 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=1208,28..1428,168
+source 6 rect=592,236..852,396 visible=1 iconic=0 cloaked=0 screen_mid=(12,12,12)
+register 6 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=1444,28..1664,168
+source 7 rect=868,236..1128,396 visible=1 iconic=0 cloaked=0 screen_mid=(46,46,46)
+register 7 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=1680,28..1900,168
+thumbs=8
+register_cost_ms=579
+--- scan t300 y=1742 ---
+run source=0 x=504..723 width=220
+run source=1 x=740..959 width=220
+run source=2 x=976..1195 width=220
+run source=3 x=1212..1431 width=220
+run source=4 x=1448..1667 width=220
+run source=5 x=1684..1903 width=220
+run source=6 x=1920..2139 width=220
+run source=7 x=2156..2375 width=220
+--- box t300 ---
+box source=0 x=28..247 y=28..167 size=220x140 hits=30800
+box source=1 x=264..483 y=28..167 size=220x140 hits=30800
+box source=2 x=500..719 y=28..167 size=220x140 hits=30800
+box source=3 x=736..955 y=28..167 size=220x140 hits=30800
+box source=4 x=972..1191 y=28..167 size=220x140 hits=30800
+box source=5 x=1208..1427 y=28..167 size=220x140 hits=30800
+box source=6 x=1444..1663 y=28..167 size=220x140 hits=30800
+box source=7 x=1680..1899 y=28..167 size=220x140 hits=30800
+source 0 rect=40,60..300,220 visible=1 iconic=0 cloaked=0 screen_mid=(40,60,200)
+register 0 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=28,28..248,168
+source 1 rect=316,60..576,220 visible=1 iconic=0 cloaked=0 screen_mid=(87,131,177)
+register 1 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=264,28..484,168
+source 2 rect=592,60..852,220 visible=1 iconic=0 cloaked=0 screen_mid=(134,202,154)
+register 2 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=500,28..720,168
+source 3 rect=868,60..1128,220 visible=1 iconic=0 cloaked=0 screen_mid=(181,103,131)
+register 3 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=736,28..956,168
+source 4 rect=40,236..300,396 visible=1 iconic=0 cloaked=0 screen_mid=(227,173,108)
+register 4 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=972,28..1192,168
+source 5 rect=316,236..576,396 visible=1 iconic=0 cloaked=0 screen_mid=(12,12,12)
+register 5 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=1208,28..1428,168
+source 6 rect=592,236..852,396 visible=1 iconic=0 cloaked=0 screen_mid=(12,12,12)
+register 6 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=1444,28..1664,168
+source 7 rect=868,236..1128,396 visible=1 iconic=0 cloaked=0 screen_mid=(46,46,46)
+register 7 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=1680,28..1900,168
+thumbs=8
+--- box after_reregister ---
+box source=0 x=28..247 y=28..167 size=220x140 hits=30800
+box source=1 x=264..483 y=28..167 size=220x140 hits=30800
+box source=2 x=500..719 y=28..167 size=220x140 hits=30800
+box source=3 x=736..955 y=28..167 size=220x140 hits=30800
+box source=4 x=972..1191 y=28..167 size=220x140 hits=30800
+box source=5 x=1208..1427 y=28..167 size=220x140 hits=30800
+box source=6 x=1444..1663 y=28..167 size=220x140 hits=30800
+box source=7 x=1680..1899 y=28..167 size=220x140 hits=30800
+--- sample before_minimize scale=2 ---
+slot 0 centre=(614,1742) got=(40,60,200) best_delta=0 at_x=531 want=(40,60,200) verdict=THUMBNAIL_VISIBLE
+slot 1 centre=(850,1742) got=(87,131,177) best_delta=0 at_x=767 want=(87,131,177) verdict=THUMBNAIL_VISIBLE
+slot 2 centre=(1086,1742) got=(134,202,154) best_delta=0 at_x=1003 want=(134,202,154) verdict=THUMBNAIL_VISIBLE
+slot 3 centre=(1322,1742) got=(181,103,131) best_delta=0 at_x=1239 want=(181,103,131) verdict=THUMBNAIL_VISIBLE
+slot 4 centre=(1558,1742) got=(228,174,108) best_delta=0 at_x=1475 want=(228,174,108) verdict=THUMBNAIL_VISIBLE
+slot 5 centre=(1794,1742) got=(85,75,85) best_delta=0 at_x=1711 want=(85,75,85) verdict=THUMBNAIL_VISIBLE
+slot 6 centre=(2030,1742) got=(132,146,62) best_delta=0 at_x=1947 want=(132,146,62) verdict=THUMBNAIL_VISIBLE
+slot 7 centre=(2266,1742) got=(179,217,189) best_delta=0 at_x=2183 want=(179,217,189) verdict=THUMBNAIL_VISIBLE
+--- sample before_teardown scale=2 ---
+slot 0 centre=(614,1742) got=(40,60,200) best_delta=0 at_x=531 want=(40,60,200) verdict=THUMBNAIL_VISIBLE
+slot 1 centre=(850,1742) got=(87,131,177) best_delta=0 at_x=767 want=(87,131,177) verdict=THUMBNAIL_VISIBLE
+slot 2 centre=(1086,1742) got=(134,202,154) best_delta=0 at_x=1003 want=(134,202,154) verdict=THUMBNAIL_VISIBLE
+slot 3 centre=(1322,1742) got=(181,103,131) best_delta=0 at_x=1239 want=(181,103,131) verdict=THUMBNAIL_VISIBLE
+slot 4 centre=(1558,1742) got=(228,174,108) best_delta=0 at_x=1475 want=(228,174,108) verdict=THUMBNAIL_VISIBLE
+slot 5 centre=(1794,1742) got=(85,75,85) best_delta=0 at_x=1711 want=(85,75,85) verdict=THUMBNAIL_VISIBLE
+slot 6 centre=(2030,1742) got=(132,146,62) best_delta=0 at_x=1947 want=(132,146,62) verdict=THUMBNAIL_VISIBLE
+slot 7 centre=(2266,1742) got=(179,217,189) best_delta=0 at_x=2183 want=(179,217,189) verdict=THUMBNAIL_VISIBLE
+gui_objects 8 -> 8, user_objects 21 -> 21
+gui_objects after 40 register/unregister: 8 -> 8
+exit code=0

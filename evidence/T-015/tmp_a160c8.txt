@@ -1,0 +1,85 @@
+sources=8
+client rect=0,0..2728,196
+dest=plain rect=76,1644 2728x196 dip=1364x98 scale=2 slot=160x70 gap=8
+source 0 rect=40,60..300,220 visible=1 iconic=0 cloaked=0 screen_mid=(12,12,12)
+register 0 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=28,28..348,168
+source 1 rect=316,60..576,220 visible=1 iconic=0 cloaked=0 screen_mid=(117,117,117)
+register 1 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=364,28..684,168
+source 2 rect=592,60..852,220 visible=1 iconic=0 cloaked=0 screen_mid=(46,46,46)
+register 2 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=700,28..1020,168
+source 3 rect=868,60..1128,220 visible=1 iconic=0 cloaked=0 screen_mid=(46,46,46)
+register 3 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=1036,28..1356,168
+source 4 rect=40,236..300,396 visible=1 iconic=0 cloaked=0 screen_mid=(12,12,12)
+register 4 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=1372,28..1692,168
+source 5 rect=316,236..576,396 visible=1 iconic=0 cloaked=0 screen_mid=(12,12,12)
+register 5 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=1708,28..2028,168
+source 6 rect=592,236..852,396 visible=1 iconic=0 cloaked=0 screen_mid=(12,12,12)
+register 6 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=2044,28..2364,168
+source 7 rect=868,236..1128,396 visible=1 iconic=0 cloaked=0 screen_mid=(12,12,12)
+register 7 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=2380,28..2700,168
+thumbs=8
+register_cost_ms=593
+--- scan t300 y=1742 ---
+run source=0 x=104..423 width=320
+run source=1 x=440..759 width=320
+run source=2 x=776..1095 width=320
+run source=3 x=1112..1431 width=320
+run source=4 x=1448..1767 width=320
+run source=5 x=1784..2103 width=320
+run source=6 x=2120..2331 width=212
+--- box t300 ---
+box source=0 x=28..347 y=28..167 size=320x140 hits=44800
+box source=1 x=364..683 y=28..167 size=320x140 hits=44800
+box source=2 x=700..1019 y=28..167 size=320x140 hits=44800
+box source=3 x=1036..1355 y=28..167 size=320x140 hits=44800
+box source=4 x=1372..1691 y=28..167 size=320x140 hits=44800
+box source=5 x=1708..2027 y=28..167 size=320x140 hits=44800
+box source=6 x=2044..2255 y=28..167 size=212x140 hits=29680
+box source=7 ABSENT
+source 0 rect=40,60..300,220 visible=1 iconic=0 cloaked=0 screen_mid=(12,12,12)
+register 0 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=28,28..348,168
+source 1 rect=316,60..576,220 visible=1 iconic=0 cloaked=0 screen_mid=(117,117,117)
+register 1 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=364,28..684,168
+source 2 rect=592,60..852,220 visible=1 iconic=0 cloaked=0 screen_mid=(46,46,46)
+register 2 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=700,28..1020,168
+source 3 rect=868,60..1128,220 visible=1 iconic=0 cloaked=0 screen_mid=(46,46,46)
+register 3 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=1036,28..1356,168
+source 4 rect=40,236..300,396 visible=1 iconic=0 cloaked=0 screen_mid=(12,12,12)
+register 4 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=1372,28..1692,168
+source 5 rect=316,236..576,396 visible=1 iconic=0 cloaked=0 screen_mid=(12,12,12)
+register 5 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=1708,28..2028,168
+source 6 rect=592,236..852,396 visible=1 iconic=0 cloaked=0 screen_mid=(12,12,12)
+register 6 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=2044,28..2364,168
+source 7 rect=868,236..1128,396 visible=1 iconic=0 cloaked=0 screen_mid=(12,12,12)
+register 7 hr=0x00000000 query=0x00000000 size=260x160 update=0x00000000 dest=2380,28..2700,168
+thumbs=8
+--- box after_reregister ---
+box source=0 x=28..347 y=28..167 size=320x140 hits=44800
+box source=1 x=364..683 y=28..167 size=320x140 hits=44800
+box source=2 x=700..1019 y=28..167 size=320x140 hits=44800
+box source=3 x=1036..1355 y=28..167 size=320x140 hits=44800
+box source=4 x=1372..1691 y=28..167 size=320x140 hits=44800
+box source=5 x=1708..2027 y=28..167 size=320x140 hits=44800
+box source=6 x=2044..2255 y=28..167 size=212x140 hits=29680
+box source=7 ABSENT
+--- sample before_minimize scale=2 ---
+slot 0 centre=(264,1742) got=(40,60,200) best_delta=0 at_x=144 want=(40,60,200) verdict=THUMBNAIL_VISIBLE
+slot 1 centre=(600,1742) got=(87,131,177) best_delta=0 at_x=480 want=(87,131,177) verdict=THUMBNAIL_VISIBLE
+slot 2 centre=(936,1742) got=(134,202,154) best_delta=0 at_x=816 want=(134,202,154) verdict=THUMBNAIL_VISIBLE
+slot 3 centre=(1272,1742) got=(181,103,131) best_delta=0 at_x=1152 want=(181,103,131) verdict=THUMBNAIL_VISIBLE
+slot 4 centre=(1608,1742) got=(228,174,108) best_delta=0 at_x=1488 want=(228,174,108) verdict=THUMBNAIL_VISIBLE
+slot 5 centre=(1944,1742) got=(85,75,85) best_delta=0 at_x=1824 want=(85,75,85) verdict=THUMBNAIL_VISIBLE
+slot 6 centre=(2280,1742) got=(132,146,62) best_delta=0 at_x=2160 want=(132,146,62) verdict=THUMBNAIL_VISIBLE
+slot 7 centre=(2616,1742) got=(8,9,11) best_delta=557 at_x=2496 want=(179,217,189) verdict=NO_THUMBNAIL
+--- sample before_teardown scale=2 ---
+slot 0 centre=(264,1742) got=(40,60,200) best_delta=0 at_x=144 want=(40,60,200) verdict=THUMBNAIL_VISIBLE
+slot 1 centre=(600,1742) got=(87,131,177) best_delta=0 at_x=480 want=(87,131,177) verdict=THUMBNAIL_VISIBLE
+slot 2 centre=(936,1742) got=(134,202,154) best_delta=0 at_x=816 want=(134,202,154) verdict=THUMBNAIL_VISIBLE
+slot 3 centre=(1272,1742) got=(181,103,131) best_delta=0 at_x=1152 want=(181,103,131) verdict=THUMBNAIL_VISIBLE
+slot 4 centre=(1608,1742) got=(228,174,108) best_delta=0 at_x=1488 want=(228,174,108) verdict=THUMBNAIL_VISIBLE
+slot 5 centre=(1944,1742) got=(85,75,85) best_delta=0 at_x=1824 want=(85,75,85) verdict=THUMBNAIL_VISIBLE
+slot 6 centre=(2280,1742) got=(132,146,62) best_delta=0 at_x=2160 want=(132,146,62) verdict=THUMBNAIL_VISIBLE
+slot 7 centre=(2616,1742) got=(8,9,11) best_delta=557 at_x=2496 want=(179,217,189) verdict=NO_THUMBNAIL
+gui_objects 8 -> 8, user_objects 21 -> 21
+gui_objects after 40 register/unregister: 8 -> 8
+exit code=0

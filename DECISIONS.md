@@ -575,3 +575,49 @@ Dock 需要接受从资源管理器、开始菜单、桌面拖来的 `.lnk` / `.
 - `DockDropTarget` 需要 `SetScale` + `SetCentres` 两个注入点，由 `geometry_changed` lambda 统一刷新，日志打 `drop grid scale=%.3f slots=%zu first=%.1f last=%.1f dip`——这三个数字让"槽位算错"从猜测变成读数。
 - caret 位置有一行 `DF_TRACE` 打 `slot/origin/pitch/x/px/band`。T-014 期间正是靠它把"caret 在 762px"和"几何算出的 650.8px"对上，才确认截图里的 caret 属于另一次运行而不是几何错误。
 - `tools/drop_caret.ps1` 成为 caret 的唯一判据。整帧 `image_diff` 只能说明"有变化"，不能说明变化是 caret。
+---
+
+## ADR-0017 · 缩略图预览用 DWM 注册表 + 独立 GDI 弹窗，不用 DirectComposition 重绘
+
+**状态**：已接受（T-015）
+**日期**：2026-10-24
+**关联**：ADR-0002（纯 Win32 + DComp + D2D）、C-17
+
+### 背景
+
+T-015 要求悬停 tile 400ms 后弹出该 app 的窗口缩略图预览，支持同一 app 多个窗口（横向 ≤8）、最小化不黑屏、UWP 正确枚举、句柄无泄漏。
+
+DWM 提供 `DwmRegisterThumbnail` 一族 API，可把任意顶层窗口的合成内容投到另一个窗口的矩形里。问题在于这个"另一个窗口"该是什么：复刻 dock 的 DirectComposition 表面，还是另开一个普通窗口。
+
+### 决策
+
+**预览弹窗是独立顶层普通窗口（自有窗口类 + GDI 画底），缩略图由 DWM 合成其上。**
+
+1. `platform::PreviewWindow`：自有类 `DockForgePreviewWindow`，`WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE` + `WS_POPUP`，**不加** `WS_EX_NOREDIRECTIONBITMAP`。
+2. `shell::ThumbnailHost`：唯一持有 `DwmRegisterThumbnail`/`DwmUnregisterThumbnail` 的类，管注册生命周期与槽矩形。
+3. 槽 110x70 DIP、gap 8 DIP、最多 8 槽、padding 12 DIP；DWM 矩形用 dest 客户端**物理像素**。
+4. 注册分帧：弹窗先显示，每 tick 注册 1 个。
+5. 弹窗隐藏而非销毁；注销先于销毁。
+
+### 理由
+
+**为什么独立窗口而不是 dock 的一部分。** dock 窗口被 `SetWindowRgn` 裁成 plate + 放大行两态（C-12），且窗口高度按 `icon*max(mag,1)+2*pad` 固定。预览需要 12+70+12=94 DIP 高、最多 964 DIP 宽，任何一态都装不下，而拖拽期 region 扩整窗也只是权宜。把预览塞进 dock region 会同时破坏 C-12 的两态模型和 C-15 的拖拽 region 规则。
+
+**为什么不能复用 `platform::Window`。** 两个都是实测约束而不是偏好：该类共享一个窗口类，其 WndProc 在 `WM_DESTROY` 时 `PostQuitMessage(0)`——预览窗一关就结束 dock 的消息循环；且它的 `MessageHook` 属主 dock，每条预览消息都要先过一遍 dock 的钩子。新开一个类是唯一干净解。
+
+**为什么不用 `WS_EX_NOREDIRECTIONBITMAP`。** dock 用它是因为 dock 的内容全部来自 DirectComposition（ADR-0007）。预览反过来：DWM 把缩略图合成在 dest 的 redirection surface 之上，加了该标志 dest 就没有 redirection surface，GDI 底也一起不可见。spike 实测"普通目标窗与 NOREDIRECTIONBITMAP 目标窗结果相同，且 GDI 背景之上绘制正常"，因此预览窗保持普通窗口 + GDI 底。
+
+**为什么不用 DirectComposition 重绘。** 候选方案是让预览窗也有 DComp 表面、用 `CreateD2DBackend` 画框，缩略图由 DWM 合成其上。放弃原因：DComp visual 与 DWM 缩略图层的 z 序依赖未在本地验证，而 spike 已证明普通窗口 + GDI 底这一路径可用。为一个未验证的 z 序假设重写渲染路径，违反"新 API 先写 spike"。
+
+**为什么槽是 110x70 而不是更大。** spike 实测的渲染上限表见 C-17c：110x70 三次全 8/8；150x70 起掉到 7，180x70 掉到 6，200x130 只出 4/6。已排除注册节奏、重注册、脏区、源重绘、TOPMOST、布局方向、注册顺序、槽高，未定因。选择是绕开而非解释：取实测稳定的最大槽位。
+
+**为什么注册分帧。** 冷注册 219-609ms/槽（8 槽 594ms，`evidence/T-015/tmp_a110c8b.txt` L21）。同步注册会让用户索要预览的那一帧直接超时 30 倍以上。分帧后预览先出框、最多约 8 帧填满，帧预算不受影响。
+
+**为什么注销先于销毁。** DWM 渲染进 dest 的 redirection surface，注册比 dest 活得久就是桌面合成器里的悬空引用；比 source 活得久就是黑框。`ReleaseAll()` 作为唯一注销入口，`HidePreview()` 与进程收尾都走它，`preview.Destroy()` 排在其后。
+
+### 后果
+
+- 预览是第二个顶层窗口，`WM_MOVE` 需要跟着 dock 重定位（已加）。
+- DPI 变化时预览隐藏并让 dwell 计时器重新武装：槽矩形是 DIP 派生，重算几何比让弹窗马上扔掉更贵。
+- 弹窗 HWND 长期存活（隐藏而非销毁），故 `Destroy()` 前的注销必须是显式步骤而不是析构副作用。
+- 未验证面：跨屏 dock 上的预览定位；DWM 渲染上限的成因；>8 窗口时保留哪 8 个（当前是顺带的 MRU，非设计）。均记入 C-17l。

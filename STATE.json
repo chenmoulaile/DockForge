@@ -1,14 +1,14 @@
-﻿{
+{
     "project":  "DockForge",
     "schema":  1,
     "milestone":  "M1",
-    "last_task":  "T-014",
-    "last_commit":  "969bf40",
-    "current_module":  "dock",
-    "current_task":  "T-015",
+    "last_task":  "T-015",
+    "last_commit":  "pending",
+    "current_module":  "shell",
+    "current_task":  null,
     "counters":  {
                      "total":  16,
-                     "done":  14,
+                     "done":  15,
                      "partial":  0,
                      "blocked":  0
                  },
@@ -104,5 +104,5 @@
                           "OLE 回调运行在源进程的模态循环里，每个 DragOver 都 InvalidateRect 会让 p99 到 17.284ms；必须由 tick 合并（drop_moved）",
                           "caret 探针必须按列统计并只认 <=12px 宽的单 run；颜色必须取 run 内峰值像素，取首个合格列会读到抗锯齿边缘把 reject 判成 accept"
                       ],
-    "updated_at":  "2026-10-24T04:40:00+08:00"
+    "updated_at":  "2026-10-24T06:10:00+08:00"
 }
