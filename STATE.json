@@ -3,9 +3,9 @@
     "schema":  1,
     "milestone":  "M1",
     "last_task":  "T-015",
-    "last_commit":  "063692a",
+    "last_commit":  "17c6322",
     "current_module":  "shell",
-    "current_task":  null,
+    "current_task":  "T-016",
     "counters":  {
                      "total":  16,
                      "done":  15,
@@ -104,5 +104,5 @@
                           "OLE 回调运行在源进程的模态循环里，每个 DragOver 都 InvalidateRect 会让 p99 到 17.284ms；必须由 tick 合并（drop_moved）",
                           "caret 探针必须按列统计并只认 <=12px 宽的单 run；颜色必须取 run 内峰值像素，取首个合格列会读到抗锯齿边缘把 reject 判成 accept"
                       ],
-    "updated_at":  "2026-10-24T06:10:00+08:00"
+    "updated_at":  "2026-10-24T06:40:00+08:00"
 }
