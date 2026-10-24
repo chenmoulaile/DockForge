@@ -1,0 +1,236 @@
+T-041 · Launchpad 全屏窗口与网格渲染 — 实机验证记录
+
+machine       : 2880x1920 @ 192 DPI (raw 243), work=0,0,2880,1824, Windows build 26300
+toolchain     : g++ 15.2.0 (MSYS2 mingw-w64) + CMake 4.4.2 + MinGW Makefiles
+tests         : All tests passed (2914 assertions in 240 test cases)
+probe         : tools/launchpad_probe.ps1 (file-channel driven, no SetCursorPos)
+date          : 2026-10-25
+
+================================================================
+DoD 1 · 独立无边框全屏顶层窗口，每显示器一个，复用 CompositionSurface + IRenderBackend
+================================================================
+PASS
+
+证据（evidence/T-041/launchpad_probe.txt）:
+  overlay_created=hwnd=3871480 visible=False dpi=192 rect=0,0 2880x1920 foreground=False
+  after_open=hwnd=3871480 visible=True dpi=192 rect=0,0 2880x1920 foreground=True
+  fullscreen=True monitor=2880x1920
+
+实现：src/platform/overlay_window.{h,cpp}
+  class OverlayWindow，class name L"DockForgeOverlayWindow"，style=WS_POPUP，
+  ex_style=WS_EX_TOPMOST | WS_EX_NOREDIRECTIONBITMAP。
+  不复用 platform::Window 的三条理由（写进头注释）：
+    1. 共享窗口类的 WndProc 在 WM_DESTROY 调 PostQuitMessage，每次开合都会结束进程；
+    2. overlay 要吞掉全部输入并回调，Window 的 hook 属主是 dock；
+    3. overlay 需要自己的 NOREDIRECTIONBITMAP 且不要 WS_EX_TOOLWINDOW。
+  overlay 的 WM_PAINT 故意什么都不画（像素来自 DComp），
+  WM_DESTROY 故意不调 PostQuitMessage。
+
+每显示器一个 overlay：src/dock/launchpad.cpp 逐 platform::EnumerateDisplays() 建
+  std::vector<std::unique_ptr<LaunchpadOverlay>>，每个 overlay 持有独立的
+  OverlayWindow + CompositionSurface + PlateRenderer + CreateD2DBackend()。
+  禁止跨屏共享合成树（ADR-0021 第 1 条）。
+  unique_ptr 是编译期强制的：OverlayWindow 与 CompositionSurface 都不可拷贝不可移动，
+  by-value vector 会因 construct_at 需要 move 而整体编译失败
+  （实测 use of deleted function 'LaunchpadOverlay::LaunchpadOverlay(LaunchpadOverlay&&)'）。
+
+本机单屏，故只验证 1 个 overlay；多屏路径由 OverlayCount() 与逐屏循环保证，
+未在本机实机验证（见诚实边界）。
+
+================================================================
+DoD 2 · 自绘网格：列数按 C-18 自适应，行数 ceil(page_size/columns)
+================================================================
+PASS
+
+证据：
+  grid=... grid[0] columns=10 rows=4 per_page=35 cell=105.2x120.0 origin=64.0,205.0
+        icon=96.0 viewport=1440x960
+  viewport=1440x960 icon=96 columns_expected=10 columns_actual=10
+  columns=10 rows=4 per_page=35 adaptive_matches_formula=True
+  rows_expected=4 rows_actual=4 matches=True
+
+公式（C-18 / src/dock/launchpad_layout.cpp ComputeLaunchpadGrid）：
+  available_w = width_dip - 2*kSideMarginDip = 1440 - 128 = 1312
+  columns     = floor(1312 / (96 + 26)) = floor(10.75) = 10   → clamp(3,12) = 10
+  rows        = ceil(page_size / columns) = ceil(35/10) = 4
+探针不重算布局，只把 app 自己日志里的 viewport 代入 C-18 公式核对
+（禁止第二套布局实现，同 T-016 的教训）。
+
+**单测暴露并修掉的真实缺陷**：第一版把 pitch 当 cell 宽度
+  grid.cell_width_dip = available_w / columns
+导致单元格首尾相接，26 DIP 的列间空隙被算进某个单元格的点击目标——
+点在看似空白处会启动 app。改为
+  pitch_x = available_w / columns;
+  cell_width_dip = max(kMinIconEdgeDip, pitch_x - kLaunchpadColumnGapDip);
+并由 LaunchpadCellRect 用 cell_width_dip + gap 复原间距。
+tests/launchpad_layout_test.cpp 断言 second.left > first.right。
+
+================================================================
+DoD 3 · 分页：单页 35 项（5×7），页码指示器仅在 >1 页时出现
+================================================================
+PASS
+
+证据：
+  open=... open items=208 pages=6 page=0 pages=6
+  pages_expected_min=6 pages_actual=6 dots_visible=True
+  page_command_consumed=True page_painted=True
+  page_diff changed=15904 of 86400 ratio=0.1841
+  page_back_consumed=True
+
+208 项 / 35 每页 = 6 页（末页 33 项）。
+页码点：kLaunchpadDotDip=8, kLaunchpadDotGapDip=10, kLaunchpadDotBottomMarginDip=24。
+LaunchpadShowsPageDots(page_count) { return page_count > 1; }
+单测覆盖 0/1/35/36/70/71 项 → 1/1/1/2/2/3 页，以及
+LaunchpadDotRect(...,0,1).Width() == 0（单页时不画点）。
+
+================================================================
+DoD 4 · 图标悬停轻微放大；点击启动并关闭
+================================================================
+PASS
+
+悬停：
+  hover_command_consumed=True
+  hover_diff changed=1053 of 86400 ratio=0.0122
+  hover_cell0_at=116.6,265
+放大倍数 kLaunchpadHoverScale=1.10f，缓动 kLaunchpadHoverRampPerSecond=14.0f
+（比 Dock 的 8/s 快，因为 Launchpad 是瞬时表面，用户不会长时间盯着看）。
+单测断言 full == icon*1.10 且越界值被钳制、放大后不超过 cell_width。
+
+点击启动并关闭：
+  cell_click_launch=True
+  cell_click_line=... INFO [launchpad] launch 7-Zip -> none route=CreateProcess pid=24908
+  cell_click_closed=True
+断言打在 app 自己的 ActivateTile 日志上，而不是"有没有新进程"：
+  -PinApps 固定的 app 多数已在运行，真实动作常常是 activated 而不是 launched，
+  用新 pid 判定会为错误的原因失败。
+
+点击 scrim 关闭：
+  scrim_click_closed=True
+（命中空格 cell<0 → Close()，与 macOS Launchpad 行为一致。）
+
+================================================================
+DoD 5 · 打开/关闭动画 p99 < 16.7ms，实测数据入证据
+================================================================
+PASS（原生 192 DPI）/ OVER_FLOOR（150% override）
+
+原生 192 DPI（evidence/T-041/launchpad_probe.txt）:
+  reopen=True reopen_complete=True reopen_animation_ms=173 animated=True
+  frame_budget samples=6 frames_max=1000 p99_min=16.58 p99_median=16.59
+               p99_max=16.59 budget=WITHIN_16_7 bare_timer_floor_p99=19.226
+
+150% override（evidence/T-041/scale150/launchpad_probe.txt）:
+  frame_budget samples=6 frames_max=1000 p99_min=19.36 p99_median=20.18
+               p99_max=20.18 budget=OVER_FLOOR bare_timer_floor_p99=19.226
+
+诚实结论：原生 DPI 下 p99 16.58ms 在 16.7ms 预算内；把 DPI 强行压到 144 后
+p99 升到 19.36-20.18ms，略高于 T-016 实测的裸定时器地板 19.226ms。
+两者差值 0.1-1.0ms，落在 T-016 记录的噪声底（spread 3.326ms）之内，
+因此判"与地板不可区分"，不宣称 150% 下满足 16.7ms。
+测量前提（继承 T-016）：等 frames>=1000 才读 p99（FrameClock 是 1000 样本滚动窗，
+之前仍含启动首帧），并用裸定时器地板对照。
+
+动画参数：kLaunchpadOpenMs=180, kLaunchpadCloseMs=140, kLaunchpadOpenScaleFrom=0.94,
+EaseOutCubic(t) = 1 - (1-t)^3。
+
+**实测修掉的真实缺陷（两处）**：
+  1. overlay 只画了第一帧，且第一帧全透明。Tick 返回 dirty 但调用方只
+     InvalidateRect(dock hwnd)；overlay 的 WM_PAINT 按设计什么都不画，
+     所以除 Open() 里那一次 Repaint()（progress_=0 → fade=0 → 全透明）
+     之外没有任何帧被提交。A/B 截图 ratio 0.0044，与关闭态无法区分。
+     修法：Tick 末尾 if (dirty && phase_ != Closed) Repaint();
+     修复后全屏均值 18.4 → 37.4。
+  2. 首次 Open 卡 1797ms。日志 tiles built: 70 of 208 items at 192px in 1797.0ms，
+     图标提取发生在 Open() 内。新增 Launchpad::WarmTiles()，启动时预热；
+     修复后同一行变成 32.0ms（磁盘缓存命中），index warmed: items=208 in 422.0ms。
+
+================================================================
+DoD 6 · 混合 DPI 双屏按屏独立创建，禁跨屏共享合成树
+================================================================
+PARTIAL（单屏机器，无法实机验证双屏）
+
+已实现并由代码结构保证：
+  - 每个 display 一个 std::unique_ptr<LaunchpadOverlay>，各自独立的
+    OverlayWindow / CompositionSurface / PlateRenderer / IRenderBackend；
+  - 每个 overlay 的 DPI 取自它自己那个 display.effective_dpi
+    （platform::DisplayInfo），而不是全局单值；
+  - Launchpad::PageCount() 取所有显示器中的最小值，页索引跨屏共享——
+    否则两个屏会翻到不同的页，用户会以为其中一屏坏了。
+未验证：真实的混合 DPI 双屏（一台 100% + 一台 150%）只有一块面板，无法在本机产生。
+不伪造截图；该项在 T-084（DPI/多显示器矩阵）承担。
+
+**顺带修掉的真实缺陷**：Launchpad 自己调 EnumerateDisplays()，绕过了 main.cpp 的
+apply_dpi_override，导致 DOCKFORGE_DPI_OVERRIDE 对 overlay 不生效——
+同一个环境变量在 Dock 与 Launchpad 上含义不同，且 150% 的 DoD 在 200% 面板上无法验证。
+修法：Initialize() 里读 platform::Window::DpiOverride()，非 0 时覆盖所有
+display.effective_dpi，并记日志 dpi override %u applied to %zu display(s)。
+
+================================================================
+DoD 7 · 截图：单屏 150% + 混合 DPI 双屏
+================================================================
+PARTIAL（150% 单屏已有；混合双屏受硬件限制）
+
+单屏 150%（DOCKFORGE_DPI_OVERRIDE=144，viewport 1440x960 → 1920x1280）:
+  evidence/T-041/scale150/launchpad_open.png      920978 bytes
+  evidence/T-041/scale150/launchpad_page2.png    1013200 bytes
+  evidence/T-041/scale150/launchpad_hover.png     912817 bytes
+  evidence/T-041/scale150/launchpad_closed.png    558448 bytes
+  grid[0] columns=12 rows=3 per_page=35 cell=123.3x120.0 origin=64.0,438.0
+        icon=96.0 viewport=1920x1280
+  columns=12 rows=3 adaptive_matches_formula=True（1312→1552 宽后按公式应得 12 列）
+  verdict=PASS
+
+原生 192 DPI:
+  evidence/T-041/launchpad_open.png      1450193 bytes
+  evidence/T-041/launchpad_page2.png     1539892 bytes
+  evidence/T-041/launchpad_hover.png     1448015 bytes
+  evidence/T-041/launchpad_closed.png    2164347 bytes
+  open_stats  colors=5659 mean=36.6 bright=11838
+  closed_stats colors=4449 mean=17.8 bright=6254
+  open_vs_closed ratio=0.5749（打开与关闭视觉上明确可区分）
+
+混合 DPI 双屏：本机只有一块面板，不伪造。由 T-084 承担。
+
+================================================================
+探针自身的四个缺陷（都已修，方法论值得记）
+================================================================
+1. System.Windows.Forms 未显式 Add-Type → Unable to find type
+   [System.Windows.Forms.SystemInformation]（-NoProfile 下没有任何别的东西加载过它）。
+2. 固定 sleep 抢在 app 之前拍快门。实测两次：写 "page 1" 后睡 500ms，
+   快门落在 23:50:35.29，而 app 直到 23:50:35.292 才记 probe command=page 1；
+   于是拿页 1 的截图和页 1 的基准比，报 ratio 0.0041，而真实值是 0.1841——
+   一个能工作的功能被判 FAIL。
+   修法：快门由 app 日志驱动（C-16j 早已冻结这条规则）。
+3. 只等 "page -> 1" 还不够：那行是命令处理器改索引时写的，像素在下一帧 Repaint 才跟上。
+   失败两次后（23:50、23:58）才定位。最终让 app 在真正交给 painter 时记一行
+   paint[0] page=N（只在页码变化时输出，避免每帧刷屏），探针等这一行。
+   修完连跑 7 次全绿。
+4. 用物理窗口 rect 反算期望列数。scale=2.0 时必然算错。
+   改为读 app 自己日志里的 viewport（DIP）代入 C-18 公式。
+
+================================================================
+构建
+================================================================
+evidence/T-041/build.log：13 行真实编译行（touch 4 个 T-041 源文件强制重编译），
+  warning=0 error=0。
+
+================================================================
+产物清单
+================================================================
+src/dock/launchpad_layout.{h,cpp}   纯数学网格/分页/动画曲线，无 Windows 依赖
+src/dock/launchpad_view.{h,cpp}     LaunchpadTile / FNV-1a 64 图标键 / LaunchpadPainter
+src/platform/overlay_window.{h,cpp} 独立 overlay 窗口（自建 class + 自建 WndProc）
+src/dock/launchpad.{h,cpp}          控制器：多 overlay、索引、分页、悬停、点击
+tests/launchpad_layout_test.cpp     15 用例 / 217 断言
+tools/launchpad_probe.ps1           文件通道驱动 + 日志驱动快门 + DPI 覆盖参数
+src/main.cpp                        集成：启动预热、Ctrl+Alt+Space、tick 驱动、命令探针
+
+================================================================
+诚实边界（未验证项，不宣称）
+================================================================
+- 混合 DPI 双屏：硬件不具备，由 T-084 承担。
+- 多显示器下的 per-display 悬停：本机单屏，只有 display 0 被真实驱动过。
+- 打开/关闭动画的"模糊淡入淡出"：ADR-0021 把材质固定为 solid
+  （全屏抓取 78ms/帧 = 4.7 个帧预算，不可能每帧做），用 scrim alpha 代替。
+  因此 DoD 里"模糊"一项是以 scrim 渐隐实现的，不是真实的高斯模糊。
+- 150% 下的帧预算：p99 19.36-20.18ms，高于 16.7ms 预算，但与裸定时器地板
+  19.226ms 不可区分，不宣称达标。

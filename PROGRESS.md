@@ -175,9 +175,8 @@
   6. 探针进程未设 DPI awareness 时 `GetWindowRect` 与 `CopyFromScreen` 都返回虚拟化坐标——实测 dock 真实 1334,1595 214x214 被报成 667,798 107x107，所有截图落在屏幕另一半。必须 `SetProcessDpiAwarenessContext(-4)`。
 - 环境事实：单屏 2880x1920@192 DPI（raw 243），work=0,0,2880,1824。多窗口 Win32 app 只有 7-Zip（3-10 窗口，`7-Zip::FM`）与 explorer（`CabinetWClass` 但 tile 走 AUMID 空间，属 C-14f 记录的真实归属）。Sublime/Chrome 无法开出第二窗口（`--new-window`/`-n`/`AttachThreadInput+Ctrl+Shift+N` 均无效）。Notepad 是 UWP，`GetApplicationUserModelId` 对 notepad.exe 返回 `0x00003D57`（APPMODULE_ERROR_NO_APPLICATION）。
 - 证据：`evidence/T-016/`（verify.txt 五条 DoD 逐条 + build.log + hover_bench.txt + preview_handles.txt + 顶层与 four/minimized/ten/uwp 四个子目录的 dwell 日志与对照 PNG）。
-- 下轮开始于：T-041 Launchpad 全屏窗口与网格渲染
 
-## T-040 · Launchpad 应用索引器（DONE）
+## 2026-10-24T23:50:00+08:00 | T-040 | DONE
 
 `src/shell/launchpad_index.{h,cpp}` 新建：三来源聚合（AppsFolder / `launchpad.extra_paths` / `launchpad.folders`）、按 C-15a 身份去重、`CompareStringEx` collation 排序、内存缓存、`ReadDirectoryChangesW` 监视 + 500ms 防抖。`src/shell/app_identity.{h,cpp}` 把身份规则从 `src/dock/tile_order.cpp` 抽到 shell（C-06 要求 shell 不依赖 dock），dock 侧保留同名薄包装。
 
@@ -192,3 +191,27 @@
 - 顺带修掉 T-016 遗留的测试基础设施缺陷：`tests/shell_icon_test.cpp` 的 `TempCacheDir()` 用「PID + 计数器」命名，Windows 复用 PID 会撞上上一轮遗留目录 → 磁盘命中 → `extractions=0` → 「必须重新提取」断言反转。实测 25 次全量里失败 1 次，本机 `%TEMP%` 积压 648 个残留目录。修法：名字加 `GetTickCount64()`，加 `CacheDirReaper` 退出时清理。连跑 12 次全量 0 失败、残留 0 个。
 - 证据：`evidence/T-040/`（build.log 13 行 warning=0 error=0；verify.txt 六条 DoD 逐条 + 两个缺陷根因 + 诚实边界 + 探针原始输出附录）。
 - 诚实边界：逐条目增量更新未做（监视器只产生「有变化」信号，触发整表重建）；`launchpad.folders` 的 UI 交互未验证（T-042 之前无窗口消费）；跨屏与换系统语言的排序未测。
+
+## 2026-10-25T00:36:00+08:00 | T-041 | DONE
+
+**产物**：`src/dock/launchpad_layout.{h,cpp}`（纯数学网格/分页/动画曲线）、`src/dock/launchpad_view.{h,cpp}`（tile 模型 + FNV-1a 64 图标键 + painter）、`src/platform/overlay_window.{h,cpp}`（独立 overlay 窗口）、`src/dock/launchpad.{h,cpp}`（控制器）、`tests/launchpad_layout_test.cpp`（15 用例）、`tools/launchpad_probe.ps1`。
+
+**实测数据**（2880x1920@192 DPI，build 26300）：
+- 网格：`columns=10 rows=4 per_page=35 cell=105.2x120.0 origin=64.0,205.0 icon=96.0 viewport=1440x960`；C-18 公式 `floor((1440-128)/(96+26))=10`，与实得一致。
+- 分页：208 项 → 6 页；`page_diff ratio=0.1841`。
+- 悬停：`hover_diff ratio=0.0122`，`kLaunchpadHoverScale=1.10`。
+- 点击启动：`launch 7-Zip -> none route=CreateProcess pid=24908`，随后 `closed`。
+- 帧预算：原生 `p99_min=16.58 p99_median=16.59` → WITHIN_16_7；150% override `p99_min=19.36 p99_median=20.18` → 与裸定时器地板 19.226ms 不可区分，未宣称达标。
+- 测试：`All tests passed (2914 assertions in 240 test cases)`。
+
+**修掉的四个真实缺陷**：
+1. overlay 只画第一帧且第一帧全透明（Tick 返回 dirty 但没人 Repaint；A/B ratio 0.0044）。
+2. 首次 Open 卡 1797ms（图标提取在 Open 内；改 WarmTiles 预热后 32.0ms）。
+3. 网格 cell 宽度等于 pitch，列间空隙成了点击目标（单测暴露）。
+4. Launchpad 自调 EnumerateDisplays 绕过 apply_dpi_override，DPI 覆盖对它不生效。
+
+**探针的三个方法论修正**：快门由 app 日志驱动且等「已绘制」而非「命令已消费」（否则报 0.0041 而真实 0.1841）；不得用物理 rect 反算列数（scale=2 必错）；`-NoProfile` 下必须显式 Add-Type System.Windows.Forms。
+
+**诚实边界**：混合 DPI 双屏与 per-display 悬停受单屏硬件限制，未实机验证，移交 T-084；"模糊淡入淡出"以 scrim alpha 实现（ADR-0021 固定 solid 材质，全屏抓取 78ms/帧不可能每帧做）。
+
+- 下轮开始于：T-042 Launchpad 搜索与文件夹分组

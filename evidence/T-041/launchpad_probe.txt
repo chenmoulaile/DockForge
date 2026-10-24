@@ -1,0 +1,35 @@
+﻿machine=2880x1920 dpi_aware=1
+dpi_override=0
+warmup=2026-10-25T00:33:45.627+08:00 INFO [launchpad] index warmed: items=208 in 437.0ms
+overlay_created=hwnd=3871480 visible=False dpi=192 rect=0,0 2880x1920 foreground=False
+before_open=hwnd=3871480 visible=False dpi=192 rect=0,0 2880x1920 foreground=False
+grid=2026-10-25T00:33:45.813+08:00 INFO [launchpad] grid[0] columns=10 rows=4 per_page=35 cell=105.2x120.0 origin=64.0,205.0 icon=96.0 viewport=1440x960
+open=2026-10-25T00:33:45.813+08:00 INFO [launchpad] open items=208 pages=6 page=0 pages=6
+after_open=hwnd=3871480 visible=True dpi=192 rect=0,0 2880x1920 foreground=True
+fullscreen=True monitor=2880x1920
+open_stats colors=5659 mean=36.6 max=255 bright=11838
+viewport=1440x960 icon=96 columns_expected=10 columns_actual=10
+columns=10 rows=4 per_page=35 adaptive_matches_formula=True
+rows_expected=4 rows_actual=4 matches=True
+pages_expected_min=6 pages_actual=6 dots_visible=True
+hover_command_consumed=True
+hover_diff changed=702 of 86400 ratio=0.0081
+hover_cell0_at=116.6,265
+leave_command_consumed=True
+page_command_consumed=True page_painted=True
+page_diff changed=15807 of 86400 ratio=0.183
+page_back_consumed=True
+scrim_click_closed=True
+after_close=hwnd=3871480 visible=False dpi=192 rect=0,0 2880x1920 foreground=False
+closed_stats colors=4452 mean=17.8 bright=6270
+open_vs_closed changed=49441 of 86400 ratio=0.5722
+reopen=True reopen_complete=True
+reopen_animation_ms=170 animated=True
+cell_click_launch=True
+cell_click_line=2026-10-25T00:33:53.853+08:00 INFO [launchpad] launch 7-Zip -> none route=CreateProcess pid=34780
+cell_click_closed=True
+frame_budget: warming the 1000-sample window while animating (target 6 samples)
+frame_budget cycles=27
+frame_budget samples=6 frames_max=1000 p99_min=16.58 p99_median=16.59 p99_max=16.59 budget=WITHIN_16_7 bare_timer_floor_p99=19.226
+orphan_overlay=False
+verdict=PASS

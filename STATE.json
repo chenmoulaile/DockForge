@@ -2,13 +2,13 @@
     "project":  "DockForge",
     "schema":  1,
     "milestone":  "M3",
-    "last_task":  "T-040",
+    "last_task":  "T-041",
     "last_commit":  "870b495",
-    "current_module":  "shell",
-    "current_task":  "T-041",
+    "current_module":  "dock",
+    "current_task":  "T-042",
     "counters":  {
-                     "total":  17,
-                     "done":  17,
+                     "total":  18,
+                     "done":  18,
                      "partial":  0,
                      "blocked":  0
                  },
@@ -116,7 +116,19 @@
                           "ADL 二义性：dock::IdentityOf 与 shell::IdentityOf 同时可见时无限定调用会 ambiguous，内部调用点必须写限定名",
                           "PowerShell 控制台无法渲染 CJK 时打印为空字符串，判断空值必须看 size() 或码点，不能看打印结果（曾据此误判数据缺陷）",
                           "TempCacheDir 用 PID+计数器不唯一：Windows 复用 PID，遗留目录会让下一次运行磁盘命中并反转必须重新提取的断言；必须加 GetTickCount64 并在退出时清理",
-                          "测试遗留的临时目录要主动删：本机 %TEMP% 曾积压 648 个 dockforge-test-icons-* 目录"
+                          "测试遗留的临时目录要主动删：本机 %TEMP% 曾积压 648 个 dockforge-test-icons-* 目录",
+                          "Launchpad overlay 是独立窗口，WM_PAINT 按设计什么都不画（像素来自 DComp）；Tick 里 dirty 时必须自己调 Repaint()，交给调用方 InvalidateRect 只会让 overlay 停在第一帧（实测 A/B ratio 0.0044，与关闭态无法区分）",
+                          "OverlayWindow 与 CompositionSurface 都不可拷贝不可移动，装在容器里必须用 std::vector\u003cstd::unique_ptr\u003cT\u003e\u003e；by-value vector 会因 construct_at 需要 move 而整体编译失败",
+                          "overlay 类不能复用 platform::Window：共享 class 的 WndProc 在 WM_DESTROY 调 PostQuitMessage，每次开合都会结束进程",
+                          "Launchpad 自己调 EnumerateDisplays() 会绕过 main.cpp 的 apply_dpi_override，DOCKFORGE_DPI_OVERRIDE 对 overlay 不生效；Initialize() 里必须自己读 platform::Window::DpiOverride() 覆盖 display.effective_dpi",
+                          "网格 cell 宽度不能等于 pitch：cell_width = pitch - column_gap，否则列间空隙被算进某个单元格的点击目标，点在空白处会启动 app",
+                          "图标预热必须放在启动而不是 Open()：实测 70 个 192px 图标首次提取 1797ms，热键按下要等近 2 秒；WarmTiles() 后同一行变 32.0ms",
+                          "帧时钟在 dock 空闲时继续走，19 秒后打开 Launchpad 时首个 tick 的 delta=19000ms，180ms 动画会在一帧内结束；动画推进必须钳制 delta（kMaxAnimationStepMs=64）",
+                          "探针快门必须由 app 日志驱动，且要等「已绘制」而不是「命令已消费」：page -\u003e 1 是改索引时写的，像素在下一帧 Repaint 才跟上，两者之间拍快门会报 ratio 0.0041 而真实值是 0.1841",
+                          "探针不得用物理窗口 rect 反算期望列数：scale=2.0 时必然算错，要读 app 日志里自己报的 viewport（DIP）再代入 C-18 公式",
+                          "PowerShell 5.1 的 -NoProfile 会话没有任何程序集被加载过，[System.Windows.Forms.SystemInformation] 必须显式 Add-Type -AssemblyName System.Windows.Forms，否则报 Unable to find type",
+                          "FrameClock 是 1000 样本滚动窗，p99 必须在 frames\u003e=1000 之后读，否则仍含启动首帧（实测 frames=377 时 19.6ms，frames=1000 后 16.5ms）",
+                          "TASKS.md / CONTRACTS.md 在 HEAD 中是 UTF-8 无 BOM + LF；用 WriteAllText 写中文后必须把 CRLF 归一化成 LF，否则 git diff 会把整文件标成改动"
                       ],
-    "updated_at":  "2026-10-24T23:51:00+08:00"
+    "updated_at":  "2026-10-25T00:36:22+08:00"
 }

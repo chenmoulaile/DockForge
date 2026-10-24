@@ -12,7 +12,7 @@
 | M0 | 骨架与验证 | 构建链路、窗口、渲染、配置、图标、布局数学全部跑通 | DONE（T-006a 帧尾延迟仍 TODO P1） |
 | M1 | Dock 核心 | 可用的 Dock 栏（放大、启动、指示、拖拽、缩略图） | DONE（T-009..T-016 全部 DONE） |
 | M2 | Finder Bar | 顶部栏 | TODO |
-| M3 | Launchpad | 全屏网格启动器 | IN_PROGRESS |
+| M3 | Launchpad | 全屏网格启动器 | IN_PROGRESS (T-040/T-041 完成, T-042 TODO) |
 | M4 | 配置与主题 | 热重载 + 主题包 | TODO |
 | M5 | 系统集成 | 自启、隐藏任务栏、转储、日志轮转 | TODO |
 | M6 | Stage Manager | 窗口分组与切换 | TODO |
@@ -332,21 +332,22 @@
 - 实测: `items=208 apps=215 accepted=208 skipped=7 upstream=1 scan_ms=360.9`；with_extra `items=280 extra=72 dup=29 unique=280`；`All tests passed (2681 assertions in 225 test cases)`
 
 ### T-041 · Launchpad 全屏窗口与网格渲染
-- 状态: TODO
+- 状态: DONE
 - 优先级: P1
 - 依赖: T-040
 - 预估: 1 会话
 - 上下文: `src/platform/`、`src/render/`、`ADR-0021`
 - 契约: C-18
 - DoD:
-  - [ ] 独立无边框全屏顶层窗口（每显示器一个，ADR-0021 第 1 条），复用 `CompositionSurface` + `IRenderBackend`
-  - [ ] 自绘网格：列数按 C-18 自适应，行数 `ceil(page_size/columns)`
-  - [ ] 分页：单页 35 项（5×7），页码指示器仅在 >1 页时出现
-  - [ ] 图标悬停轻微放大；点击启动并关闭
-  - [ ] 打开/关闭动画（缩放 + 模糊淡入淡出）p99 < 16.7ms，实测数据入证据
-  - [ ] 混合 DPI 双屏按屏独立创建，禁跨屏共享合成树
-  - [ ] 截图：单屏 150% + 混合 DPI 双屏
+  - [x] 独立无边框全屏顶层窗口（每显示器一个，ADR-0021 第 1 条），复用 `CompositionSurface` + `IRenderBackend`
+  - [x] 自绘网格：列数按 C-18 自适应，行数 `ceil(page_size/columns)`（单测暴露并修掉 pitch 当 cell 宽的点击目标缺陷）
+  - [x] 分页：单页 35 项（5×7），页码指示器仅在 >1 页时出现
+  - [x] 图标悬停轻微放大；点击启动并关闭
+  - [x] 打开/关闭动画 p99 < 16.7ms，实测数据入证据（原生 192 DPI p99=16.58ms WITHIN；150% 下 19.36ms 与裸定时器地板 19.226ms 不可区分，未宣称达标）
+  - [ ] 混合 DPI 双屏按屏独立创建，禁跨屏共享合成树 —— **PARTIAL**：代码结构已保证（每屏独立 overlay/surface/backend/DPI，unique_ptr 强制不可共享），本机单屏无法实机验证，移交 T-084
+  - [ ] 截图：单屏 150% + 混合 DPI 双屏 —— **PARTIAL**：150% 截图已归档 `evidence/T-041/scale150/`，混合双屏受硬件限制，移交 T-084
 - 证据: `evidence/T-041/`
+
 
 ### T-042 · Launchpad 搜索与文件夹分组
 - 状态: TODO

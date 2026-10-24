@@ -14,6 +14,7 @@
 #include "dock/drop_target.h"
 #include "dock/drag_controller.h"
 #include "dock/hover_timer.h"
+#include "dock/launchpad.h"
 #include "dock/running_tracker.h"
 #include "dock/tile_order.h"
 #include "platform/composition.h"
@@ -687,6 +688,126 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     // defaults to off" (PROMPT.md).
     const bool preview_enabled = ReadEnvFlag(L"DOCKFORGE_PREVIEW", true) && preview_class_ready;
 
+    // Launchpad (T-041). One overlay per display, one shared index. The index scan is
+    // 360-1045ms on this machine (evidence/T-040), so it is warmed once at startup
+    // rather than on the first open, and the file watcher only marks it stale; the
+    // rebuild happens on the next open, never inside a frame.
+    //
+    // Switchable off for the same reason as the preview: it changes system-visible
+    // behaviour (a full-screen topmost window and a global hotkey) and PROMPT.md
+    // requires such features to have a switch.
+    const bool launchpad_enabled = ReadEnvFlag(L"DOCKFORGE_LAUNCHPAD", true);
+    dock::Launchpad launchpad;
+    bool launchpad_ready = false;
+    if (launchpad_enabled) {
+        if (launchpad.Initialize(instance, config, icons, dock::LaunchpadOptions{})) {
+            launchpad_ready = true;
+            const std::uint64_t warm_start = GetTickCount64();
+            launchpad.RebuildIndex(config);
+            // Icons cost 1797ms for 70 at 192px (measured this run). Extracting them
+            // here rather than inside Open() is the difference between a launcher that
+            // appears on the gesture and one that stalls for two seconds on the first
+            // press of its hotkey.
+            launchpad.WarmTiles(config);
+            DF_INFO("launchpad", "index warmed: items=%d in %.1fms", launchpad.ItemCount(),
+                    static_cast<double>(GetTickCount64() - warm_start));
+        } else {
+            DF_WARN("launchpad", "initialize failed; Launchpad unavailable this run");
+        }
+    } else {
+        DF_INFO("launchpad", "disabled by DOCKFORGE_LAUNCHPAD");
+    }
+
+    // The Launchpad's open gesture. A registered hotkey, not a low-level keyboard hook:
+    // WH_KEYBOARD_LL would sit in the input path of every process on the machine, and
+    // RegisterHotKey already fails cleanly when the combination is taken (which is
+    // logged, not silently ignored).
+    constexpr int kLaunchpadHotkeyId = 0x4C50;  // 'LP'
+    bool launchpad_hotkey = false;
+    if (launchpad_ready) {
+        launchpad_hotkey =
+            RegisterHotKey(window.Handle(), kLaunchpadHotkeyId, MOD_CONTROL | MOD_ALT, VK_SPACE);
+        if (launchpad_hotkey) {
+            DF_INFO("launchpad", "hotkey registered: Ctrl+Alt+Space");
+        } else {
+            DF_WARN("launchpad", "RegisterHotKey failed (%lu); use the environment trigger",
+                    GetLastError());
+        }
+    }
+
+    // Verification hook for the Launchpad, same precedent and same reason as the hover
+    // probe above: the automated probe cannot win a race against a human hand on the
+    // physical mouse, and RegisterHotKey cannot be injected from another process.
+    //
+    // The channel is a file holding ONE command line. It is re-read at most every
+    // kLaunchpadCmdPollMs, and a command whose text is unchanged from the last one is
+    // ignored - otherwise "open" would re-fire every poll and the open animation would
+    // restart forever.
+    //
+    // Commands: `open`, `close`, `page <n>`, `click <x> <y>`, `hover <x> <y>`, `leave`.
+    // Coordinates are DIP on display 0. Only the *source* of the input is replaced: the
+    // real ClickAt/PointerMoved/KeyPressed paths run, so a PASS still proves the chain.
+    std::wstring launchpad_cmd_file;
+    if (launchpad_ready) {
+        wchar_t cmd_buffer[MAX_PATH]{};
+        const DWORD n = GetEnvironmentVariableW(L"DOCKFORGE_LAUNCHPAD_CMD_FILE", cmd_buffer,
+                                               ARRAYSIZE(cmd_buffer));
+        if (n > 0 && n < ARRAYSIZE(cmd_buffer)) {
+            launchpad_cmd_file.assign(cmd_buffer, n);
+            DF_INFO("launchpad", "command probe file=%s",
+                    core::WideToUtf8(launchpad_cmd_file).c_str());
+        }
+    }
+    std::string launchpad_last_command;
+    double launchpad_cmd_since_read_ms = 1e9;
+    auto read_launchpad_command = [&](double delta_ms) {
+        launchpad_cmd_since_read_ms += delta_ms;
+        if (launchpad_cmd_since_read_ms < 50.0) return;
+        launchpad_cmd_since_read_ms = 0.0;
+        // Full sharing, not _wfopen_s: the writer is another process rewriting the file
+        // between frames, and a CRT fopen denies the concurrent write (measured on the
+        // T-016 hover probe: "The process cannot access the file ... because it is being
+        // used by another process").
+        HANDLE h = CreateFileW(launchpad_cmd_file.c_str(), GENERIC_READ,
+                               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                               nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (h == INVALID_HANDLE_VALUE) return;
+        char raw[128]{};
+        DWORD got = 0;
+        const BOOL read_ok = ReadFile(h, raw, sizeof(raw) - 1, &got, nullptr);
+        CloseHandle(h);
+        if (!read_ok || got == 0) return;
+        raw[got] = '\0';
+        std::string command(raw);
+        while (!command.empty() &&
+               (command.back() == '\n' || command.back() == '\r' || command.back() == ' ')) {
+            command.pop_back();
+        }
+        if (command.empty() || command == launchpad_last_command) return;
+        launchpad_last_command = command;
+        DF_DEBUG("launchpad", "probe command=%s", command.c_str());
+
+        if (command == "open") {
+            launchpad.Open(config);
+        } else if (command == "close") {
+            launchpad.Close();
+        } else if (command == "leave") {
+            launchpad.PointerLeft(0);
+        } else if (command.rfind("page ", 0) == 0) {
+            launchpad.KeyPressed(atoi(command.c_str() + 5) > 0 ? VK_RIGHT : VK_LEFT);
+        } else if (command.rfind("click ", 0) == 0 || command.rfind("hover ", 0) == 0) {
+            float x = 0.0f;
+            float y = 0.0f;
+            if (sscanf_s(command.c_str() + 6, "%f %f", &x, &y) == 2) {
+                if (command[0] == 'c') {
+                    launchpad.ClickAt(0, x, y);
+                } else {
+                    launchpad.PointerMoved(0, x, y);
+                }
+            }
+        }
+    };
+
     // Verification hook, same precedent as DOCKFORGE_FORCE_MATERIAL and
     // DOCKFORGE_DPI_OVERRIDE: pins the hover onto one tile index so the dwell can
     // be exercised without a cursor. The automated probe cannot win a race against
@@ -1288,6 +1409,17 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
             }
         }
 
+        // Launchpad (T-041): the animation runs at frame rate and the watcher only
+        // signals, so the tick is the only place either can advance. Returns true while
+        // anything is animating, which is what keeps the repaint loop awake for the
+        // 180ms open and 140ms close.
+        if (!launchpad_cmd_file.empty()) {
+            read_launchpad_command(delta_ms);
+        }
+        if (launchpad_ready && launchpad.Tick(delta_ms, config)) {
+            dirty = true;
+        }
+
         if (dirty) {
             InvalidateRect(window.Handle(), nullptr, FALSE);
         }
@@ -1595,6 +1727,17 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                 }
                 return false;
             }
+            case WM_HOTKEY:
+                if (wp == static_cast<WPARAM>(kLaunchpadHotkeyId) && launchpad_ready) {
+                    if (launchpad.Visible()) {
+                        launchpad.Close();
+                    } else {
+                        launchpad.Open(config);
+                    }
+                    out = 0;
+                    return true;
+                }
+                return false;
             case WM_KEYDOWN:
                 if (wp == 'Q' && (GetKeyState(VK_CONTROL) & 0x8000)) {
                     PostMessageW(hwnd, WM_CLOSE, 0, 0);
@@ -1650,6 +1793,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     // inside the desktop compositor, and it is invisible until shutdown hangs.
     thumbnails.ReleaseAll();
     preview.Destroy();
+    // The Launchpad's overlays are their own top-level windows with their own DComp
+    // targets. They go before the Dock's surface for the same reason the preview does:
+    // a live composition target on a destroyed HWND is a shutdown hang, not a leak.
+    if (launchpad_hotkey) UnregisterHotKey(window.Handle(), kLaunchpadHotkeyId);
+    launchpad.Shutdown();
     capture.Stop();
     plate.Reset();
     render_backend->Shutdown();
