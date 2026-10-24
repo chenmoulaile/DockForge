@@ -2,6 +2,7 @@
 
 #include "core/log.h"
 #include "core/paths.h"
+#include "shell/app_identity.h"
 
 #include <algorithm>
 #include <cwctype>
@@ -11,29 +12,14 @@
 namespace dockforge::dock {
 namespace {
 
-std::string LowerAscii(std::string text) {
-    for (char& ch : text) {
-        if (ch >= 'A' && ch <= 'Z') ch = static_cast<char>(ch - 'A' + 'a');
-    }
-    return text;
-}
+// Identity now lives in shell::app_identity so Launchpad can share it without
+// depending on src/dock (C-06). This alias keeps the dock-side spelling used by
+// every call site and test below.
+using shell::LowerAscii;
 
 }  // namespace
 
-std::string IdentityOf(const shell::AppEntry& app) {
-    // AUMID first: for a packaged app it is the only stable identity - every
-    // packaged window is hosted by ApplicationFrameHost.exe, so the path is shared
-    // and would make two apps look identical (C-13b).
-    if (!app.aumid.empty()) return LowerAscii(core::WideToUtf8(app.aumid));
-    if (!app.namespace_parsing.empty()) {
-        return LowerAscii(core::WideToUtf8(app.namespace_parsing));
-    }
-    if (!app.target_path.empty()) return LowerAscii(core::WideToUtf8(app.target_path));
-    // Last resort: the display name. Two different apps could share one, which is
-    // why it is last - but a tile with no identity at all could never be reordered
-    // or hidden, and would come back after every restart.
-    return LowerAscii(core::WideToUtf8(app.display_name));
-}
+std::string IdentityOf(const shell::AppEntry& app) { return shell::IdentityOf(app); }
 
 std::vector<shell::AppEntry> ApplyOrder(const std::vector<shell::AppEntry>& apps,
                                         const std::vector<std::string>& order,
@@ -53,7 +39,7 @@ std::vector<shell::AppEntry> ApplyOrder(const std::vector<shell::AppEntry>& apps
     std::unordered_multimap<std::string, std::size_t> by_identity;
     by_identity.reserve(apps.size() * 2);
     for (std::size_t i = 0; i < apps.size(); ++i) {
-        const std::string identity = IdentityOf(apps[i]);
+        const std::string identity = dock::IdentityOf(apps[i]);
         if (hidden_set.count(identity) != 0) continue;
         by_identity.emplace(identity, i);
     }
@@ -88,7 +74,7 @@ std::vector<shell::AppEntry> ApplyOrder(const std::vector<shell::AppEntry>& apps
     for (std::size_t i = 0; i < apps.size(); ++i) {
         if (static_cast<int>(result.size()) >= max_tiles) break;
         if (consumed.count(i) != 0) continue;
-        if (hidden_set.count(IdentityOf(apps[i])) != 0) continue;
+        if (hidden_set.count(dock::IdentityOf(apps[i])) != 0) continue;
         result.push_back(apps[i]);
     }
 
@@ -117,7 +103,7 @@ void CommitOrder(core::Config& config, const std::vector<DockTile>& tiles,
     config.dock.tiles.clear();
     config.dock.tiles.reserve(tiles.size());
     for (const auto& tile : tiles) {
-        config.dock.tiles.push_back(IdentityOf(tile.app));
+        config.dock.tiles.push_back(dock::IdentityOf(tile.app));
     }
 
     if (!removed_identity.empty()) {

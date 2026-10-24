@@ -26,6 +26,8 @@ const std::unordered_set<std::string> kDockKeys = {
     "influence_radius", "falloff_sharpness", "position", "tiles", "hidden"};
 const std::unordered_set<std::string> kAppearanceKeys = {"material", "corner_radius"};
 const std::unordered_set<std::string> kBehaviorKeys = {"autostart", "hide_taskbar"};
+const std::unordered_set<std::string> kLaunchpadKeys = {"extra_paths", "columns", "icon_size",
+                                                       "page_size", "folders"};
 
 // Upper bound on the persisted tile list.
 //
@@ -35,6 +37,15 @@ const std::unordered_set<std::string> kBehaviorKeys = {"autostart", "hide_taskba
 // that a corrupt file is harmless.
 constexpr std::size_t kMaxTileListEntries = 256;
 constexpr std::size_t kMaxIdentityLength = 512;
+
+// Launchpad limits from C-18. The folders list is bounded separately from the
+// entries inside it because both are user-editable and either could otherwise be
+// made unbounded by a hand-written file.
+constexpr std::size_t kMaxExtraPaths = 16;
+constexpr std::size_t kMaxFolders = 64;
+constexpr std::size_t kMaxFolderItems = 256;
+constexpr std::size_t kMaxFolderNameLength = 64;
+constexpr std::size_t kMaxFolderIdLength = 64;
 
 // Reads a string array of identities, trimming over-long or non-string entries.
 // Returns true when the array was present but needed cleaning (caller rewrites).
@@ -83,6 +94,168 @@ void WriteIdentityList(json& node, const char* key, const std::vector<std::strin
     node[key] = std::move(array);
 }
 
+// Reads a bounded string array. Same contract as ReadIdentityList (returns true
+// when the array was present but needed cleaning) but with caller-chosen limits,
+// because C-18 bounds `extra_paths` at 16 entries while `tiles` allows 256.
+bool ReadStringList(const json& node, const char* key, std::vector<std::string>& out,
+                    std::size_t max_entries, std::size_t max_length) {
+    if (!node.contains(key)) return false;
+    const auto& value = node.at(key);
+    if (!value.is_array()) {
+        DF_WARN("core", "config %s has non-array type, keeping default", key);
+        return true;
+    }
+    bool dirty = false;
+    std::vector<std::string> parsed;
+    parsed.reserve(std::min(value.size(), max_entries));
+    for (const auto& item : value) {
+        if (parsed.size() >= max_entries) {
+            DF_WARN("core", "config %s has more than %zu entries, extra entries dropped", key,
+                    max_entries);
+            dirty = true;
+            break;
+        }
+        if (!item.is_string()) {
+            DF_WARN("core", "config %s contains a non-string entry, dropped", key);
+            dirty = true;
+            continue;
+        }
+        std::string text = item.get<std::string>();
+        if (text.empty()) {
+            dirty = true;
+            continue;
+        }
+        if (text.size() > max_length) {
+            DF_WARN("core", "config %s entry longer than %zu bytes, dropped", key, max_length);
+            dirty = true;
+            continue;
+        }
+        parsed.push_back(std::move(text));
+    }
+    out = std::move(parsed);
+    return dirty;
+}
+
+// Reads `launchpad.folders`.
+//
+// Every rule here comes from C-18: a duplicate or empty `id` drops the folder, an
+// empty `items` drops the folder (an empty folder has nothing to open), and a bad
+// entry inside `items` is skipped without invalidating the folder - a single
+// uninstalled app must not make a curated folder disappear.
+bool ReadFolders(const json& node, const char* key, std::vector<LaunchpadFolder>& out) {
+    if (!node.contains(key)) return false;
+    const auto& value = node.at(key);
+    if (!value.is_array()) {
+        DF_WARN("core", "config %s has non-array type, keeping default", key);
+        return true;
+    }
+    bool dirty = false;
+    std::vector<LaunchpadFolder> parsed;
+    std::unordered_set<std::string> seen_ids;
+    parsed.reserve(std::min(value.size(), kMaxFolders));
+
+    for (const auto& item : value) {
+        if (parsed.size() >= kMaxFolders) {
+            DF_WARN("core", "config %s has more than %zu folders, extra folders dropped", key,
+                    kMaxFolders);
+            dirty = true;
+            break;
+        }
+        if (!item.is_object()) {
+            DF_WARN("core", "config %s contains a non-object entry, dropped", key);
+            dirty = true;
+            continue;
+        }
+
+        LaunchpadFolder folder;
+        const auto id_it = item.find("id");
+        if (id_it == item.end() || !id_it->is_string()) {
+            DF_WARN("core", "config %s folder has no string id, dropped", key);
+            dirty = true;
+            continue;
+        }
+        folder.id = id_it->get<std::string>();
+        if (folder.id.empty() || folder.id.size() > kMaxFolderIdLength) {
+            DF_WARN("core", "config %s folder id is empty or longer than %zu bytes, dropped", key,
+                    kMaxFolderIdLength);
+            dirty = true;
+            continue;
+        }
+        if (!seen_ids.insert(folder.id).second) {
+            DF_WARN("core", "config %s folder id \"%s\" repeated, keeping the first", key,
+                    folder.id.c_str());
+            dirty = true;
+            continue;
+        }
+
+        const auto name_it = item.find("name");
+        if (name_it != item.end() && name_it->is_string()) {
+            folder.name = name_it->get<std::string>();
+        } else if (name_it != item.end()) {
+            DF_WARN("core", "config %s folder \"%s\" has a non-string name, using the id", key,
+                    folder.id.c_str());
+            dirty = true;
+        }
+        if (folder.name.size() > kMaxFolderNameLength) {
+            DF_WARN("core", "config %s folder \"%s\" name longer than %zu bytes, truncated", key,
+                    folder.id.c_str(), kMaxFolderNameLength);
+            folder.name.resize(kMaxFolderNameLength);
+            dirty = true;
+        }
+
+        const auto items_it = item.find("items");
+        if (items_it != item.end() && items_it->is_array()) {
+            for (const auto& entry : *items_it) {
+                if (folder.items.size() >= kMaxFolderItems) {
+                    DF_WARN("core", "config %s folder \"%s\" has more than %zu items, extras dropped",
+                            key, folder.id.c_str(), kMaxFolderItems);
+                    dirty = true;
+                    break;
+                }
+                if (!entry.is_string()) {
+                    dirty = true;
+                    continue;
+                }
+                std::string identity = entry.get<std::string>();
+                if (identity.empty() || identity.size() > kMaxIdentityLength) {
+                    dirty = true;
+                    continue;
+                }
+                folder.items.push_back(std::move(identity));
+            }
+        } else if (items_it != item.end()) {
+            DF_WARN("core", "config %s folder \"%s\" has a non-array items field, dropped", key,
+                    folder.id.c_str());
+            dirty = true;
+            continue;
+        }
+
+        if (folder.items.empty()) {
+            DF_WARN("core", "config %s folder \"%s\" has no items, dropped", key, folder.id.c_str());
+            dirty = true;
+            continue;
+        }
+        parsed.push_back(std::move(folder));
+    }
+
+    out = std::move(parsed);
+    return dirty;
+}
+
+void WriteFolders(json& node, const char* key, const std::vector<LaunchpadFolder>& folders) {
+    json array = json::array();
+    for (const auto& folder : folders) {
+        json entry = json::object();
+        entry["id"] = folder.id;
+        entry["name"] = folder.name;
+        json items = json::array();
+        for (const auto& item : folder.items) items.push_back(item);
+        entry["items"] = std::move(items);
+        array.push_back(std::move(entry));
+    }
+    node[key] = std::move(array);
+}
+
 int ClampInt(int value, IntRange range, const char* name) {
     const int clamped = std::clamp(value, range.min, range.max);
     if (clamped != value) {
@@ -119,17 +292,20 @@ json StripUnknownKeys(const json& source) {
     json result = json::object();
     if (!source.is_object()) return result;
 
-    for (const char* section : {"dock", "appearance", "behavior"}) {
+    for (const char* section : {"dock", "appearance", "behavior", "launchpad"}) {
         if (!source.contains(section) || !source[section].is_object()) continue;
         json section_out = json::object();
-        const auto& owned = std::string(section) == "dock"        ? kDockKeys
-                            : std::string(section) == "appearance" ? kAppearanceKeys
-                                                                   : kBehaviorKeys;
+        const std::string name = section;
+        const auto& owned = name == "dock"          ? kDockKeys
+                            : name == "appearance"  ? kAppearanceKeys
+                            : name == "behavior"    ? kBehaviorKeys
+                                                    : kLaunchpadKeys;
         PreserveUnknown(source[section], section_out, owned);
         if (!section_out.empty()) result[section] = section_out;
     }
     // Top-level unknown keys.
-    static const std::unordered_set<std::string> kTopKeys = {"dock", "appearance", "behavior"};
+    static const std::unordered_set<std::string> kTopKeys = {"dock", "appearance", "behavior",
+                                                             "launchpad"};
     PreserveUnknown(source, result, kTopKeys);
     return result;
 }
@@ -227,6 +403,9 @@ IntRange CornerRadiusRange() { return {0, 40}; }
 FloatRange MagnificationRange() { return {1.0f, 2.5f}; }
 FloatRange InfluenceRadiusRange() { return {1.0f, 5.0f}; }
 FloatRange FalloffSharpnessRange() { return {0.5f, 4.0f}; }
+IntRange LaunchpadColumnsRange() { return {0, 12}; }
+IntRange LaunchpadIconSizeRange() { return {48, 192}; }
+IntRange LaunchpadPageSizeRange() { return {10, 70}; }
 
 const char* ToString(FalloffCurve value) {
     switch (value) {
@@ -305,6 +484,39 @@ bool ClampConfig(Config& config) {
         config.appearance.corner_radius = corner;
         changed = true;
     }
+
+    auto& launchpad = config.launchpad;
+    const int columns = ClampInt(launchpad.columns, LaunchpadColumnsRange(), "launchpad.columns");
+    if (columns != launchpad.columns) { launchpad.columns = columns; changed = true; }
+
+    const int lp_icon =
+        ClampInt(launchpad.icon_size, LaunchpadIconSizeRange(), "launchpad.icon_size");
+    if (lp_icon != launchpad.icon_size) { launchpad.icon_size = lp_icon; changed = true; }
+
+    const int page = ClampInt(launchpad.page_size, LaunchpadPageSizeRange(), "launchpad.page_size");
+    if (page != launchpad.page_size) { launchpad.page_size = page; changed = true; }
+
+    if (launchpad.extra_paths.size() > kMaxExtraPaths) {
+        DF_WARN("core", "config launchpad.extra_paths has %zu entries, keeping the first %zu",
+                launchpad.extra_paths.size(), kMaxExtraPaths);
+        launchpad.extra_paths.resize(kMaxExtraPaths);
+        changed = true;
+    }
+    for (auto& path : launchpad.extra_paths) {
+        if (path.size() > kMaxIdentityLength) {
+            DF_WARN("core", "config launchpad.extra_paths entry longer than %zu bytes, truncated",
+                    kMaxIdentityLength);
+            path.resize(kMaxIdentityLength);
+            changed = true;
+        }
+    }
+
+    if (launchpad.folders.size() > kMaxFolders) {
+        DF_WARN("core", "config launchpad.folders has %zu entries, keeping the first %zu",
+                launchpad.folders.size(), kMaxFolders);
+        launchpad.folders.resize(kMaxFolders);
+        changed = true;
+    }
     return changed;
 }
 
@@ -348,12 +560,22 @@ bool ParseConfig(const std::string& json_text, Config& out, std::string* error) 
         bad_value |= ReadBool(node, "autostart", parsed.behavior.autostart);
         bad_value |= ReadBool(node, "hide_taskbar", parsed.behavior.hide_taskbar);
     }
+    if (document.contains("launchpad") && document["launchpad"].is_object()) {
+        const auto& node = document["launchpad"];
+        bad_value |= ReadStringList(node, "extra_paths", parsed.launchpad.extra_paths,
+                                    kMaxExtraPaths, kMaxIdentityLength);
+        bad_value |= ReadNumber(node, "columns", parsed.launchpad.columns);
+        bad_value |= ReadNumber(node, "icon_size", parsed.launchpad.icon_size);
+        bad_value |= ReadNumber(node, "page_size", parsed.launchpad.page_size);
+        bad_value |= ReadFolders(node, "folders", parsed.launchpad.folders);
+    }
     parsed.unknown_keys_json = StripUnknownKeys(document).dump();
 
     // Snapshot the raw parsed values so we can tell whether clamping actually
     // changed anything (that drives the rewrite decision together with enums).
     const DockConfig raw_dock = parsed.dock;
     const AppearanceConfig raw_appearance = parsed.appearance;
+    const LaunchpadConfig raw_launchpad = parsed.launchpad;
 
     ClampConfig(parsed);
 
@@ -364,7 +586,12 @@ bool ParseConfig(const std::string& json_text, Config& out, std::string* error) 
         raw_dock.magnification != parsed.dock.magnification ||
         raw_dock.influence_radius != parsed.dock.influence_radius ||
         raw_dock.falloff_sharpness != parsed.dock.falloff_sharpness ||
-        raw_appearance.corner_radius != parsed.appearance.corner_radius;
+        raw_appearance.corner_radius != parsed.appearance.corner_radius ||
+        raw_launchpad.columns != parsed.launchpad.columns ||
+        raw_launchpad.icon_size != parsed.launchpad.icon_size ||
+        raw_launchpad.page_size != parsed.launchpad.page_size ||
+        raw_launchpad.extra_paths != parsed.launchpad.extra_paths ||
+        raw_launchpad.folders.size() != parsed.launchpad.folders.size();
 
     out = std::move(parsed);
     return true;
@@ -398,6 +625,19 @@ std::string SerializeConfig(const Config& config) {
         {"autostart", config.behavior.autostart},
         {"hide_taskbar", config.behavior.hide_taskbar},
     };
+    document["launchpad"] = {
+        {"columns", config.launchpad.columns},
+        {"icon_size", config.launchpad.icon_size},
+        {"page_size", config.launchpad.page_size},
+    };
+    // Same reasoning as dock.tiles: an empty array in every default file would
+    // advertise a feature nobody used. Folders are written only when present.
+    if (!config.launchpad.extra_paths.empty()) {
+        WriteIdentityList(document["launchpad"], "extra_paths", config.launchpad.extra_paths);
+    }
+    if (!config.launchpad.folders.empty()) {
+        WriteFolders(document["launchpad"], "folders", config.launchpad.folders);
+    }
 
     // Re-attach unknown keys captured at load time.
     if (!config.unknown_keys_json.empty()) {

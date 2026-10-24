@@ -48,10 +48,36 @@ struct BehaviorConfig {
     bool hide_taskbar = false;
 };
 
+// One Launchpad folder (CONTRACTS.md C-18).
+//
+// `items` holds the same lowercased identity strings the Dock uses (C-15a), so a
+// folder entry and a tile entry name the same app the same way. `id` is a v4 UUID
+// generated on creation; it exists so a rename does not change which folder is
+// which while the grid is being rearranged.
+struct LaunchpadFolder {
+    std::string id;
+    std::string name;
+    std::vector<std::string> items;
+};
+
+struct LaunchpadConfig {
+    // Extra directories to aggregate besides AppsFolder. Each is walked with
+    // shell::FindShortcuts, so a folder of .lnk files is a first-class source.
+    std::vector<std::string> extra_paths;
+
+    // 0 means "derive from the available width" (C-18 分页).
+    int columns = 0;
+    int icon_size = 96;
+    int page_size = 35;
+
+    std::vector<LaunchpadFolder> folders;
+};
+
 struct Config {
     DockConfig dock;
     AppearanceConfig appearance;
     BehaviorConfig behavior;
+    LaunchpadConfig launchpad;
 
     // Raw JSON as loaded from disk. Unknown keys live here so that a
     // save round-trip never silently drops user data (C-01 实现约束).
@@ -99,5 +125,8 @@ IntRange CornerRadiusRange();
 FloatRange MagnificationRange();
 FloatRange InfluenceRadiusRange();
 FloatRange FalloffSharpnessRange();
+IntRange LaunchpadColumnsRange();
+IntRange LaunchpadIconSizeRange();
+IntRange LaunchpadPageSizeRange();
 
 }  // namespace dockforge::core

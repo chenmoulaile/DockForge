@@ -24,17 +24,57 @@ std::wstring NotepadPath() {
     return std::wstring(windir) + L"\\system32\\notepad.exe";
 }
 
+// Removes every directory TempCacheDir handed out, at process exit.
+//
+// The cache is persistent by design, so the tests cannot share one directory - but
+// leaving them behind is not free either: this machine had 648 of them, and each
+// leftover is a future name collision for the very assertion above.
+struct CacheDirReaper {
+    ~CacheDirReaper() {
+        for (const std::wstring& dir : *dirs) {
+            WIN32_FIND_DATAW data{};
+            HANDLE find = FindFirstFileW((dir + L"\\*").c_str(), &data);
+            if (find != INVALID_HANDLE_VALUE) {
+                do {
+                    if (data.cFileName[0] == L'.') continue;
+                    DeleteFileW((dir + L"\\" + data.cFileName).c_str());
+                } while (FindNextFileW(find, &data));
+                FindClose(find);
+            }
+            RemoveDirectoryW(dir.c_str());
+        }
+        dirs->clear();
+    }
+    std::vector<std::wstring>* dirs;
+};
+
+std::vector<std::wstring>& CreatedDirs() {
+    static std::vector<std::wstring> dirs;
+    static CacheDirReaper reaper{&dirs};
+    (void)reaper;
+    return dirs;
+}
+
 std::wstring TempCacheDir() {
     // A unique directory per call: the disk cache is persistent by design, so a
     // shared path would let a previous run turn "must extract" into a disk hit and
     // silently invert the assertions that check extraction counts.
+    //
+    // PID plus a counter is NOT unique across time: Windows reuses PIDs, and a
+    // leftover directory from an earlier run restarts the counter at 1 in the same
+    // place. Measured: 1 failure in 25 full-suite runs, always with extractions==0
+    // right after a successful Get. The tick count closes that hole, and the reaper
+    // stops the leftovers accumulating in the first place.
     static int counter = 0;
     wchar_t temp[MAX_PATH]{};
     GetTempPathW(MAX_PATH, temp);
-    wchar_t name[64]{};
-    std::swprintf(name, ARRAYSIZE(name), L"dockforge-test-icons-%lu-%d",
-                  static_cast<unsigned long>(GetCurrentProcessId()), ++counter);
-    return std::wstring(temp) + name;
+    wchar_t name[96]{};
+    std::swprintf(name, ARRAYSIZE(name), L"dockforge-test-icons-%lu-%llu-%d",
+                  static_cast<unsigned long>(GetCurrentProcessId()),
+                  static_cast<unsigned long long>(GetTickCount64()), ++counter);
+    std::wstring dir = std::wstring(temp) + name;
+    CreatedDirs().push_back(dir);
+    return dir;
 }
 
 }  // namespace

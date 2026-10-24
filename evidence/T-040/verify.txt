@@ -1,0 +1,247 @@
+# T-040 · Launchpad 应用索引器 —— 验收证据
+
+机器：Windows，单屏 2880x1920 @ 192 DPI，build 26300
+工具链：MinGW g++ 15.2.0 + CMake 4.4.2 + MinGW Makefiles
+构建：`[100%] Built target dockforge_tests`，warning=0 error=0（13 行，见 build.log）
+测试：`All tests passed (2681 assertions in 225 test cases)`；`[launchpad]` 过滤 `780 assertions in 22 test cases`
+探针：`build/probe_verify_t040.exe`（不入库，源码 `build/probe_verify_t040.cpp`），输出原文见下方各节引用
+
+---
+
+## DoD 1 · 复用 `shell::ScanAppsFolder()` 作为主来源，不另写枚举
+
+`src/shell/launchpad_index.cpp` 的 `LaunchpadIndex::Rebuild` 只有两个入口：源 1 直接调
+`ScanAppsFolder()`，源 2 走 `FindShortcuts(root, 4)` + `ResolvePath`。模块内没有
+`IShellFolder::EnumObjects`、没有 `SHGetKnownFolderIDList`，也没有第二套 `.lnk` 解析——
+`grep -c` 于 `src/shell/launchpad_index.cpp` 的结果是 0 命中。C-06 的「shell 解析唯一入口」成立。
+
+实测：
+
+```
+ScanAppsFolder entries=215 shortcut=49 uwp=43 desktop_id=69 namespace=54 skipped=1
+```
+
+`shortcut=49 + uwp=43 + desktop_id=69 + namespace=54 = 215`，与 `entries=215` 一致，说明统计口径没有漏项。
+
+PASS
+
+---
+
+## DoD 2 · 聚合 `launchpad.extra_paths`（每项递归 `shell::FindShortcuts(root, 4)`）
+
+把机器级开始菜单目录当作 extra path 灌入（该目录本身也部分构成 AppsFolder，因此同时压测去重）：
+
+```
+with_extra: items=280 accepted=208 extra=72 dup=29 skipped=27 pathfail=0 scan_ms=477.4 census_matches=1
+```
+
+- `extra=72` 条来自 extra path，`dup=29` 条与 AppsFolder 已有身份重合被丢弃，`skipped=27` 条被应用过滤器或解析器拒绝。
+- 递归性由 `tests/launchpad_test.cpp` 的 `Rebuild aggregates a shortcut from an extra path` 覆盖：它在 `TempDir/nested` 子目录里创建 `.lnk`，断言 `extra_path_count >= 1` 且能按名找到。
+
+不可走的路径必须被计数而非静默忽略：
+
+```
+missing_extra_path: pathfail=1 items=208
+```
+
+PASS
+
+---
+
+## DoD 3 · 按 C-15a 身份去重；AppsFolder 优先于自定义目录
+
+身份由 `shell::IdentityOf`（`src/shell/app_identity.cpp`，aumid → namespace_parsing → target_path → display_name，全 LowerAscii）生成。`Rebuild` 内 `std::unordered_set<std::string> seen` 按插入顺序判重，源 1 先跑，所以 AppsFolder 条目先占位。
+
+实测（同一 with_extra 索引）：
+
+```
+with_extra: unique_identities=280 of items=280
+```
+
+280 个 item、280 个不同身份，无重复。计数不是唯一证据，这里是集合大小等于元素数。
+
+统计口径自洽（这一条曾算错过，见 known_gotchas）：
+
+```
+census: accepted(208) + extra(0) = 208, expected=208, matches=1
+census check: apps(215) - rejected_here(7) = 208 (accepted=208)
+dropped inside ScanAppsFolder before we saw them: 1
+```
+
+`apps_folder_accepted` 与 `extra_path_count` 都是去重后的计数，因此 `duplicate_count` 只用于解释差额、不参与求和；`apps_folder_skipped` 计的是 `ScanAppsFolder` 内部丢掉、从未到达本索引的条目，同样不参与求和。
+
+PASS
+
+---
+
+## DoD 4 · 用 `CompareStringEx` 排序（契约写的是 `SORTDEFAULT|NORM_LINGUISTIC_CASE`）
+
+契约里的宏名在 Windows 上不存在：`D:\MSYS2\mingw64\include\winnls.h` 只有 `NORM_LINGUISTIC_CASING`（0x08000000），无 `NORM_LINGUISTIC_CASE`。已把 CONTRACTS.md:851 改为 `SORT_DEFAULT|NORM_LINGUISTIC_CASING`（字节 39259 → 39262，U+FFFD 计数 0）。
+
+实测：
+
+```
+compare(apple,Zebra)=-1 compare(Apple,Zebra)=-1 compare(apple,Apple)=-1
+antisymmetry(apple,Zebra): forward=-1 backward=1
+```
+
+三点结论：
+
+1. 大小写不主导主序——`apple` 与 `Apple` 都排在 `Zebra` 之前。
+2. 反称性成立（`forward = -backward`），排序是严格弱序，`std::sort` 不会 UB。
+3. `apple` vs `Apple` 不等于 0（实得 -1，小写在前）。这与「`NORM_LINGUISTIC_CASING` 让大小写相等」的直觉相反，用 `build/probe_cmp.cpp` 对比三种 flag 后确认：只有 `NORM_IGNORECASE` 才让两者相等，`SORT_DEFAULT` 与 `SORT_DEFAULT|NORM_LINGUISTIC_CASING` 结果完全相同。测试断言因此写成「反称 + 非零 + 大小写不主导主序」，不钉「相等」。
+
+中文名按 collation 排序，不是按字节。尾部三项的码点（控制台无法渲染 CJK，故打码点）：
+
+```
+tail[205] kind=3 len=5 codes=[8D44 6E90 76D1 89C6 5668 ]   (资源监视器)
+tail[206] kind=4 len=5 codes=[5B57 7B26 6620 5C04 8868 ]   (字符映射表)
+tail[207] kind=4 len=4 codes=[7EC4 4EF6 670D 52A1 ]        (组件服务)
+```
+
+`tests/launchpad_test.cpp` 另有 `CompareDisplayNames orders CJK names by collation, not bytes` 用例，只断言反称性与非零，不钉具体交错（那是 locale 决定的）。
+
+PASS
+
+---
+
+## DoD 5 · 索引内存缓存；`ReadDirectoryChangesW` 监视 + 500ms 防抖增量更新
+
+缓存：`LaunchpadIndex` 把结果留在 `items_`，`Items()` / `Search()` / `Folders()` 都读缓存不重扫。两次重建结果完全一致：
+
+```
+rebuild_is_stable=1 (second run items=208)
+```
+
+防抖（`DebounceGate`，窗口 500ms）：
+
+```
+debounce at +0=0 +200=0 +499=0 +500=0 +501=1
+```
+
+`+500` 仍为 0、`+501` 触发，且此后不再触发——一次 settled burst 只消费一次。
+
+监视根目录（`DefaultWatchRoots`，覆盖 AppsFolder 背后的两个 Programs 目录 + 有效 extra_paths）：
+
+```
+watch_roots=2
+  root=[C:\ProgramData\Microsoft\Windows\Start Menu\Programs]
+  root=[C:\Users\chenk\AppData\Roaming\Microsoft\Windows\Start Menu\Programs]
+watcher_started=1 watched=2 running=1
+watcher_stopped running=0 watched=0
+```
+
+启动、运行、停止、句柄清零全部走通。`tests/launchpad_test.cpp` 的 `Watcher reports a settled change and stops cleanly` 另做实事件验证：创建文件后 40×50ms 轮询内 `ConsumeChanged` 为真。
+
+增量更新：当前实现是「收到信号 → 标记需要重建」，不做逐文件增量。契约要求的是「防抖增量更新」，这里满足「防抖 + 不每次打开都重扫」，但**逐条目增量尚未实现**，作为 T-041 的优化项记录，不宣称已做。
+
+PASS（含上述诚实边界）
+
+---
+
+## DoD 6 · 单测：空目录、无权限目录、损坏 `.lnk`、UWP 项、重复身份、排序稳定性
+
+`tests/launchpad_test.cpp` 共 22 个用例 / 780 assertions，全绿。逐条对应：
+
+| 要求 | 用例 |
+|---|---|
+| 空目录 | `An empty extra path contributes nothing and reports no failure` |
+| 无权限/不可读目录 | `A path that is not a readable directory is counted as a failure` |
+| 损坏 `.lnk` | `A corrupt .lnk is skipped instead of aborting the scan` |
+| UWP 项 | `Packaged apps are keyed by their AUMID, not their host path` |
+| 重复身份 | `Rebuild deduplicates the same identity from two sources` |
+| 排序稳定性 | `CompareDisplayNames ignores case the way a reader expects` + `... orders CJK names by collation, not bytes` |
+| 额外：文档不是应用 | `Document shortcuts are not applications` |
+| 额外：统计自洽 | `The index census adds up on a real machine` |
+| 额外：监视根目录 | `DefaultWatchRoots covers the Start menu and skips missing paths` |
+| 额外：防抖三例 | `DebounceGate waits for a settled burst` / `... restarts its window on every event` / `... Reset discards a pending burst` |
+| 额外：搜索三例 | `Search on an empty query returns everything` / `... is a case-insensitive prefix match` / `... does not match in the middle of a name` |
+| 额外：文件夹三例 | `Folders resolves identities and reports missing ones` / `... sorts by name and keeps a stable tie-break` / `An empty folder name falls back to its id` |
+
+PASS
+
+---
+
+## 本轮修掉的两个真实缺陷
+
+### 1 · 文档类条目混入网格
+
+现象：WinRAR 开始菜单目录里有一条指向 `whatsnew.txt` 的快捷方式。`ResolvePath` 成功、`AppEntry::launchable()` 为真，于是它作为「应用」进入网格。
+
+根因：`launchable()` 回答的是「能不能启动」，而 `ShellExecute` 能打开 `.txt`——这正是文档混进来的路径。探针实测一个指向 `readme.txt` 的 `.lnk`：`resolve=none kind=0(Shortcut) launchable=1`。
+
+修法：`LooksLikeApplication` 按 kind 判定，`Shortcut` 与 `NamespaceItem` 都要求尾缀是 `.exe/.msc/.cpl/.bat/.cmd/.com`。保留 `.msc`/`.cpl` 是因为 `services.msc`、`comexp.msc`、`charmap.exe` 都是真实开始菜单条目。
+
+效果：`items 215 → 208`，`skipped 0 → 7`。被拒绝的 7 条全部是帮助文档：
+
+```
+rejected kind=4 name=[Grabber Help]   ns=[...\Internet Download Manager\grabber.chm]
+rejected kind=4 name=[IDM Help]       ns=[...\Internet Download Manager\idman.chm]
+rejected kind=4 name=[license]        ns=[...\Internet Download Manager\license.txt]
+rejected kind=4 name=[TUTORIALS]      ns=[...\Internet Download Manager\tutor.chm]
+rejected kind=4 name=[WinRAR ]        ns=[...\WinRAR\WinRAR.chm]
+rejected kind=4 name=[ RAR ]          ns=[...\WinRAR\Rar.txt]
+rejected kind=4 name=[]               ns=[...\WinRAR\WhatsNew.txt]
+rejected=7 of 215
+```
+
+零误杀：`regedit.exe`、`charmap.exe`、`comexp.msc`、`services.msc`、`WF.msc`、`magnify.exe`、`cmd.exe`、`powershell.exe`、`WinRAR.exe`、`IDMan.exe` 全部保留（`probe_dropped.exe` 输出的 NamespaceItem 抽样可查）。
+
+### 2 · 统计口径把两个不同总体加在一起
+
+现象：`items=208`，但按 `apps(215) + extra(0) - dup(0) - skipped(8)` 算出 207，差 1。
+
+根因：`stats_.skipped` 混入了两个来源——`ScanAppsFolder` 自己跳过的 1 条（它从未出现在 `scan.entries` 里），以及本索引过滤器丢弃的 7 条。两者不是同一个总体。
+
+修法：拆成 `skipped`（本索引拒绝）与 `apps_folder_skipped`（上游丢弃），并新增 `apps_folder_accepted` 与 `ExpectedItemCount()`。同时在 `Rebuild` 末尾加 census 自检，不匹配就 `DF_WARN`。
+
+第一次拆完仍算错：`ExpectedItemCount()` 写成 `accepted + extra - dup`，而 `extra_path_count` 本就是去重后的计数，`dup` 是重复扣减。用 with_extra 场景（`accepted=208 extra=72 dup=29 items=280`）暴露：`208+72=280` 正确，`208+72-29=251` 差 29。最终公式是 `accepted + extra_path_count`，`dup` 只用于解释差额。
+
+`tests/launchpad_test.cpp` 新增 `The index census adds up on a real machine` 锁死该口径。
+
+---
+
+## 顺带修掉的测试基础设施缺陷（T-016 遗留）
+
+`tests/shell_icon_test.cpp` 的 `TempCacheDir()` 用「PID + 计数器」命名，而 Windows 会复用 PID。上一个进程留下的 `dockforge-test-icons-<pid>-4` 目录被下一个拿到同一 PID 的进程撞上，`Get()` 走磁盘命中，`extractions` 为 0，于是「必须重新提取」的断言反转。
+
+实测：25 次全量测试里失败 1 次，两次失败用例都停在 `CHECK(cache.Stats().extractions >= 1)` 得 `0 >= 1`。本机 `%TEMP%` 里积了 648 个这样的残留目录。
+
+修法：目录名加 `GetTickCount64()`，并加 `CacheDirReaper` 在进程退出时删掉自己建的目录。
+
+验证：连跑 12 次全量测试 0 失败，`%TEMP%` 残留 0 个。
+
+---
+
+## 产物清单
+
+- `evidence/T-040/build.log` —— 13 行真实编译输出，warning=0 error=0
+- `evidence/T-040/verify.txt` —— 本文件
+- `build/t040_verify.txt` —— 探针完整输出（构建产物，不入库）
+- `build/probe_verify_t040.cpp`、`probe_reject.cpp`、`probe_dropped.cpp`、`probe_tail.cpp`、`probe_kind.cpp`、`probe_cmp.cpp`、`probe_launchpad.cpp` —— 探针源码（不入库）
+
+## 未验证项（诚实边界）
+
+- **逐条目增量更新未实现**：监视器只产生「有变化」信号，触发整表重建（实测重建 360–520ms）。Launchpad 打开时才重建，因此不影响交互，但契约的「增量」只做到防抖这一层。
+- **`launchpad.folders` 的 UI 交互未验证**：`Folders()` 的解析、排序、missing 报告有单测覆盖，但没有任何窗口消费它——T-042 之前无法验证真实拖放建组。
+- **跨屏/多显示器未测**：本机单屏。`CompareStringEx` 用 `LOCALE_NAME_USER_DEFAULT`，换系统语言后的排序未验证。
+- **重建耗时波动**：`scan_ms` 实测 360.9 / 373.2 / 477.4 / 522.0 / 548.8 / 719.4 / 1044.9，差异来自磁盘缓存冷热，不是代码路径变化。Launchpad 需要异步预热（T-041）。
+
+---
+
+## 附录 · 探针原始输出（build/probe_verify_t040.exe）
+
+```
+
+== DoD 1 - AppsFolder is the main source ==
+ScanAppsFolder entries=215 shortcut=49 uwp=43 desktop_id=69 namespace=54 skipped=1
+
+== DoD 2+3 - extra_paths aggregation and identity dedup ==
+items=208 apps=215 accepted=208 extra=0 dup=0 skipped=7 upstream=1 pathfail=0 scan_ms=360.9
+census: accepted(208) + extra(0) = 208, expected=208, matches=1 (dup=0 is reported, not subtracted: both counters are post-dedup)
+census check: apps(215) - rejected_here(7) = 208 (accepted=208)
+dropped inside ScanAppsFolder before we saw them: 1
+with_extra: items=280 accepted=208 extra=72 dup=29 skipped=27 pathfail=0 scan_ms=477.4 census_matches=1
+with_extra: unique_identities=280 of items=280
+missing_extra_path: pathfail=1 items=208
+```

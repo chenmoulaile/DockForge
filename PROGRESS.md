@@ -175,4 +175,20 @@
   6. 探针进程未设 DPI awareness 时 `GetWindowRect` 与 `CopyFromScreen` 都返回虚拟化坐标——实测 dock 真实 1334,1595 214x214 被报成 667,798 107x107，所有截图落在屏幕另一半。必须 `SetProcessDpiAwarenessContext(-4)`。
 - 环境事实：单屏 2880x1920@192 DPI（raw 243），work=0,0,2880,1824。多窗口 Win32 app 只有 7-Zip（3-10 窗口，`7-Zip::FM`）与 explorer（`CabinetWClass` 但 tile 走 AUMID 空间，属 C-14f 记录的真实归属）。Sublime/Chrome 无法开出第二窗口（`--new-window`/`-n`/`AttachThreadInput+Ctrl+Shift+N` 均无效）。Notepad 是 UWP，`GetApplicationUserModelId` 对 notepad.exe 返回 `0x00003D57`（APPMODULE_ERROR_NO_APPLICATION）。
 - 证据：`evidence/T-016/`（verify.txt 五条 DoD 逐条 + build.log + hover_bench.txt + preview_handles.txt + 顶层与 four/minimized/ten/uwp 四个子目录的 dwell 日志与对照 PNG）。
-- 下轮开始于：解决 P1/P2 brief 的栈假设冲突，然后 T-040
+- 下轮开始于：T-041 Launchpad 全屏窗口与网格渲染
+
+## T-040 · Launchpad 应用索引器（DONE）
+
+`src/shell/launchpad_index.{h,cpp}` 新建：三来源聚合（AppsFolder / `launchpad.extra_paths` / `launchpad.folders`）、按 C-15a 身份去重、`CompareStringEx` collation 排序、内存缓存、`ReadDirectoryChangesW` 监视 + 500ms 防抖。`src/shell/app_identity.{h,cpp}` 把身份规则从 `src/dock/tile_order.cpp` 抽到 shell（C-06 要求 shell 不依赖 dock），dock 侧保留同名薄包装。
+
+- 实测（本机 2880x1920@192 DPI）：`ScanAppsFolder entries=215 shortcut=49 uwp=43 desktop_id=69 namespace=54 skipped=1`；`items=208 accepted=208 skipped=7 upstream=1 pathfail=0 scan_ms=360.9`。灌入机器级 Programs 目录后 `items=280 extra=72 dup=29 unique_identities=280`，集合大小等于元素数，去重成立。
+- 重建耗时实测 360.9 / 373.2 / 477.4 / 522.0 / 548.8 / 719.4 / 1044.9 ms，差异来自磁盘缓存冷热。分段计时：`ScanAppsFolder 513.2ms` / `FindShortcuts 5.0ms` / `ResolvePath 119 of 121 in 127.3ms`——AppsFolder 扫描占 93%，所以 Launchpad 必须异步预热，不能打开时同步扫。
+- 两个真实缺陷：
+  1. **文档混入网格**。WinRAR 开始菜单目录有一条指向 `whatsnew.txt` 的快捷方式，`ResolvePath` 成功、`launchable()` 为真（探针实测 `resolve=none kind=Shortcut launchable=1`），于是作为应用进入网格。`launchable()` 回答的是「能不能启动」，而 ShellExecute 能打开 `.txt`。修法：`LooksLikeApplication` 按 kind 分派，`Shortcut` 与 `NamespaceItem` 都要求目标尾缀是 `.exe/.msc/.cpl/.bat/.cmd/.com`。效果 `items 215→208`，被拒的 7 条全是 IDM/WinRAR 的 `.chm`/`.txt` 手册，零误杀（`regedit.exe`/`charmap.exe`/`comexp.msc`/`services.msc` 全保留）。
+  2. **统计口径混算两个总体**。`stats_.skipped` 同时收了 `ScanAppsFolder` 内部丢的 1 条与索引内拒的 7 条，导致 `215-8=207` 而 `items=208` 差 1。拆成 `skipped`（本索引拒绝）与 `apps_folder_skipped`（上游丢弃），新增 `apps_folder_accepted` 与 `ExpectedItemCount()`，`Rebuild` 末尾加 census 自检。第一次拆完仍算错：`ExpectedItemCount()` 写成 `accepted+extra-dup`，而 `extra_path_count` 本就 post-dedup，`dup` 是重复扣减（with_extra 场景 `208+72=280` 正确，`208+72-29=251` 差 29）。最终公式 `accepted+extra_path_count`，`dup` 只用于解释差额。
+- 契约错误：CONTRACTS.md:851 原写 `NORM_LINGUISTIC_CASE`，该宏在 Windows 头里不存在（`winnls.h` 只有 `NORM_LINGUISTIC_CASING 0x08000000`）。已改。用 `build/probe_cmp.cpp` 对比三种 flag 后确认：`SORT_DEFAULT` 与 `SORT_DEFAULT|NORM_LINGUISTIC_CASING` 对 `apple`/`Apple` 结果完全相同（都是 -1，小写在前），只有 `NORM_IGNORECASE` 才让两者相等——所以「大小写不敏感排序」的直觉断言 `==0` 是错的，测试改成「反称 + 非零 + 大小写不主导主序」。
+- 监视器三个内存安全缺陷：① 把事件 `HANDLE` 强转 `LPOVERLAPPED` 传给 `ReadDirectoryChangesW`（内核会往句柄值当地址写状态）；② `vector<Watch>` by-value + 先 arm 再 `push_back`，扩容后内核仍写旧栈地址，监视器永不触发；③ 线程循环用局部 scratch buffer，上一次未完成时被下一次复用。最终形态：每个 Watch 自有 `OVERLAPPED` + 64KB buffer，`vector<unique_ptr<Watch>>` 保证地址稳定，`~Watch` 先 `CancelIoEx` 再 `CloseHandle`，单线程 `WaitForMultipleObjects` 服务所有 root。
+- 测试：`tests/launchpad_test.cpp` 22 例 / 780 assertions（空目录、不可读路径、损坏 `.lnk`、UWP AUMID 键、重复身份、排序稳定性、防抖三例、搜索三例、文件夹三例、文档拒绝、census 自洽、watch roots）。全量 `All tests passed (2681 assertions in 225 test cases)`。
+- 顺带修掉 T-016 遗留的测试基础设施缺陷：`tests/shell_icon_test.cpp` 的 `TempCacheDir()` 用「PID + 计数器」命名，Windows 复用 PID 会撞上上一轮遗留目录 → 磁盘命中 → `extractions=0` → 「必须重新提取」断言反转。实测 25 次全量里失败 1 次，本机 `%TEMP%` 积压 648 个残留目录。修法：名字加 `GetTickCount64()`，加 `CacheDirReaper` 退出时清理。连跑 12 次全量 0 失败、残留 0 个。
+- 证据：`evidence/T-040/`（build.log 13 行 warning=0 error=0；verify.txt 六条 DoD 逐条 + 两个缺陷根因 + 诚实边界 + 探针原始输出附录）。
+- 诚实边界：逐条目增量更新未做（监视器只产生「有变化」信号，触发整表重建）；`launchpad.folders` 的 UI 交互未验证（T-042 之前无窗口消费）；跨屏与换系统语言的排序未测。

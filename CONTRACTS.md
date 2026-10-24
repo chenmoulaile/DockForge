@@ -848,7 +848,7 @@ Launchpad 的应用列表由三个来源合并，优先级从上到下：
 
 **排序**
 
-默认按显示名做 `CompareStringEx` 的 `SORTDEFAULT|NORM_LINGUISTIC_CASE` 排序，不做 ASCII 排序——中文名与大小写混排必须符合用户预期。文件夹排在应用之前，文件夹内部按同样规则排序。
+默认按显示名做 `CompareStringEx` 的 `SORT_DEFAULT|NORM_LINGUISTIC_CASING` 排序，不做 ASCII 排序——中文名与大小写混排必须符合用户预期。文件夹排在应用之前，文件夹内部按同样规则排序。
 
 **文件监视**
 

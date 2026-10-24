@@ -12,7 +12,7 @@
 | M0 | 骨架与验证 | 构建链路、窗口、渲染、配置、图标、布局数学全部跑通 | DONE（T-006a 帧尾延迟仍 TODO P1） |
 | M1 | Dock 核心 | 可用的 Dock 栏（放大、启动、指示、拖拽、缩略图） | DONE（T-009..T-016 全部 DONE） |
 | M2 | Finder Bar | 顶部栏 | TODO |
-| M3 | Launchpad | 全屏网格启动器 | TODO |
+| M3 | Launchpad | 全屏网格启动器 | IN_PROGRESS |
 | M4 | 配置与主题 | 热重载 + 主题包 | TODO |
 | M5 | 系统集成 | 自启、隐藏任务栏、转储、日志轮转 | TODO |
 | M6 | Stage Manager | 窗口分组与切换 | TODO |
@@ -315,20 +315,21 @@
 ## M3 · Launchpad（P1）
 
 ### T-040 · Launchpad 应用索引器
-- 状态: TODO
+- 状态: DONE
 - 优先级: P1
 - 依赖: T-006（应用解析与图标提取）
 - 预估: 1 会话
 - 上下文: `src/shell/`、`CONTRACTS.md#C-08`、`CONTRACTS.md#C-18`
 - 契约: C-18
 - DoD:
-  - [ ] 复用 `shell::ScanAppsFolder()` 作为主来源，不另写枚举
-  - [ ] 聚合 `launchpad.extra_paths`（每项递归 `shell::FindShortcuts(root, 4)`）
-  - [ ] 按 C-15a 身份去重；AppsFolder 优先于自定义目录
-  - [ ] 用 `CompareStringEx(SORTDEFAULT|NORM_LINGUISTIC_CASE)` 排序
-  - [ ] 索引结果内存缓存；`ReadDirectoryChangesW` 监视 + 500ms 防抖增量更新
-  - [ ] 单测：空目录、无权限目录、损坏 `.lnk`、UWP 项、重复身份、排序稳定性
+  - [x] 复用 `shell::ScanAppsFolder()` 作为主来源，不另写枚举
+  - [x] 聚合 `launchpad.extra_paths`（每项递归 `shell::FindShortcuts(root, 4)`）
+  - [x] 按 C-15a 身份去重；AppsFolder 优先于自定义目录
+  - [x] 用 `CompareStringEx(SORTDEFAULT|NORM_LINGUISTIC_CASING)` 排序（契约原写 `NORM_LINGUISTIC_CASE`，该宏不存在，已改）
+  - [x] 索引结果内存缓存；`ReadDirectoryChangesW` 监视 + 500ms 防抖（逐条目增量未做，只做「有变化→整表重建」，见 evidence/T-040/verify.txt 诚实边界）
+  - [x] 单测：空目录、无权限目录、损坏 `.lnk`、UWP 项、重复身份、排序稳定性
 - 证据: `evidence/T-040/`
+- 实测: `items=208 apps=215 accepted=208 skipped=7 upstream=1 scan_ms=360.9`；with_extra `items=280 extra=72 dup=29 unique=280`；`All tests passed (2681 assertions in 225 test cases)`
 
 ### T-041 · Launchpad 全屏窗口与网格渲染
 - 状态: TODO
