@@ -944,3 +944,104 @@ Dock 右侧的 Stage Manager 入口是普通 tile，点击发事件；Stage Mana
 **降级顺序**（沿用 ADR-0008）：`mica → acrylic → blur → solid`，只降不升，`MaterialRestored` 时一次性恢复到用户配置的等级。
 
 **所有使用材质的窗口必须订阅**，不得各自轮询电源状态——否则同一台机器上不同窗口会在不同帧降级，视觉上割裂。
+
+## C-22 Dock 图标叠加层视觉规范（P1.5 冻结）
+
+```
+叠加层类型: message_badge | progress_bar | weather_text | pulse
+红点尺寸: 图标宽度的 28%，最小 10px@100%DPI
+数字字号: 图标宽度的 22%，最小 9pt
+进度条高度: 4px@100%DPI，位于图标底部内侧，圆角 2px
+颜色: 跟随系统强调色；错误态 #E81123；暂停态 #FFB900
+叠加层不得遮挡图标主体超过 25% 面积
+```
+
+- 四类叠加层互斥优先级：`message_badge` > `progress_bar` > `weather_text` > `pulse`。同一图标同时有多类时只画最高优先级那一个，不做并排。
+- 叠加层与 C-11 的图标绘制同源：几何来自 `DockPainter` 的 `LayoutSummary`，不得另算一套坐标。
+- 叠加层不参与命中测试：点击图标永远是激活应用，不是点叠加层。
+- 红点与数字的取舍：`count <= 9` 画数字，`count > 9` 画 `9+`，`count == 0` 不画。
+- 脉冲（`pulse`）只用于 T-076 通知到达提示，时长 320ms、两次、不循环。
+
+## C-23 硬件控制事件（P1.5 冻结）
+
+```
+事件名: VolumeChanged, MediaSessionChanged, RadioStateChanged, SystemStatsUpdated
+载荷: { device_id, session_id, value, ... }
+采样频率: 音量/媒体实时（事件驱动），系统统计 ≤ 0.5Hz
+```
+
+- `VolumeChanged { std::wstring device_id; std::wstring session_id; float level; bool muted; }`：`session_id` 为空表示端点级（`IAudioEndpointVolume`），非空表示进程级（`ISimpleAudioVolume`）。
+- `MediaSessionChanged { std::wstring session_id; std::wstring title; std::wstring artist; bool playing; }`。
+- `RadioStateChanged { int radio_kind; bool on; }`（`radio_kind` 用 `Windows.Devices.Radios.RadioKind` 的数值：0=其他 1=WiFi 2=移动宽带 3=蓝牙）。
+- `SystemStatsUpdated { float cpu_percent; float memory_percent; unsigned long long memory_used_bytes; unsigned long long memory_total_bytes; }`。
+- 采样频率上限：系统统计 0.5Hz（2 秒一次），空闲 CPU 增量必须 < 0.3%（PERFORMANCE.md 预算）。**禁止**在渲染路径上采样。
+- 所有控制调用失败必须上报事件或面板内错误提示，不得静默吞掉 `HRESULT`。
+
+## C-24 热键与热区配置（P1.5 冻结）
+
+```
+hotkeys:  [{ id, modifiers, vk, action, enabled }]
+hotspots: [{ edge: top|bottom|left|right, corner: tl|tr|bl|br|null,
+             size_px, action, enabled }]
+所有热键/热区默认 enabled=false
+```
+
+- `id` 为稳定字符串（≤64 字符，`[a-z0-9_.-]`），用于导入/导出匹配，不得用序号。
+- `modifiers` 为位掩码（`MOD_ALT=1`、`MOD_CONTROL=2`、`MOD_SHIFT=4`、`MOD_WIN=8`）；注册时**必须**或上 `MOD_NOREPEAT=0x4000`。
+- `vk` 为虚拟键码（1..254）。
+- 热键注册失败（`RegisterHotKey` 返回 FALSE）必须读 `GetLastError`，`ERROR_HOTKEY_ALREADY_REGISTERED=1409` 提示"已被其他程序占用"，其余错误原样上报错误码。
+- 进程退出时**必须** `UnregisterHotKey` 全部已注册热键；已在 T-041 的 `kLaunchpadHotkeyId=0x4C50` 建立了先例。
+- 热区 `size_px` 范围 1..256，`corner` 为 `null` 表示整条边。
+- 热区触发只允许两种实现：`GetCursorPos` + ≤10Hz 定时器，或 `WH_MOUSE_LL` 低级钩子。**禁止**高频轮询（>10Hz）与 `WH_MOUSE`（非 LL）全局钩子。
+
+## C-25 消息计数适配器接口（P1.5 冻结）
+
+```
+interface IMessageCounterAdapter {
+  string TargetAppId();          // AUMID 或进程名（lowercase）
+  bool   Initialize();
+  void   Shutdown();
+  event  CountChanged(int count);
+  int    CurrentCount();
+}
+适配器失败时返回 0，不得抛出异常到 Dock 主循环
+```
+
+- 适配器注册/注销由 `MessageCounterHost` 统一管理；一个 `TargetAppId` 只允许一个适配器，重复注册保留首条并 WARN。
+- `Initialize()` 返回 false 视为不可用，`MessageCounterHost` 静默跳过该适配器并记一次 WARN，不重试。
+- 目标进程退出时 `CurrentCount()` 必须返回 0 并触发一次 `CountChanged(0)`。
+- **禁止**：读取聊天内容、hook 目标进程内存、打包任何逆向工程产物（ADR-0022）。
+- 每个适配器必须可在设置窗口单独开关（C-01 增 `integrations.message_counts.<adapter_id>.enabled`）。
+
+## C-26 发布物清单与命名规范（P3 冻结）
+
+```
+DockForge-<version>-x64.msix
+DockForge-<version>-arm64.msix
+DockForge-<version>.msixbundle
+DockForge-<version>-portable-x64.exe        # Inno Setup 单文件
+DockForge-<version>.appinstaller
+SHA256SUMS.txt
+```
+
+- `<version>` 为 SemVer 2.0.0 且**不带** `v` 前缀（tag 带 `v`，文件名不带）。
+- 所有二进制资产必须同时出现在 GitHub Release 与 `SHA256SUMS.txt`；校验和文件本身不入 `SHA256SUMS.txt`。
+- MSIX 与 `.msixbundle` 使用自签名测试证书，Release 页面必须显式标注"自签名证书需手动信任，未通过 Microsoft Store 分发"（ADR-0029）。
+- 便携版为首选分发格式；MSIX 为次要。
+- 每个 Release 必须附 `CHANGELOG.md` 中对应版本条目作为 Release Notes 正文。
+
+## C-27 公开仓库排除清单（P3 冻结）
+
+**必须排除**（`.gitignore` 从首次 commit 起生效，历史用 `git filter-repo` 清理）：
+- `evidence/`（开发过程证据）
+- `spikes/`（技术探针，默认不公开）
+- `build/`、`out/`、`vcpkg_installed/`、`.vs/`、`*.user`、`*.dmp`
+- 大于 20MB 的二进制（`*.mp4` 等演示视频走 Release 附件或外链）
+- 含个人路径、机器名、内网地址的文件
+
+**必须包含**：
+- `PROMPT.md`（可作为 `docs/agent-workflow.md` 公开，作为 AI 辅助开发的透明化说明）
+- `CONTRACTS.md`、`DECISIONS.md`、`PERFORMANCE.md`、`COMPATIBILITY.md`
+- 完整 `src/`、`tests/`、`themes/`、`tools/`、`.github/`
+
+清理前必须先完整备份（`git bundle` 或目录复制），清理后必须全新克隆验证可构建（T-151）。

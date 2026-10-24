@@ -557,6 +557,366 @@
 
 ---
 
+
+## P1.5 · 深度集成与差异化
+
+**阶段入口条件**：Dock 悬停放大、缩略图、Launchpad 基础网格已稳定（T-009..T-041 已 DONE）。
+**阶段设计原则**：消息计数、任务栏进度、文件夹穿透三项必须 spike 先行，验证不通过则降级为可选插件而非硬编码进主流程；硬件控制与热键系统风险较低可并行；天气与通知中心放在末尾，不阻塞核心差异化功能。
+
+### T-065 · 消息计数适配框架（P1 · 高风险）
+
+- 状态: TODO
+- 依赖: T-040（索引稳定）、C-01 配置 schema
+- 上下文: `src/shell/`、`ADR-0022`
+- DoD:
+  - [ ] **Spike 先行**：`spikes/T-065_notification_probe/` 验证 `UserNotificationListener`（WinRT）对目标应用（微信 UWP / QQ Win32 / Discord 至少其一）的通知可见性；不可见则记 `BLOCKERS.md` 并评估窗口标题解析 / UIA 替代路径
+  - [ ] 适配器模式：`IMessageCounterAdapter` 接口，每目标应用一个实现，互不影响（C-25）
+  - [ ] 第一阶段只支持 1–2 个目标，不追求全覆盖
+  - [ ] 计数渲染到 Dock 图标右上角红点/数字叠加层，遵循 C-22
+  - [ ] 适配器失败或目标未运行时静默降级，不崩溃、不阻塞 Dock
+  - [ ] 设置窗口中可单独开关每个适配器
+  - [ ] 单测：适配器注册/注销、计数归零、目标进程退出
+- 证据: `evidence/T-065/`
+
+### T-066 · Dock 文件夹穿透浏览器（P1 · 中高风险）
+
+- 状态: TODO
+- 依赖: T-014（拖拽基础）、T-040（身份规则）
+- 上下文: `src/dock/`、`ADR-0023`
+- DoD:
+  - [ ] **Spike 先行**：`spikes/T-066_shellfolder_enum/` 验证 `IShellFolder::EnumObjects` + `IEnumIDList` 枚举显示名、图标、PIDL
+  - [ ] Dock 文件夹图标左键点击时在 Dock 上方弹出内嵌文件列表（不是打开资源管理器）
+  - [ ] 二级目录逐级展开：点击子文件夹在当前面板内钻取，提供返回上级
+  - [ ] 文件名悬停显示完整名称，超长截断
+  - [ ] **拖出支持**：`IDataObject` + `CF_HDROP` 拖到桌面/资源管理器
+  - [ ] 内容变化用 `ReadDirectoryChangesW` 实时刷新，防抖 500ms
+  - [ ] 面板关闭：点击外部或 Esc，不阻塞 Dock 其他交互
+  - [ ] 空文件夹、无权限文件夹显示友好占位，不崩溃
+- 证据: `evidence/T-066/`
+
+### T-067 · 任务栏进度条同步（P1 · 中高风险）
+
+- 状态: TODO
+- 依赖: T-013（运行状态指示）
+- 上下文: `src/shell/`、`ADR-0024`
+- DoD:
+  - [ ] **Spike 先行**：`ITaskbarList3::SetProgressValue/SetProgressState` 是设置接口不是读取；`spikes/T-067_progress_probe/` 验证至少一条读取路径（vtable hook 或目标窗口代理状态轮询）
+  - [ ] hook 不稳定则降级为白名单轮询（资源管理器复制、Chrome 下载），不追求系统级全覆盖
+  - [ ] 进度映射到 Dock 图标底部细进度条，颜色跟随系统强调色（C-22）
+  - [ ] 状态机：正常 / 暂停（#FFB900）/ 错误（#E81123）/ 不确定（脉冲），对应 `TBPF_*`
+  - [ ] 目标窗口销毁时清理进度状态，与 `DwmUnregisterThumbnail` 同侧清理
+  - [ ] 8 小时连续运行无句柄泄漏（`GetGuiResources` 稳态采样，方法同 T-016）
+- 证据: `evidence/T-067/`
+
+### T-068 · MyFinder 硬件控制面板（P1 · 低风险）
+
+- 状态: TODO
+- 依赖: T-050（设置窗口骨架）、T-062（日志基础设施）
+- 上下文: `src/finderbar/`、`C-23`
+- DoD:
+  - [ ] 分程序音量：`IAudioSessionManager2` → `GetSessionEnumerator` + `ISimpleAudioVolume`
+  - [ ] 全局音量/麦克风：`IAudioEndpointVolume`
+  - [ ] 媒体控制：`GlobalSystemMediaTransportControlsSessionManager.RequestAsync()`，播放/暂停/切歌/曲目信息
+  - [ ] WiFi/蓝牙开关：`Windows.Devices.Radios`
+  - [ ] CPU/内存监控：`GetSystemTimes` + `GlobalMemoryStatusEx`，每 2 秒采样，空闲 CPU 增量 < 0.3%
+  - [ ] Finder Bar 中以弹出面板呈现，不常驻占顶部栏
+  - [ ] 控制失败显示 Toast 或面板内错误提示，不静默失败
+- 证据: `evidence/T-068/`
+
+### T-069 · 热区与全局热键系统（P1 · 低风险）
+
+- 状态: TODO
+- 依赖: T-060、T-061
+- 上下文: `src/core/`、`C-24`
+- DoD:
+  - [ ] 封装 `RegisterHotKey` / `UnregisterHotKey`，用 `MOD_NOREPEAT` 防长按重复
+  - [ ] 四类热键：组件显隐、系统控制、显示模式、窗口管理
+  - [ ] 冲突检测：注册失败读 `GetLastError`，设置窗口提示"已被其他程序占用"
+  - [ ] 退出时 `UnregisterHotKey` 全部热键，不残留系统级占用
+  - [ ] 屏幕热区：进入边缘/角落触发动作，大小可配置
+  - [ ] 热区用低频轮询（`GetCursorPos` + 定时器 ≤10Hz）或 `WH_MOUSE_LL`，spike 验证 CPU 占用
+  - [ ] 所有热键与热区默认关闭，设置窗口显式开启
+  - [ ] 热键配置写入 C-24，支持导入/导出
+- 证据: `evidence/T-069/`
+
+### T-075 · 天气小组件（P1 · 低风险）
+
+- 状态: TODO
+- 依赖: T-051（配置热重载）
+- 上下文: `src/dock/`、`ASSETS.md`
+- DoD:
+  - [ ] 高德 Web API：IP 定位 + 实时天气 + 预报；**Key 不硬编码**，存 `%APPDATA%\DockForge\secrets.json`（不入库）
+  - [ ] **无 Key 兜底**：Open-Meteo 公开 API，城市手动指定
+  - [ ] Dock 图标动态渲染：温度作图标文字叠加，天气状态用符号
+  - [ ] 悬停预览显示未来 3 天预报
+  - [ ] 网络请求异步，失败显示占位图标，不阻塞渲染
+  - [ ] 刷新间隔默认 30 分钟可配置，支持手动刷新
+  - [ ] 图标素材自绘或 CC0，登记 `ASSETS.md`
+- 证据: `evidence/T-075/`
+
+### T-076 · macOS 风格通知中心（P1 · 中风险）
+
+- 状态: TODO
+- 依赖: T-065
+- 上下文: `src/notifications/`、`ADR-0025`
+- DoD:
+  - [ ] **Spike 先行**：`UserNotificationListener` 需清单声明 `userNotificationListener` 能力；MSIX 打包前用非打包方式验证可用性，受限则降级为仅显示本应用通知
+  - [ ] 右上角 macOS 风格通知窗，支持堆叠、超时收起、点击跳转
+  - [ ] 通知窗使用与 Dock 一致的材质降级链（C-21）
+  - [ ] 与 Dock 图标红点联动：通知到达时对应图标短暂脉冲
+  - [ ] 通知历史面板（点击 Finder Bar 时钟区域展开），支持清除
+  - [ ] 通知数据仅存内存，不落盘、不采集内容
+- 证据: `evidence/T-076/`
+
+### T-085 · 社区主题分发替代方案（P1 · 低风险）
+
+- 状态: TODO
+- 依赖: T-052（主题加载）
+- 上下文: `ADR-0026`
+- DoD:
+  - [ ] 不绑定 Steam Workshop；基于 GitHub Releases / 静态索引 JSON
+  - [ ] 主题浏览器：拉取远程索引（名称、作者、预览图、下载 URL、SHA256），显示在设置窗口
+  - [ ] 一键安装：下载 `.dockforge-theme`（zip）到 `%APPDATA%\DockForge\themes\<name>\`，校验 SHA256，失败拒绝安装
+  - [ ] 主题包格式遵循 C-02，不得含可执行内容
+  - [ ] 远程索引 URL 可配置，默认指向项目自己的 GitHub Pages 或 Release 资产
+  - [ ] 本地主题管理器：列表、启用/禁用、删除、打开文件夹
+  - [ ] **不实现**评分、评论、订阅推送
+- 证据: `evidence/T-085/`
+
+### P1.5 完成定义
+
+- [ ] 消息计数至少覆盖 1 个目标应用，红点正常，适配器失败不崩溃
+- [ ] Dock 文件夹可展开、二级钻取、拖出，空/无权限友好降级
+- [ ] 任务栏进度至少对白名单应用可用，8 小时无句柄泄漏
+- [ ] 硬件面板：分程序音量、媒体控制、WiFi/蓝牙、CPU/内存全部可用
+- [ ] 全局热键与屏幕热区可配置，默认关闭，冲突检测有效
+- [ ] 天气高德/Open-Meteo 双路径可用，网络失败不阻塞
+- [ ] 通知中心右上角弹出、堆叠、清除可用
+- [ ] 主题浏览器可拉取远程索引并一键安装，SHA256 校验生效
+- [ ] 所有新增能力在设置窗口中可单独开关
+- [ ] 性能增量：空闲 RSS 增量 < 40MB，空闲 CPU 增量 < 0.8%
+
+---
+
+## P3 · v1.0.0 开源发布
+
+**阶段入口条件**（首次会话执行一次，不跳过）：
+1. `STATE.json` 的 `milestone` 为 M2 或以上。
+2. `TASKS.md` 中 P1 全部 `DONE`，P2 中 T-080/T-081/T-082/T-084 至少 `DONE` 或 `BLOCKED`（BLOCKED 需在 `BLOCKERS.md` 有明确记录与推荐动作）。
+3. `DECISIONS_PENDING.md` 中发布相关待决项按 DECISION AUTONOMY 自决；无法自决则 HANDOFF。
+4. 读 `PROGRESS.md` 末 60 行、`BLOCKERS.md`、`git log --oneline -10`、`git status`。
+5. 入口检查失败则输出 `[HANDOFF] 上一阶段未达标，不进入发布阶段`，不做任何改动。
+
+**入口检查实测结论（2026-10-25）**：**未通过**。`milestone=M3` 满足第 1 条；P1 中 T-042 仍 `TODO`，P1.5 全部 `TODO`，P2 的 T-050..T-084 全部 `TODO`（T-080/T-082 记 BLOCKED 但前置 T-079 未做），第 2 条不满足。故 P3 任务队列仅登记，不进入执行。
+
+### T-100 · 遗留 PARTIAL 清理与回归
+
+- 状态: TODO
+- 依赖: 无
+- DoD:
+  - [ ] `TASKS.md` 中所有 PARTIAL 逐条复检，确认 DONE 或降级为 v1.1 backlog 并记录
+  - [ ] 回归 FlaUI 冒烟 8–12 例全绿
+  - [ ] 回归性能基准，Launchpad / Stage Manager / 主题切换 p99 均在预算内
+  - [ ] 回归 DPI 矩阵（100/150/200 + 混合双屏）截图归档
+- 证据: `evidence/T-100/`
+
+### T-101 · 技术债清理
+
+- 状态: TODO
+- 依赖: T-100
+- DoD:
+  - [ ] 全仓库 TODO/FIXME/HACK 清理或归档到 `docs/backlog.md`
+  - [ ] `clang-tidy` + `clang-format` 全量通过并集成 CI
+  - [ ] 编译警告清零
+  - [ ] 无效代码、调试输出、临时文件清理
+- 证据: `evidence/T-101/`
+
+### T-102 · 测试覆盖率补齐
+
+- 状态: TODO
+- 依赖: T-101
+- DoD:
+  - [ ] 核心模块（配置、主题、索引器、布局引擎）单测覆盖率 ≥ 70%
+  - [ ] 覆盖报告归档 `evidence/T-102/`
+  - [ ] CI 中运行单测并上传覆盖率
+- 证据: `evidence/T-102/`
+
+### T-110 · 法律与社区文件
+
+- 状态: TODO
+- 依赖: T-100
+- DoD:
+  - [ ] `LICENSE`（GPL-3.0-or-later 完整文本）
+  - [ ] `NOTICE`（第三方依赖许可汇总）
+  - [ ] `CONTRIBUTING.md`（环境、构建、测试、提交规范、PR 流程）
+  - [ ] `CODE_OF_CONDUCT.md`（Contributor Covenant 2.1）
+  - [ ] `SECURITY.md`（漏洞报告渠道、响应 SLA）
+  - [ ] `docs/legal/third-party-licenses.md` 完整列出依赖与许可
+- 证据: `evidence/T-110/`
+
+### T-111 · README 与文档
+
+- 状态: TODO
+- 依赖: T-110
+- DoD:
+  - [ ] `README.md`：简介、截图/GIF、功能列表、系统要求、下载、安装、配置示例、FAQ、构建、贡献、协议、致谢
+  - [ ] `CHANGELOG.md`（Keep a Changelog，v1.0.0 条目）
+  - [ ] `docs/roadmap.md`、`docs/architecture.md`、`docs/configuration.md`、`docs/themes.md`
+  - [ ] 中英双语（`README.en.md` + `README.md`），至少中文完整
+- 证据: `evidence/T-111/`
+
+### T-112 · GitHub 模板与元数据
+
+- 状态: TODO
+- 依赖: T-111
+- DoD:
+  - [ ] `.github/ISSUE_TEMPLATE/bug_report.yml` + `feature_request.yml` + `config.yml`
+  - [ ] `.github/PULL_REQUEST_TEMPLATE.md`
+  - [ ] 仓库 description、topics
+  - [ ] About 页面链接指向文档站
+- 证据: `evidence/T-112/`
+
+### T-120 · GitHub Actions 构建
+
+- 状态: TODO
+- 依赖: T-101
+- DoD:
+  - [ ] `.github/workflows/build.yml`：push / PR 触发，Windows Server 2022 runner
+  - [ ] 编译 x64 + arm64，产物上传 artifact
+  - [ ] 编译耗时基线记录 `evidence/T-120/`
+  - [ ] 缓存命中率 ≥ 80%
+- 证据: `evidence/T-120/`
+
+### T-121 · GitHub Actions 测试
+
+- 状态: TODO
+- 依赖: T-120
+- DoD:
+  - [ ] `.github/workflows/test.yml`：Catch2 单测 + 覆盖率上传
+  - [ ] FlaUI 冒烟标 `workflow_dispatch` 手动触发（需交互桌面），不阻塞 PR
+  - [ ] 报告以 TRX + Cobertura 上传
+  - [ ] PR 页面展示测试结果
+- 证据: `evidence/T-121/`
+
+### T-122 · GitHub Actions 发布
+
+- 状态: TODO
+- 依赖: T-082、T-083、T-120
+- DoD:
+  - [ ] `.github/workflows/release.yml`：`v*` tag 触发
+  - [ ] 生成 MSIX（x64 + arm64）、`.msixbundle`、Inno Setup 便携版、`.appinstaller`
+  - [ ] 生成 `SHA256SUMS.txt`
+  - [ ] 自动创建 GitHub Release 附全部资产
+  - [ ] Release Notes 从 `CHANGELOG.md` 自动提取
+- 证据: `evidence/T-122/`
+
+### T-123 · 代码质量门禁
+
+- 状态: TODO
+- 依赖: T-120
+- DoD:
+  - [ ] CodeQL 工作流（C++）
+  - [ ] Dependabot 配置
+  - [ ] 分支保护规则文档化到 `docs/branch-protection.md`
+  - [ ] PR 需通过 build + test + CodeQL 才可合并
+- 证据: `evidence/T-123/`
+
+### T-130 · 品牌资产
+
+- 状态: TODO
+- 依赖: 无
+- DoD:
+  - [ ] Logo（SVG 源 + PNG 16/32/64/128/256/512/1024）
+  - [ ] 应用图标 `.ico`（16/24/32/48/64/128/256）
+  - [ ] 品牌色板写入 `docs/branding.md`
+  - [ ] 全部素材来源与许可登记 `ASSETS.md`，优先自绘
+- 证据: `evidence/T-130/`
+
+### T-131 · 展示资产
+
+- 状态: TODO
+- 依赖: T-130
+- DoD:
+  - [ ] 高质量截图 ≥ 8 张（Dock 浅/深、Finder Bar、Launchpad、Stage Manager、设置），DPI 150%
+  - [ ] 演示 GIF ≥ 3 段，每段 ≤ 5 秒、≤ 2MB
+  - [ ] 演示视频 60–90 秒（1080p）
+  - [ ] 资产归档 `assets/branding/` 与 `docs/screenshots/`
+- 证据: `evidence/T-131/`
+
+### T-132 · 文档站
+
+- 状态: TODO
+- 依赖: T-111
+- DoD:
+  - [ ] 基于 MkDocs Material 或 VitePress，源文件在 `docs/`
+  - [ ] GitHub Pages 自动部署（`.github/workflows/docs.yml`）
+  - [ ] 页面：首页、安装、配置、主题制作、架构、Roadmap、FAQ、贡献
+  - [ ] 搜索、暗色模式可用
+- 证据: `evidence/T-132/`
+
+### T-140 · Release Notes 与版本冻结
+
+- 状态: TODO
+- 依赖: T-111、T-122
+- DoD:
+  - [ ] `CHANGELOG.md` 中 v1.0.0 条目完整
+  - [ ] Release Notes 含亮点、已知问题、系统要求、安装说明、升级路径、协议
+  - [ ] 版本号统一更新：`STATE.json`、`CMakeLists.txt`、`Package.appxmanifest`、`appinstaller`、About 页
+  - [ ] 打 tag `v1.0.0` 并推送
+- 证据: `evidence/T-140/`
+
+### T-141 · 发布物验证
+
+- 状态: TODO
+- 依赖: T-140
+- DoD:
+  - [ ] 干净 Win10 21H2 与 Win11 24H2 各装一次 MSIX，启动、卸载、验证无残留
+  - [ ] 便携版解压即用，便携模式配置不写 `%APPDATA%`
+  - [ ] `.appinstaller` 更新源可达，模拟更新路径
+  - [ ] 所有发布物 SHA256 与 Release 页面一致
+  - [ ] 已知兼容问题记入 `COMPATIBILITY.md`
+- 证据: `evidence/T-141/`
+
+### T-150 · 公开仓库创建与推送
+
+- 状态: TODO
+- 依赖: T-140
+- DoD:
+  - [ ] 读 `.dockforge.env` 的 `PUBLIC_REPO` 与 `PUBLIC_VIS`（默认 `public`）；未提供则写 `DECISIONS_PENDING.md` 并停止本任务
+  - [ ] `gh repo create <PUBLIC_REPO> --public --source=. --remote=public --push`
+  - [ ] `gh` 不可用则 `git remote add public <url>` + `git push public main --tags`
+  - [ ] 推送前用 `git filter-repo` 清理历史大文件与敏感文件（先备份）
+  - [ ] 推送 `main`、`dev`、所有 `v*` tag
+  - [ ] 设置 topics：`windows`、`dock`、`macos-style`、`desktop-enhancement`、`cpp`
+  - [ ] 上传 Logo 作社交预览图
+  - [ ] 创建 `v1.0.0` Release 并附加全部资产
+  - [ ] `README.md` 徽章指向新仓库
+- 证据: `evidence/T-150/`
+
+### T-151 · 公开仓库最终核验
+
+- 状态: TODO
+- 依赖: T-150
+- DoD:
+  - [ ] 全新克隆公开仓库到临时目录，按 README 从零构建成功
+  - [ ] 下载 Release 中 MSIX，安装启动成功
+  - [ ] 所有徽章渲染正常
+  - [ ] Actions 在新仓库首次运行全绿（build + test + docs）
+  - [ ] 最终 URL 与 Release 链接写入 `PROGRESS.md` 与 HANDOFF
+- 证据: `evidence/T-151/`
+
+### P3 完成定义
+
+- [ ] 全部 P1 / P1.5 / P2 / P3 任务 `DONE` 或有明确降级记录
+- [ ] FlaUI 冒烟全绿，性能基准 p99 在预算内
+- [ ] LICENSE / README / CONTRIBUTING / CODE_OF_CONDUCT / SECURITY / CHANGELOG / Roadmap 齐全
+- [ ] GitHub Actions：build、test、release、docs、CodeQL 全绿
+- [ ] Logo、截图、演示 GIF/视频全部就位并登记许可
+- [ ] v1.0.0 tag 已打，Release 页面资产完整
+- [ ] 新公开仓库已创建，全量推送成功，全新克隆可构建
+- [ ] 最终 URL 与 Release 链接写入 `PROGRESS.md` 与 HANDOFF
+
+
 ## 会话结束模板
 
 ```

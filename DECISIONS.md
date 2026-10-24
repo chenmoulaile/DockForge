@@ -676,3 +676,65 @@ P1/P2 阶段的任务书假设本项目是 WinUI 3 + Windows App SDK 应用，�
 - 任务书里的 `ItemsRepeater` / `UniformGridLayout` / `NavigationView` 这些具体控件不存在，对应的 DoD 改写为「自绘网格 + 自绘分区列表」，验收标准（列数自适应、单页 35 项、p99 < 16.7ms）保持不变。
 - T-080 与 T-082 在本阶段很可能停在 `BLOCKED`。这是环境事实，不是未完成；STOP_CONDITIONS 允许 `BLOCKED` 且已记录。
 - 后续若人类决定安装 MSVC + Windows SDK + Windows App SDK，本 ADR 可被新 ADR 取代，届时 Launchpad 与设置窗口需要重写——这个成本现在就该被看见。
+
+## ADR-0022 · 消息计数优先走 UserNotificationListener，不可见则逐应用适配器
+
+- **决策**：优先用 `UserNotificationListener` 获取系统通知列表并按应用聚合未读数；对 `UserNotificationListener` 不可见的应用，建立**逐应用适配器**（C-25），不追求通用方案。MyDockFinder 的消息计数算法为原创且无公开接口，本项目不逆向其实现。
+- **理由**：`UserNotificationListener` 是唯一有文档保证的系统级未读来源；一旦某个应用不向它上报，唯一可靠信息只能来自该应用自己的可观测面（窗口标题、UIA 树、自有协议）。做通用 hook 会在每个目标进程里制造崩溃面。
+- **后果**：覆盖范围天生不完整，必须靠 C-25 的"失败静默降级"和设置窗口的逐适配器开关兜住；T-065 的 spike 必须先证明至少一个目标可用，否则整项降级为可选插件。
+- **禁止**：不得读取聊天内容、不得 hook 目标进程内存、不得打包任何逆向工程产物。
+
+## ADR-0023 · 文件夹穿透用 IShellFolder 枚举 + IDataObject 拖出，不做 NSE
+
+- **决策**：用 `IShellFolder::EnumObjects` + `IEnumIDList` 枚举文件夹内容，`IDataObject` + `CF_HDROP` 支持拖出；不实现完整的 Shell 命名空间扩展（NSE），只做 Dock 内的轻量文件浏览器。
+- **理由**：`IShellFolder` 已经提供显示名、图标、PIDL 三个必需项，且与资源管理器同源（不会出现名称/图标不一致）；NSE 需要注册全局 Shell 扩展，安装/卸载成本与崩溃面都远超收益。
+- **后果**：不支持虚拟命名空间里的自定义列、排序规则、右键菜单；面板只能是"轻量浏览器"，不能替代资源管理器。
+- **禁止**：不得替换资源管理器，不得注册全局 Shell 扩展。
+
+## ADR-0024 · 任务栏进度优先读 ITaskbarList3 代理状态，不稳定则白名单轮询
+
+- **决策**：`ITaskbarList3::SetProgressValue/SetProgressState` 是**设置**接口，读取必须先证明可行。优先尝试读目标窗口的 `ITaskbarList3` 代理状态；若 spike 证明不稳定，降级为白名单轮询（资源管理器复制、Chrome 下载等已知可观测的应用）。进度只读，不反向修改系统任务栏。
+- **理由**：vtable hook 需要在目标进程里改内存，与 ADR-0022 的禁止项同类；白名单虽然覆盖窄，但完全无侵入。
+- **后果**：T-067 的 DoD 允许"白名单可用"即算达标，不追求系统级全覆盖；8 小时无句柄泄漏必须实测。
+- **禁止**：不得向系统任务栏注入任何内容。
+
+## ADR-0025 · 通知中心内容仅内存驻留，能力受限时只显示本应用通知
+
+- **决策**：通知内容仅内存驻留，不落盘、不上传。`UserNotificationListener` 能力受限（MSIX 打包前无法声明 `userNotificationListener` 能力）时，降级为仅显示本应用产生的通知。
+- **理由**：通知正文是最敏感的一类数据；一旦落盘就要回答加密、清理、备份、迁移四个问题，收益远小于风险。
+- **后果**：通知历史面板在进程重启后清空，这是设计而非缺陷；必须在文档里写明。
+- **禁止**：不得申请超出必要的系统能力。
+
+## ADR-0026 · 社区主题分发基于 GitHub Releases + 静态 JSON 索引，不绑定 Steam Workshop
+
+- **决策**：主题分发用 GitHub Releases 承载 `.dockforge-theme` 包，配一个静态 JSON 索引（名称、作者、预览图、下载 URL、SHA256）。一键安装到 `%APPDATA%\DockForge\themes\<name>\`，SHA256 校验失败拒绝安装。主题包禁止包含可执行代码（与 ADR-0006 / C-02 一致）。
+- **理由**：Workshop 绑定 Steam 平台，与"Windows 桌面增强工具"的分发渠道冲突；静态索引零运维成本，且索引本身可以放在仓库 Pages 上。
+- **后果**：没有评分、评论、订阅推送——这些是 Workshop 的社交功能，v1.0 不做；索引被投毒的风险由 SHA256 + 人工 review 兜住。
+- **禁止**：v1.0 不实现社交功能。
+
+## ADR-0027 · 开源协议选 GPL-3.0-or-later
+
+- **决策**：`GPL-3.0-or-later`。
+- **理由**：项目目标是长期的社区桌面增强工具，GPL 防止闭源分支滥用；若未来需更宽松可迁移至 MIT 并保留历史（属可自决）。
+- **禁止**：不得使用未经 OSI 认证的自定义协议；不得包含"仅供学习"等模糊条款。
+
+## ADR-0028 · 公开仓库与私有仓库同名、同结构，历史先清理再推送
+
+- **决策**：公开仓库与现有仓库同名（`DockForge`），结构一致；`main` 为发布分支，`dev` 为开发分支，`release/vX.Y.Z` 为发布分支。推送前用 `git filter-repo` 清理 `evidence/`、`spikes/`、`build/`、`vcpkg_installed/` 等开发过程产物（排除清单见 C-27）。
+- **理由**：同名同结构让"私有开发 → 公开发布"不需要维护两套路径假设；清理历史比"从零重建仓库"更安全，因为 tag 与 Release 需要历史。
+- **后果**：清理后所有 commit hash 都会变，必须在清理前打 `git bundle` 备份；清理后必须全新克隆验证可构建（T-151）。
+- **禁止**：不得把 `evidence/`、`spikes/`、`build/`、`vcpkg_installed/` 推入公开仓库。
+
+## ADR-0029 · v1.0.0 用自签名测试证书发 MSIX，Inno Setup 便携版为首选
+
+- **决策**：v1.0.0 用自签名测试证书发布 MSIX，Release 页面明确标注"未通过 Microsoft Store 分发，自签名证书需手动信任"；同时提供 Inno Setup 便携版作为**首选**分发格式。
+- **理由**：商业代码签名证书需要购买与人工审核（属 DECISION AUTONOMY 的"必须停下"项），不能阻塞 v1.0；便携版不需要任何证书信任，解压即用，是这类工具最自然的分发形态。
+- **后果**：MSIX 安装需要用户手动信任证书，会在文档里写清楚；`winget` 之外的包管理器（scoop / chocolatey）可自决，但需在提交前确认。
+- **禁止**：不得伪造代码签名证书；不得声称已通过 Microsoft Store 审核。
+
+## ADR-0030 · CI/CD 用 GitHub Actions，交互式 UI 自动化不跑在公共 runner
+
+- **决策**：CI/CD 用 GitHub Actions。build 矩阵为 Windows Server 2022 + MSVC 2022 + Windows SDK 10.0.22621 + vcpkg manifest 缓存；test 跑 Catch2 单测 + 覆盖率；FlaUI 冒烟标注 `workflow_dispatch` 手动触发（需交互桌面），不阻塞 PR。
+- **理由**：公共 runner 没有真实交互桌面会话，UIA 会直接失败；把冒烟做成手动触发比"在 CI 里假装能跑"诚实。
+- **后果**：FlaUI 冒烟的回归频率取决于人工触发，必须在 T-100 的回归清单里显式列出。
+- **禁止**：不得在 CI 里跑需要交互桌面的 UI 自动化到公共 runner。
