@@ -3,7 +3,7 @@
     "schema":  1,
     "milestone":  "M3",
     "last_task":  "T-040",
-    "last_commit":  "19a1723",
+    "last_commit":  "870b495",
     "current_module":  "shell",
     "current_task":  "T-041",
     "counters":  {
@@ -118,5 +118,5 @@
                           "TempCacheDir 用 PID+计数器不唯一：Windows 复用 PID，遗留目录会让下一次运行磁盘命中并反转必须重新提取的断言；必须加 GetTickCount64 并在退出时清理",
                           "测试遗留的临时目录要主动删：本机 %TEMP% 曾积压 648 个 dockforge-test-icons-* 目录"
                       ],
-    "updated_at":  "2026-10-24T23:50:00+08:00"
+    "updated_at":  "2026-10-24T23:51:00+08:00"
 }
