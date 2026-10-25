@@ -24,6 +24,10 @@ inline constexpr float kLaunchpadLabelGapDip = 6.0f;
 inline constexpr float kLaunchpadColumnGapDip = 26.0f;
 inline constexpr float kLaunchpadRowGapDip = 26.0f;
 
+// Top band reserved for the search field (T-042). The grid's origin_y starts below it,
+// so adding a search field moves nothing that already existed.
+inline constexpr float kLaunchpadTopBandDip = 56.0f;
+
 // Hover response. 1.10x is enough to read as "this one" on a full-screen grid without
 // the neighbouring cells appearing to move; the Dock uses 1.8x because it magnifies a
 // row the pointer travels along.
@@ -46,6 +50,9 @@ struct LaunchpadGridInput {
     int icon_size = 96;   // C-18 launchpad.icon_size, DIP
     int columns = 0;      // C-18 launchpad.columns, 0 = adaptive
     int page_size = kLaunchpadDefaultPageSize;
+    // T-042: when a folder is open the grid shows its items instead of the flat index,
+    // and the strip height is added to the top band so the chips do not cover row one.
+    bool show_folder_strip = false;
 };
 
 struct LaunchpadGrid {
@@ -59,6 +66,11 @@ struct LaunchpadGrid {
     float icon_size_dip = 0.0f;
     float label_height_dip = 0.0f;
 };
+
+// The band the grid starts below: the search field always, plus the folder strip when
+// folders exist (T-042). Exposed so the painter draws the strip in the space the grid
+// actually left free rather than a second, drifting estimate.
+float LaunchpadTopBandDip(bool folder_strip);
 
 // Resolves columns, rows, and the cell geometry for one display. Never returns a grid
 // with columns == 0 or rows == 0, so callers can divide by them on the first frame.

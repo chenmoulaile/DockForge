@@ -60,6 +60,10 @@ bool AdvanceLaunchpadHover(LaunchpadHover& hover, int cells, double delta_ms);
 
 struct LaunchpadPaintInput {
     const std::vector<LaunchpadTile>* tiles = nullptr;
+    // The tiles actually on screen, as indices into `tiles`. Non-empty when a search
+    // query or an open folder projects the index; the painter resolves each index
+    // itself so it never assumes page * per_page.
+    const std::vector<int>* visible = nullptr;
     LaunchpadGrid grid;
     int page = 0;
     int page_count = 1;
@@ -73,6 +77,21 @@ struct LaunchpadPaintInput {
     // Optional: the app the pointer is over, drawn with a selection plate. Kept
     // separate from `hover` so the animation state and the paint stay decoupled.
     int selected = -1;
+
+    // T-042 search field. `query` is the current text; `caret_visible` gates the
+    // caret so it blinks rather than sitting lit all the time.
+    const std::wstring* query = nullptr;
+    bool caret_visible = false;
+
+    // T-042 folder strip. `folder_names` is the config order, already clipped to what
+    // fits; `open_folder` is the id of the folder being shown, empty for the flat grid.
+    const std::vector<std::wstring>* folder_names = nullptr;
+    const std::string* open_folder = nullptr;
+    // The folder whose name is being edited, and the text in the field. When set, the
+    // strip draws an editor over that chip instead of its label.
+    const std::string* renaming_folder = nullptr;
+    const std::wstring* rename_text = nullptr;
+    bool rename_caret_visible = false;
 };
 
 // Draws one frame. Returns false only when the caller handed over no tiles.

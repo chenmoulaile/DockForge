@@ -2,6 +2,7 @@
 
 #include "core/log.h"
 #include "core/paths.h"
+#include "dock/launchpad_folders.h"
 #include "platform/display.h"
 #include "platform/window.h"
 #include "shell/app_launcher.h"
@@ -210,6 +211,125 @@ void Launchpad::RebuildIndex(const core::Config& config) {
 
 int Launchpad::ItemCount() const { return static_cast<int>(index_.Items().size()); }
 
+int Launchpad::VisibleCount() const {
+    if (!search_query_.empty()) return static_cast<int>(visible_.size());
+    if (!current_folder_id_.empty()) return static_cast<int>(visible_.size());
+    return static_cast<int>(index_.Items().size());
+}
+
+bool Launchpad::HasFolders() const {
+    return !config_.launchpad.folders.empty();
+}
+
+void Launchpad::SetSearchQuery(const std::wstring& text) {
+    if (text == search_query_) return;
+    search_query_ = text;
+    // A query change invalidates the folder context: the user is looking for one app,
+    // and a grid that silently kept the folder open would search only inside it.
+    current_folder_id_.clear();
+    caret_folder_id_.clear();
+    RefreshVisible();
+    page_ = 0;
+    ApplyPageClamp();
+    DF_DEBUG(kLogModule, "search '%s' -> %d item(s)", core::WideToUtf8(text).c_str(),
+             VisibleCount());
+    Repaint();
+}
+
+void Launchpad::RefreshVisible() {
+    visible_.clear();
+    if (!search_query_.empty()) {
+        visible_ = index_.Filter(search_query_, shell::LaunchpadIndex::MatchMode::Prefix);
+        return;
+    }
+    if (!current_folder_id_.empty()) {
+        // A folder view is a projection of the index, so its item indices are only
+        // valid until the index is rebuilt. Resolving by identity every time is
+        // cheap against 208 items and keeps the mapping honest.
+        for (const shell::LaunchpadFolderView& view : folder_views_) {
+            if (view.id != current_folder_id_) continue;
+            for (const shell::LaunchpadItem& item : view.items) {
+                for (std::size_t i = 0; i < index_.Items().size(); ++i) {
+                    if (index_.Items()[i].identity == item.identity) {
+                        visible_.push_back(static_cast<int>(i));
+                        break;
+                    }
+                }
+            }
+            break;
+        }
+        return;
+    }
+    // Flat grid: every item is visible.
+    visible_.reserve(index_.Items().size());
+    for (std::size_t i = 0; i < index_.Items().size(); ++i) {
+        visible_.push_back(static_cast<int>(i));
+    }
+}
+
+void Launchpad::RefreshFolderViews(const core::Config& config) {
+    folder_views_ = index_.Folders(config.launchpad);
+    // The open folder may have been deleted or renamed since the last frame; leaving
+    // a stale id would show an empty grid with no way back.
+    if (!current_folder_id_.empty()) {
+        bool found = false;
+        for (const shell::LaunchpadFolderView& view : folder_views_) {
+            if (view.id == current_folder_id_) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) current_folder_id_.clear();
+    }
+}
+
+void Launchpad::EnterFolder(const std::string& id) {
+    if (id.empty()) {
+        LeaveFolder();
+        return;
+    }
+    if (current_folder_id_ == id) return;
+    current_folder_id_ = id;
+    caret_folder_id_.clear();
+    search_query_.clear();
+    RefreshVisible();
+    page_ = 0;
+    ApplyPageClamp();
+    const core::LaunchpadFolder* folder = dock::FindLaunchpadFolder(config_, id);
+    DF_INFO(kLogModule, "folder opened id=%s name=%s items=%d",
+            id.c_str(), folder ? core::WideToUtf8(std::wstring(folder->name.begin(),
+                                                              folder->name.end())).c_str()
+                              : "?",
+            VisibleCount());
+    Repaint();
+}
+
+void Launchpad::LeaveFolder() {
+    if (current_folder_id_.empty()) return;
+    current_folder_id_.clear();
+    caret_folder_id_.clear();
+    RefreshVisible();
+    page_ = 0;
+    ApplyPageClamp();
+    DF_DEBUG(kLogModule, "folder closed; %d item(s)", VisibleCount());
+    Repaint();
+}
+
+std::vector<int> Launchpad::PageIndices() const {
+    std::vector<int> page;
+    if (LaunchpadGrid grid = GridFor(0); grid.per_page > 0) {
+        const int start = page_ * grid.per_page;
+        const int count = std::min(grid.per_page, std::max(0, VisibleCount() - start));
+        page.reserve(static_cast<std::size_t>(count));
+        for (int i = 0; i < count; ++i) {
+            if (start + i < static_cast<int>(visible_.size())) {
+                page.push_back(visible_[static_cast<std::size_t>(start + i)]);
+            }
+        }
+    }
+    return page;
+}
+
 const LaunchpadOverlay* Launchpad::OverlayAt(std::size_t display_index) const {
     if (display_index >= overlays_.size()) return nullptr;
     return overlays_[display_index].get();
@@ -239,7 +359,7 @@ int Launchpad::PageCount() const {
     int pages = -1;
     for (const auto& overlay : overlays_) {
         const LaunchpadGrid grid = GridForOverlay(*overlay, config_);
-        const int count = LaunchpadPageCount(ItemCount(), grid);
+        const int count = LaunchpadPageCount(VisibleCount(), grid);
         pages = (pages < 0) ? count : std::min(pages, count);
     }
     return std::max(1, pages < 0 ? 1 : pages);
@@ -286,9 +406,14 @@ void Launchpad::Open(const core::Config& config) {
         RebuildIndex(config);
         index_stale_ = false;
     }
+    // Folder views are a projection of the index, so they must be resolved after the
+    // rebuild. Doing it here (rather than on every read) keeps the chip strip and the
+    // click handler in agreement about ordering.
+    RefreshFolderViews(config);
+    RefreshVisible();
     EnsureTiles(config);
 
-    page_ = ClampLaunchpadPage(page_, ItemCount(), GridFor(0));
+    page_ = ClampLaunchpadPage(page_, VisibleCount(), GridFor(0));
     progress_ = 0.0f;
     phase_ = LaunchpadPhase::Opening;
     for (std::size_t i = 0; i < overlays_.size(); ++i) {
@@ -312,7 +437,6 @@ void Launchpad::Open(const core::Config& config) {
     DF_INFO(kLogModule, "open items=%d pages=%d page=%d", ItemCount(), PageCount(), page_);
     Repaint();
 }
-
 void Launchpad::Close() {
     if (phase_ == LaunchpadPhase::Closed || phase_ == LaunchpadPhase::Closing) return;
     phase_ = LaunchpadPhase::Closing;
@@ -368,7 +492,7 @@ bool Launchpad::Tick(double delta_ms, const core::Config& config) {
     }
 
     if (phase_ != LaunchpadPhase::Closed) {
-        const int cells = LaunchpadPageItemCount(ItemCount(), GridFor(0), page_);
+        const int cells = LaunchpadPageItemCount(VisibleCount(), GridFor(0), page_);
         for (std::size_t i = 0; i < hovers_.size(); ++i) {
             // Only the display under the pointer can have an active cell; the rest decay.
             LaunchpadHover& hover = hovers_[i];
@@ -396,7 +520,7 @@ void Launchpad::ApplyPageClamp() {
         page_ = 0;
         return;
     }
-    const int clamped = ClampLaunchpadPage(page_, ItemCount(), GridFor(0));
+    const int clamped = ClampLaunchpadPage(page_, VisibleCount(), GridFor(0));
     if (clamped != page_) {
         DF_DEBUG(kLogModule, "page clamped %d -> %d", page_, clamped);
         page_ = clamped;
@@ -408,13 +532,13 @@ void Launchpad::PaintOverlay(std::size_t display_index) {
     if (!overlay.ready) return;
 
     const LaunchpadGrid grid = GridForOverlay(overlay, config_);
-    const int items_on_page = LaunchpadPageItemCount(ItemCount(), grid, page_);
+    const int items_on_page = LaunchpadPageItemCount(VisibleCount(), grid, page_);
 
     LaunchpadPaintInput input;
     input.tiles = &tiles_;
     input.grid = grid;
     input.page = page_;
-    input.page_count = LaunchpadPageCount(ItemCount(), grid);
+    input.page_count = LaunchpadPageCount(VisibleCount(), grid);
     input.items_on_page = items_on_page;
     input.width_dip = overlay.window.WidthDip();
     input.height_dip = overlay.window.HeightDip();
@@ -457,8 +581,25 @@ const shell::LaunchpadItem* Launchpad::ClickAt(std::size_t display_index, float 
     if (display_index >= overlays_.size()) return nullptr;
     if (phase_ == LaunchpadPhase::Closed || phase_ == LaunchpadPhase::Closing) return nullptr;
 
-    const LaunchpadGrid grid = GridFor(display_index);
-    const int items_on_page = LaunchpadPageItemCount(ItemCount(), grid, page_);
+    LaunchpadOverlay& overlay = *overlays_[display_index];
+    const float width_dip = overlay.window.WidthDip();
+
+    // The folder strip sits above the grid. A click there enters the folder and must
+    // not fall through to whatever cell happens to be under it.
+    if (HasFolders()) {
+        std::vector<render::RectF> chips;
+        dock::LaunchpadFolderChipRects(width_dip,
+                                       static_cast<int>(config_.launchpad.folders.size()),
+                                       chips);
+        const int chip = dock::LaunchpadFolderChipHit(x_dip, y_dip, chips);
+        if (chip >= 0 && chip < static_cast<int>(folder_views_.size())) {
+            EnterFolder(folder_views_[static_cast<std::size_t>(chip)].id);
+            return nullptr;
+        }
+    }
+
+    const LaunchpadGrid grid = GridForOverlay(overlay, config_);
+    const int items_on_page = LaunchpadPageItemCount(VisibleCount(), grid, page_);
     const int cell = painter_.HitTest(grid, items_on_page, x_dip, y_dip);
     if (cell < 0) {
         // A click on the scrim (outside every cell) dismisses, the way every full-screen
@@ -468,7 +609,12 @@ const shell::LaunchpadItem* Launchpad::ClickAt(std::size_t display_index, float 
         return nullptr;
     }
 
-    const int item_index = page_ * grid.per_page + cell;
+    // The cell index is relative to the page; `visible_` maps it back to the index. While
+    // a folder is open or a query is active that list is a projection, so the old
+    // page_ * per_page + cell arithmetic would launch the wrong app.
+    const std::vector<int> page_indices = PageIndices();
+    if (cell >= static_cast<int>(page_indices.size())) return nullptr;
+    const int item_index = page_indices[static_cast<std::size_t>(cell)];
     if (item_index < 0 || item_index >= static_cast<int>(index_.Items().size())) return nullptr;
     const shell::LaunchpadItem& item = index_.Items()[static_cast<std::size_t>(item_index)];
 
@@ -484,8 +630,8 @@ void Launchpad::PointerMoved(std::size_t display_index, float x_dip, float y_dip
     if (display_index >= overlays_.size() || phase_ == LaunchpadPhase::Closed) return;
     hover_display_ = static_cast<int>(display_index);
 
-    const LaunchpadGrid grid = GridFor(display_index);
-    const int items_on_page = LaunchpadPageItemCount(ItemCount(), grid, page_);
+    const LaunchpadGrid grid = GridForOverlay(*overlays_[display_index], config_);
+    const int items_on_page = LaunchpadPageItemCount(VisibleCount(), grid, page_);
     const int cell = painter_.HitTest(grid, items_on_page, x_dip, y_dip);
 
     LaunchpadHover& hover = hovers_[display_index];
@@ -528,6 +674,142 @@ void Launchpad::KeyPressed(unsigned int vk) {
         default:
             break;
     }
+}
+
+void Launchpad::Character(wchar_t ch) {
+    caret_ms_ = 0.0;
+    caret_visible_ = true;
+    if (!caret_folder_id_.empty()) {
+        rename_text_.push_back(ch);
+        Repaint();
+        return;
+    }
+    // Control characters never belong in a query: the overlay's WndProc forwards
+    // everything it gets, and a stray Enter or Tab typed during the open animation
+    // would otherwise be filtered into the field.
+    if (ch < 0x20) return;
+    search_query_.push_back(ch);
+    current_folder_id_.clear();
+    RefreshVisible();
+    page_ = 0;
+    ApplyPageClamp();
+    DF_DEBUG(kLogModule, "search '%s' -> %d item(s)", core::WideToUtf8(search_query_).c_str(),
+             VisibleCount());
+    Repaint();
+}
+
+void Launchpad::Backspace() {
+    caret_ms_ = 0.0;
+    caret_visible_ = true;
+    if (!caret_folder_id_.empty()) {
+        if (!rename_text_.empty()) rename_text_.pop_back();
+        Repaint();
+        return;
+    }
+    if (search_query_.empty()) return;
+    search_query_.pop_back();
+    // Deleting the last character clears the folder context too: the same rule as
+    // SetSearchQuery, so leaving a folder and typing a query behave identically.
+    if (search_query_.empty()) current_folder_id_.clear();
+    RefreshVisible();
+    page_ = 0;
+    ApplyPageClamp();
+    Repaint();
+}
+
+void Launchpad::BeginRename(const std::string& id) {
+    const core::LaunchpadFolder* folder = dock::FindLaunchpadFolder(config_, id);
+    if (folder == nullptr) return;
+    caret_folder_id_ = id;
+    rename_text_ = std::wstring(folder->name.begin(), folder->name.end());
+    caret_ms_ = 0.0;
+    caret_visible_ = true;
+    DF_DEBUG(kLogModule, "rename started id=%s", id.c_str());
+    Repaint();
+}
+
+void Launchpad::CommitRename() {
+    if (caret_folder_id_.empty()) return;
+    // dock::RenameLaunchpadFolder keeps the id stable, which is the whole reason the
+    // rename path exists in launchpad_folders rather than here.
+    const bool renamed = dock::RenameLaunchpadFolder(config_, caret_folder_id_,
+                                                     std::string(rename_text_.begin(),
+                                                                 rename_text_.end()));
+    if (renamed) {
+        const bool saved = dock::SaveLaunchpadConfig(config_);
+        DF_INFO(kLogModule, "folder renamed id=%s saved=%d", caret_folder_id_.c_str(),
+                saved ? 1 : 0);
+    } else {
+        DF_WARN(kLogModule, "rename refused id=%s", caret_folder_id_.c_str());
+    }
+    caret_folder_id_.clear();
+    rename_text_.clear();
+    RefreshFolderViews(config_);
+    RefreshVisible();
+    Repaint();
+}
+
+void Launchpad::CancelRename() {
+    if (caret_folder_id_.empty()) return;
+    caret_folder_id_.clear();
+    rename_text_.clear();
+    Repaint();
+}
+
+void Launchpad::BeginItemDrag(const std::string& identity) {
+    drag_identity_ = identity;
+}
+
+void Launchpad::EndItemDrag(const std::string& target_identity) {
+    if (drag_identity_.empty()) return;
+    const std::string source = drag_identity_;
+    drag_identity_.clear();
+    if (target_identity.empty() || target_identity == source) return;
+    CreateFolderFromDrop(source, target_identity);
+}
+
+std::string Launchpad::CreateFolderFromDrop(const std::string& identity,
+                                            const std::string& target_identity) {
+    if (identity.empty() || target_identity.empty() || identity == target_identity) {
+        return std::string();
+    }
+    // A folder that already holds either identity would gain a duplicate, which
+    // AppendToLaunchpadFolder refuses silently - so look for an existing folder
+    // first and append to it instead of creating a second one.
+    for (const core::LaunchpadFolder& folder : config_.launchpad.folders) {
+        const bool holds_identity =
+            dock::LaunchpadFolderContains(config_, folder.id, identity);
+        const bool holds_target =
+            dock::LaunchpadFolderContains(config_, folder.id, target_identity);
+        if (holds_identity && holds_target) return std::string();
+        if (holds_identity || holds_target) {
+            const std::string& missing = holds_identity ? target_identity : identity;
+            dock::AppendToLaunchpadFolder(config_, folder.id, missing);
+            const bool saved = dock::SaveLaunchpadConfig(config_);
+            DF_INFO(kLogModule, "folder %s gained %s saved=%d", folder.id.c_str(),
+                    core::WideToUtf8(std::wstring(missing.begin(), missing.end())).c_str(),
+                    saved ? 1 : 0);
+            RefreshFolderViews(config_);
+            RefreshVisible();
+            Repaint();
+            return folder.id;
+        }
+    }
+    const std::string id = dock::CreateLaunchpadFolder(config_, "New Folder",
+                                                       {identity, target_identity});
+    if (id.empty()) {
+        DF_WARN(kLogModule, "folder create refused for %s + %s",
+                core::WideToUtf8(std::wstring(identity.begin(), identity.end())).c_str(),
+                core::WideToUtf8(std::wstring(target_identity.begin(), target_identity.end()))
+                    .c_str());
+        return std::string();
+    }
+    const bool saved = dock::SaveLaunchpadConfig(config_);
+    DF_INFO(kLogModule, "folder created id=%s items=2 saved=%d", id.c_str(), saved ? 1 : 0);
+    RefreshFolderViews(config_);
+    RefreshVisible();
+    Repaint();
+    return id;
 }
 
 }  // namespace dockforge::dock

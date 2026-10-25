@@ -25,3 +25,4 @@ evidence/**/*.mkv
 thumbs.db
 desktop.ini
 .DS_Store
+.v2c/

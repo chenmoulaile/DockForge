@@ -102,8 +102,11 @@ bool LaunchpadPainter::Paint(ID2D1DeviceContext& dc, render::IRenderBackend& bac
     (void)dc;  // the backend owns the context; kept in the signature for parity with DockPainter
 
     PaintBackdrop(backend, input);
+    PaintSearchField(backend, input);
+    PaintFolderStrip(backend, input);
     PaintCells(backend, input);
     PaintDots(backend, input);
+    PaintEmptyState(backend, input);
     return true;
 }
 
@@ -215,6 +218,109 @@ void LaunchpadPainter::PaintDots(render::IRenderBackend& backend,
         color.a *= fade;
         backend.FillRoundedRect(dot, kLaunchpadDotDip * 0.5f, color);
     }
+}
+
+void LaunchpadPainter::PaintSearchField(render::IRenderBackend& backend,
+                                        const LaunchpadPaintInput& input) {
+    if (input.width_dip <= 0.0f || input.height_dip <= 0.0f) return;
+
+    const float fade = LaunchpadAnimationFade(input.progress);
+    const render::RectF field =
+        dock::LaunchpadSearchRect(input.width_dip, input.height_dip);
+    if (field.Width() <= 0.0f || field.Height() <= 0.0f) return;
+
+    render::ColorF plate = kSearchPlateColor;
+    plate.a *= fade;
+    backend.FillRoundedRect(field, dock::kLaunchpadSearchRadiusDip, plate);
+
+    // The text is drawn inside the field with the same inset the caret uses, so an
+    // empty query leaves the caret exactly where the first character would land.
+    const render::RectF text{field.left + dock::kLaunchpadSearchInsetDip, field.top,
+                             field.right - dock::kLaunchpadSearchInsetDip, field.bottom};
+    const std::wstring& query = input.query ? *input.query : std::wstring();
+    if (!query.empty()) {
+        render::ColorF label = kLabelColor;
+        label.a *= fade;
+        backend.DrawLabel(query.c_str(), text, dock::kLaunchpadSearchFontDip, label,
+                          render::TextAlign::Left);
+    } else {
+        render::ColorF hint = kSearchHintColor;
+        hint.a *= fade;
+        backend.DrawLabel(L"Search", text, dock::kLaunchpadSearchFontDip, hint,
+                          render::TextAlign::Left);
+    }
+
+    if (!input.caret_visible) return;
+    // A caret index past the end of the text clamps to the end of the text rather than
+    // to the edge of the field, so it tracks the typed characters.
+    const int caret_index = static_cast<int>(query.size());
+    const render::RectF caret =
+        dock::LaunchpadSearchCaretRect(query, caret_index, field);
+    if (caret.Width() <= 0.0f || caret.Height() <= 0.0f) return;
+    render::ColorF color = kSearchCaretColor;
+    color.a *= fade;
+    backend.FillRoundedRect(caret, caret.Width() * 0.5f, color);
+}
+
+void LaunchpadPainter::PaintFolderStrip(render::IRenderBackend& backend,
+                                        const LaunchpadPaintInput& input) {
+    if (input.folder_names == nullptr || input.folder_names->empty()) return;
+    if (input.width_dip <= 0.0f) return;
+
+    const float fade = LaunchpadAnimationFade(input.progress);
+    // The controller already clipped the list to what fits, so the count and the
+    // rects are guaranteed to agree with what ClickAt hit-tests.
+    std::vector<render::RectF> chips;
+    dock::LaunchpadFolderChipRects(input.width_dip,
+                                   static_cast<int>(input.folder_names->size()), chips);
+
+    for (std::size_t i = 0; i < chips.size() && i < input.folder_names->size(); ++i) {
+        const render::RectF& chip = chips[i];
+        const std::wstring& name = (*input.folder_names)[i];
+        const bool open =
+            input.open_folder != nullptr && !input.open_folder->empty() &&
+            i < input.folder_names->size() &&
+            name == input.folder_names->at(i) && i == open_chip_index_;
+
+        render::ColorF plate = open ? kFolderChipActiveColor : kFolderChipColor;
+        plate.a *= fade;
+        backend.FillRoundedRect(chip, dock::kLaunchpadFolderChipRadiusDip, plate);
+
+        render::ColorF label = kLabelColor;
+        label.a *= fade;
+        backend.DrawLabel(name.c_str(), chip, dock::kLaunchpadFolderChipFontDip, label,
+                          render::TextAlign::Center);
+
+        // The rename editor replaces the chip's label with the pending text and a
+        // caret, so the user sees what will be committed.
+        if (input.renaming_folder != nullptr && input.rename_text != nullptr &&
+            i == open_chip_index_) {
+            const render::RectF caret = dock::LaunchpadFolderRenameCaretRect(
+                *input.rename_text, static_cast<int>(input.rename_text->size()), chip);
+            if (caret.Width() > 0.0f && caret.Height() > 0.0f && input.rename_caret_visible) {
+                render::ColorF color = kSearchCaretColor;
+                color.a *= fade;
+                backend.FillRoundedRect(caret, caret.Width() * 0.5f, color);
+            }
+        }
+    }
+}
+
+void LaunchpadPainter::PaintEmptyState(render::IRenderBackend& backend,
+                                       const LaunchpadPaintInput& input) {
+    // Only when a query is active and it matched nothing. An empty Launchpad (no apps
+    // installed at all) is a different failure and is reported by the controller.
+    if (input.query == nullptr || input.query->empty()) return;
+    if (input.items_on_page > 0) return;
+
+    const float fade = LaunchpadAnimationFade(input.progress);
+    render::ColorF label = kEmptyStateColor;
+    label.a *= fade;
+    const render::RectF box{input.width_dip * 0.2f, input.height_dip * 0.5f,
+                            input.width_dip * 0.8f, input.height_dip * 0.5f +
+                                                        dock::kLaunchpadSearchFontDip * 2.0f};
+    backend.DrawLabel(L"No results", box, dock::kLaunchpadSearchFontDip, label,
+                      render::TextAlign::Center);
 }
 
 int LaunchpadPainter::HitTest(const LaunchpadGrid& grid, int items_on_page, float x_dip,

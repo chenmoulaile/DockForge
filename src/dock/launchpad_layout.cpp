@@ -18,6 +18,11 @@ constexpr float kSideMarginDip = 64.0f;
 constexpr float kTopBandDip = 56.0f;
 constexpr float kBottomBandDip = 48.0f;
 
+// Folder strip height, added to the top band when folders exist (T-042). Kept here
+// rather than in launchpad_search.h so the grid is the single source for how much
+// vertical room it consumed.
+constexpr float kFolderStripDip = 34.0f;
+
 // A gutter is guaranteed even when the icon was shrunk to fit its cell, so two
 // adjacent icons never read as one wide shape.
 constexpr float kMinIconGutterDip = 8.0f;
@@ -32,6 +37,13 @@ float EaseOutCubic(float t) {
 }
 
 }  // namespace
+
+// The band the grid starts below: the search field always, plus the folder strip when
+// folders exist (T-042). Exposed so the painter draws the strip in the space the grid
+// actually left free rather than a second, drifting estimate.
+float LaunchpadTopBandDip(bool folder_strip) {
+    return kTopBandDip + (folder_strip ? kFolderStripDip : 0.0f);
+}
 
 LaunchpadGrid ComputeLaunchpadGrid(const LaunchpadGridInput& input) {
     LaunchpadGrid grid;
@@ -82,7 +94,8 @@ LaunchpadGrid ComputeLaunchpadGrid(const LaunchpadGridInput& input) {
     grid.rows = (page_size + columns - 1) / columns;
     grid.origin_x_dip = kSideMarginDip;
 
-    const float available_h = input.height_dip - kTopBandDip - kBottomBandDip;
+    const float top_band = LaunchpadTopBandDip(input.show_folder_strip);
+    const float available_h = input.height_dip - top_band - kBottomBandDip;
     float cell_height = icon_edge + kLaunchpadLabelGapDip + kLaunchpadLabelHeightDip;
     float grid_height =
         static_cast<float>(grid.rows) * cell_height + static_cast<float>(grid.rows - 1) * kLaunchpadRowGapDip;
@@ -110,7 +123,7 @@ LaunchpadGrid ComputeLaunchpadGrid(const LaunchpadGridInput& input) {
     // negative remainder (the grid is taller than the display) pins it to the top
     // band so the first row stays visible.
     const float slack = available_h - grid_height;
-    grid.origin_y_dip = kTopBandDip + (slack > 0.0f ? slack * 0.5f : 0.0f);
+    grid.origin_y_dip = top_band + (slack > 0.0f ? slack * 0.5f : 0.0f);
 
     return grid;
 }

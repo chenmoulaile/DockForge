@@ -24,6 +24,7 @@
 
 #include "core/config.h"
 #include "dock/launchpad_layout.h"
+#include "dock/launchpad_search.h"
 #include "dock/launchpad_view.h"
 #include "platform/composition.h"
 #include "platform/display.h"
@@ -120,6 +121,23 @@ class Launchpad {
     // launched, or nullptr. The Launchpad closes itself after a successful launch.
     const shell::LaunchpadItem* ClickAt(std::size_t display_index, float x_dip, float y_dip);
 
+    // Types `text` into the search field, replacing the current query. An empty string
+    // clears the filter, which is what Backspace down to nothing should do.
+    void SetSearchQuery(const std::wstring& text);
+    const std::wstring& SearchQuery() const { return search_query_; }
+    // How many items the current query keeps. Reported so the empty state can be drawn
+    // without the view reaching into the index.
+    int VisibleCount() const;
+    bool SearchActive() const { return !search_query_.empty(); }
+
+    // Folder navigation: the strip is only drawn when the config has folders.
+    bool HasFolders() const;
+    // Enters a folder by id, or -1 to return to the flat grid. Rebuilds the visible
+    // list from the index on entry so a folder added while closed appears immediately.
+    void EnterFolder(const std::string& id);
+    void LeaveFolder();
+    const std::string& CurrentFolderId() const { return current_folder_id_; }
+
     // Pointer state, per display. Only the display the pointer is on has an active
     // hover; the others keep their eased amounts decaying to zero.
     void PointerMoved(std::size_t display_index, float x_dip, float y_dip);
@@ -127,6 +145,31 @@ class Launchpad {
 
     // Keyboard: Escape closes, Left/Right/PageUp/PageDown page, Home/End jump.
     void KeyPressed(unsigned int vk);
+    // Typed characters go to the search field while it has focus, or to the rename
+    // field while a folder is being renamed (T-042). Anything else is ignored.
+    void Character(wchar_t ch);
+    // Backspace in the search field removes one character; in the rename field it
+    // edits the pending name. Enter commits a rename, Escape cancels it.
+    void Backspace();
+    void CommitRename();
+    void CancelRename();
+    // Begins renaming the folder under the pointer, or by id. The field is drawn over
+    // the chip with the current name pre-selected.
+    void BeginRename(const std::string& id);
+    bool Renaming() const { return !caret_folder_id_.empty(); }
+    const std::string& RenamingFolderId() const { return caret_folder_id_; }
+
+    // Drag-to-create (T-042 DoD 3): dragging app `identity` onto the cell holding
+    // `target_identity` creates a folder holding both and persists it. Returns the
+    // new folder id, or an empty string when nothing was written.
+    std::string CreateFolderFromDrop(const std::string& identity,
+                                     const std::string& target_identity);
+    // Drag bookkeeping, so a drag that ends on the scrim is not mistaken for a
+    // folder creation.
+    void BeginItemDrag(const std::string& identity);
+    void EndItemDrag(const std::string& target_identity);
+    bool DraggingItem() const { return !drag_identity_.empty(); }
+    const std::string& DragIdentity() const { return drag_identity_; }
 
     const shell::LaunchpadIndexStats& Stats() const { return index_.Stats(); }
     std::size_t OverlayCount() const { return overlays_.size(); }
@@ -147,6 +190,16 @@ class Launchpad {
     void DestroyOverlays();
     LaunchpadGrid GridForOverlay(const LaunchpadOverlay& overlay, const core::Config& config) const;
 
+    // Recomputes `visible_` (indices into index_.Items()) from the search query and
+    // the open folder. Called on every query change and folder transition, never per
+    // frame: the index is small (208 items) but the paging arithmetic runs per frame.
+    void RefreshVisible();
+    // The items the current page should draw, as indices into index_.Items().
+    std::vector<int> PageIndices() const;
+    // Resolves config.launchpad.folders against the index. Cheap enough to call on
+    // demand; cached here so the chip strip and the click handler agree on ordering.
+    void RefreshFolderViews(const core::Config& config);
+
     HINSTANCE instance_ = nullptr;
     LaunchpadOptions options_{};
     core::Config config_{};  // snapshot; the Launchpad never edits config
@@ -159,6 +212,19 @@ class Launchpad {
     std::vector<LaunchpadTile> tiles_;
     bool tiles_stale_ = true;
 
+    // Search state (T-042). The query is the source of truth for `visible_`; the
+    // field itself only forwards characters.
+    std::wstring search_query_;
+    std::vector<int> visible_;
+
+    // Folder state (T-042). `current_folder_id_` empty means the flat grid. The views
+    // are a projection of config.launchpad.folders against the index, refreshed when
+    // the config or the index changes.
+    std::vector<shell::LaunchpadFolderView> folder_views_;
+    std::string current_folder_id_;
+    std::string caret_folder_id_;  // folder pending rename, "" when not renaming
+    int caret_folder_index_ = -1;
+
     LaunchpadPhase phase_ = LaunchpadPhase::Closed;
     float progress_ = 0.0f;
     int page_ = 0;
@@ -170,6 +236,18 @@ class Launchpad {
     // loop for 360-1045ms (evidence/T-040), which is a visible freeze on a surface the
     // user is not even looking at yet.
     bool index_stale_ = false;
+
+    // Caret blink state for the search field (T-042). The field only draws the caret
+    // when the elapsed time since the last keystroke is inside the visible half of the
+    // blink cycle, so a query left alone does not pulse forever.
+    double caret_ms_ = 0.0;
+    bool caret_visible_ = false;
+
+    // Drag-to-create state (T-042). `drag_identity_` is the app being dragged;
+    // `rename_text_` is the folder name being edited, valid only while
+    // `caret_folder_id_` is set.
+    std::string drag_identity_;
+    std::wstring rename_text_;
 
     // Last page handed to the painter, so the per-frame debug line only appears when the
     // page actually changes instead of 60 times a second.

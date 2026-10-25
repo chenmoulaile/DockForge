@@ -161,7 +161,29 @@ public:
 
     // Case-insensitive prefix filter over display names. Empty query returns
     // everything, which is what the grid wants before the user types.
+    //
+    // Prefix rather than substring (T-042 DoD 1): a Launchpad search that matched
+    // the middle of a name would surface "Visual Studio Code" for "code", which is
+    // rarely what the first keystrokes mean. Substring matching, if it ever comes,
+    // has to be a distinct mode the user opts into rather than the default.
     std::vector<const LaunchpadItem*> Search(const std::wstring& query) const;
+
+    // The live query filter used by the search field, as a set of indices into
+    // Items(). Kept as indices rather than pointers so a concurrent rebuild can
+    // invalidate the whole set without leaving dangling pointers in the caller.
+    //
+    // `match_mode` selects prefix (0) or substring (1). Substring is exposed for
+    // the T-042 rename dialog's "find app" field, where the user is looking for
+    // one app they already know and a prefix match over the whole Start menu is
+    // the wrong default there.
+    enum class MatchMode { Prefix = 0, Substring = 1 };
+    std::vector<int> Filter(const std::wstring& query, MatchMode mode) const;
+
+    // True when the two names match under `mode` with case folding. Exposed for
+    // tests so the folding rule is asserted directly rather than inferred from
+    // which apps happen to be installed.
+    static bool MatchesQuery(const std::wstring& name, const std::wstring& query,
+                             MatchMode mode);
 
 private:
     std::vector<LaunchpadItem> items_;

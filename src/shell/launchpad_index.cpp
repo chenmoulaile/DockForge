@@ -513,6 +513,48 @@ std::vector<LaunchpadFolderView> LaunchpadIndex::Folders(const core::LaunchpadCo
     return views;
 }
 
+bool LaunchpadIndex::MatchesQuery(const std::wstring& name, const std::wstring& query,
+                                  MatchMode mode) {
+    if (query.empty()) return true;
+    if (name.size() < query.size()) return false;
+    // CompareStringEx with NORM_IGNORECASE is the folding rule T-042 DoD 1 names.
+    // It is what the Start menu's own search box uses, so the results interleave
+    // the way a user expects (typed ASCII finds Chinese names' pinyin is NOT
+    // covered, but case folding of Latin names is, which is the stated DoD).
+    const wchar_t* name_ptr = name.c_str();
+    const int name_len = static_cast<int>(name.size());
+    const wchar_t* query_ptr = query.c_str();
+    const int query_len = static_cast<int>(query.size());
+
+    if (mode == MatchMode::Prefix) {
+        const int result = ::CompareStringEx(LOCALE_NAME_USER_DEFAULT, NORM_IGNORECASE,
+                                             name_ptr, query_len, query_ptr, query_len, nullptr,
+                                             nullptr, 0);
+        if (result == CSTR_EQUAL) return true;
+        // CompareStringEx returns 0 on failure; fall back to a wide fold so a
+        // bad locale cannot silently empty the search field.
+        if (result == 0) {
+            const std::wstring folded = LowerWide(name.substr(0, query_len));
+            return folded == LowerWide(query);
+        }
+        return false;
+    }
+
+    // Substring: slide the query over the name one position at a time. A full
+    // FindSubstring-style scan is what NORM_IGNORECASE alone cannot express, and
+    // 208 items is small enough that the naive walk is not worth a smarter
+    // algorithm.
+    for (int start = 0; start + query_len <= name_len; ++start) {
+        const int result = ::CompareStringEx(LOCALE_NAME_USER_DEFAULT, NORM_IGNORECASE,
+                                             name_ptr + start, query_len, query_ptr, query_len,
+                                             nullptr, nullptr, 0);
+        if (result == CSTR_EQUAL) return true;
+    }
+    const std::wstring folded_name = LowerWide(name);
+    const std::wstring folded_query = LowerWide(query);
+    return folded_name.find(folded_query) != std::wstring::npos;
+}
+
 std::vector<const LaunchpadItem*> LaunchpadIndex::Search(const std::wstring& query) const {
     std::vector<const LaunchpadItem*> matches;
     if (query.empty()) {
@@ -526,12 +568,30 @@ std::vector<const LaunchpadItem*> LaunchpadIndex::Search(const std::wstring& que
     for (const LaunchpadItem& item : items_) {
         const std::wstring& name = item.app.display_name;
         if (name.size() < lowered.size()) continue;
-        // Prefix, not substring: a Launchpad search that matched the middle of a
-        // name would surface "Visual Studio Code" for "code", which is rarely what
-        // the first keystrokes mean. A dedicated substring mode can come later.
         if (LowerWide(name.substr(0, lowered.size())) == lowered) matches.push_back(&item);
     }
     return matches;
+}
+
+std::vector<int> LaunchpadIndex::Filter(const std::wstring& query, MatchMode mode) const {
+    std::vector<int> indices;
+    if (items_.empty()) return indices;
+
+    if (query.empty()) {
+        indices.reserve(items_.size());
+        for (std::size_t i = 0; i < items_.size(); ++i) {
+            indices.push_back(static_cast<int>(i));
+        }
+        return indices;
+    }
+
+    indices.reserve(std::min<std::size_t>(items_.size(), 64));
+    for (std::size_t i = 0; i < items_.size(); ++i) {
+        if (MatchesQuery(items_[i].app.display_name, query, mode)) {
+            indices.push_back(static_cast<int>(i));
+        }
+    }
+    return indices;
 }
 
 }  // namespace dockforge::shell
