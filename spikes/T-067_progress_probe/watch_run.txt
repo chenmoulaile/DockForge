@@ -1,0 +1,16 @@
+=== Q3: watch explorer copy dialog (any process), 40 s ===
+start the copy NOW (e.g. PowerShell Shell.Application CopyHere of a big file)
+round 10: no copy dialog
+NEW window hwnd=0000000000150ac2 class='OperationStatusWindow' title='' pid=5532
+round 20: no copy dialog
+round 30: no copy dialog
+round 40: no copy dialog
+round 50: no copy dialog
+round 60: no copy dialog
+round 70: no copy dialog
+round 80: no copy dialog
+round 90: no copy dialog
+round 100: no copy dialog
+round 110: no copy dialog
+round 120: no copy dialog
+watch done: 125 rounds, 0 msaa progress reports

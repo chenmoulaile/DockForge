@@ -1,0 +1,9 @@
+reusing payload at C:\Users\chenk\AppData\Local\Temp\dockforge-t067-payload-512
+=== T-067 probe: scratch=C:\Users\chenk\AppData\Local\Temp\dockforge-t067-18737390 payload=0GB ===
+A. registration: PASS (white list 1 entry @250ms, explorer tile pinned)
+B1. first reading: 2026-10-25T17:02:28.449+08:00 INFO [dock] taskbar progress 'microsoft.windows.explorer' -> normal 43%
+B2. advancing: PASS (2 normal readings: normal 43% -> normal 69%)
+B3. screenshot while copy live: evidence\T-067\progress_on.png
+C. copy finished: PASS (clearing event: 2026-10-25T17:02:33.546+08:00 INFO [dock] taskbar progress 'microsoft.windows.explorer' -> none 0%); screenshot evidence\T-067\progress_off.png
+D. no residue: PASS (last line still: 2026-10-25T17:02:33.546+08:00 INFO [dock] taskbar progress 'microsoft.windows.explorer' -> none 0%)
+ALL PARTS PASS

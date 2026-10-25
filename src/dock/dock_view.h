@@ -17,6 +17,7 @@
 #include "shell/app_entry.h"
 #include "shell/app_resolver.h"
 #include "shell/icon_cache.h"
+#include "shell/taskbar_progress.h"
 
 #include <cstdint>
 #include <string>
@@ -59,6 +60,36 @@ inline constexpr float kBadgeMinFontDip = 12.0f;  // 9pt at 96 DPI
 // Fallback red when the system accent colour cannot be read. Close to the
 // macOS badge red so the fallback still reads as "unread", not as an error.
 inline constexpr render::ColorF kBadgeFallbackColor{0.91f, 0.27f, 0.24f, 1.0f};
+
+// ---- progress bar (T-067, C-22 progress_bar) --------------------------------
+// Contract text, not taste: bar height 4px at 100% DPI (= 4 DIP), inside the
+// icon's bottom edge, corner radius 2px, colour = system accent for Normal,
+// #E81123 for Error, #FFB900 for Paused; Indeterminate pulses. Geometry comes
+// from the same LayoutSummary slot the icon pass used - never a second
+// coordinate source (C-22 shared rule with the badge).
+inline constexpr float kProgressBarHeightDip = 4.0f;
+inline constexpr float kProgressBarCornerDip = 2.0f;
+// Breathing room between the bar and the icon's bottom edge, so the bar sits
+// inside the artwork rather than tangent to the plate's padding.
+inline constexpr float kProgressBarInsetDip = 2.0f;
+inline constexpr render::ColorF kProgressErrorColor{0xE8 / 255.0f, 0x11 / 255.0f,
+                                                    0x23 / 255.0f, 1.0f};  // #E81123
+inline constexpr render::ColorF kProgressPausedColor{0xFF / 255.0f, 0xB9 / 255.0f,
+                                                     0x00 / 255.0f, 1.0f};  // #FFB900
+
+// Progress overlay geometry for one painted slot, in window DIP. `track` is
+// the full-width lane at the icon's bottom inside edge; `bar` is the filled
+// part for `fraction` (clamped 0..1).
+struct ProgressGeometry {
+    render::RectF track{};
+    render::RectF bar{};
+};
+ProgressGeometry ComputeProgressGeometry(const render::RectF& slot, float fraction);
+
+// Bar colour for a state: system accent for Normal and Indeterminate (the
+// pulse is an alpha cycle applied by the painter, not a different hue),
+// #E81123 for Error, #FFB900 for Paused.
+render::ColorF ProgressOverlayColor(shell::ProgressState state);
 
 // "12" for 1..9, "9+" above, empty at 0 and below (C-22: nothing is drawn).
 std::wstring BadgeTextFor(int count);
@@ -106,6 +137,12 @@ struct DockTile {
     // painter. 0 means "no badge"; the painter draws nothing for it, so a tile
     // whose app has no adapter needs no special case.
     int message_count = 0;
+    // Taskbar-progress overlay (T-067, C-22 progress_bar). Written from the
+    // ProgressTracker's last snapshot by the main loop, read by the painter.
+    // NoProgress paints nothing; a showing message badge outranks it (C-22:
+    // message_badge > progress_bar), handled in the paint path.
+    shell::ProgressState progress_state = shell::ProgressState::NoProgress;
+    float progress_fraction = 0.0f;  // 0..1, meaningful for Normal only
 };
 
 // FNV-1a over the UTF-16 source string. Only needs to be collision-resistant
@@ -183,6 +220,11 @@ struct DockPaintInput {
     int backdrop_h = 0;
     float dpi = 96.0f;
     DockHover hover{};
+    // Wall clock in ms, accumulated by the tick, for time-driven overlays: the
+    // indeterminate progress pulse (T-067). Lives here rather than on the tile
+    // because it is global animation state, and here rather than a GetTickCount
+    // read inside Paint because tests must be able to freeze it.
+    double clock_ms = 0.0;
     // Live reorder gesture, or nullptr. The painter reads it but never writes: the
     // controller owns the gesture, and two owners would let the ghost and the
     // insertion slot disagree.

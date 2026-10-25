@@ -37,6 +37,7 @@
 #include "shell/icon_cache.h"
 #include "shell/message_counts.h"
 #include "shell/start_menu.h"
+#include "shell/taskbar_progress.h"
 #include "shell/thumbnail_host.h"
 #include "shell/window_actions.h"
 #include "shell/window_list.h"
@@ -130,6 +131,20 @@ std::optional<int> MessageCountPollFromEnvironment() {
     const int value = _wtoi(buffer);
     if (value >= 200 && value <= 10000) return value;
     return std::nullopt;
+}
+
+// Poll interval override for the taskbar-progress white-list scan (T-067).
+//
+// Verification hook, same pattern as DOCKFORGE_MESSAGE_POLL_MS: a probe has to
+// catch a copy that only lasts seconds, so it tightens the 500ms default.
+// ProgressTracker clamps to 250..5000 - an MSAA sweep costs real milliseconds,
+// so the floor cannot go as low as the message adapters' 200.
+std::optional<int> ProgressPollFromEnvironment() {
+    wchar_t buffer[16]{};
+    const DWORD n = GetEnvironmentVariableW(L"DOCKFORGE_PROGRESS_POLL_MS", buffer,
+                                            ARRAYSIZE(buffer));
+    if (n == 0 || n >= ARRAYSIZE(buffer)) return std::nullopt;
+    return _wtoi(buffer);
 }
 
 // DOCKFORGE_BADGE_PROBE_TARGET=<lowercase process name> registers one extra
@@ -433,7 +448,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         dock_apps = scan.entries;
     } else {
         for (const auto& entry : scan.entries) {
-            if (MatchesAnyPin(entry, pins)) dock_apps.push_back(entry);
+            if (MatchesAnyPin(entry, pins)) {
+                DF_INFO("app", "pin kept: '%s' kind=%d target='%s' aumid='%s' ns='%s'",
+                        core::WideToUtf8(entry.display_name).c_str(),
+                        static_cast<int>(entry.kind), core::WideToUtf8(entry.target_path).c_str(),
+                        core::WideToUtf8(entry.aumid).c_str(),
+                        core::WideToUtf8(entry.namespace_parsing).c_str());
+                dock_apps.push_back(entry);
+            }
         }
         DF_INFO("app", "DOCKFORGE_PIN_APPS kept %zu of %zu apps", dock_apps.size(),
                 scan.entries.size());
@@ -538,6 +560,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     // holds no unread state for chat apps, so the first two targets read the
     // apps' own window titles - no hooks, no chat content (ADR-0022).
     shell::MessageCounterHost message_counters;
+    // Wall clock for overlay animations (T-067's indeterminate-progress pulse),
+    // accumulated by the tick handler and read by the paint lambda - declared
+    // at function scope so both lambdas capture the same accumulator.
+    double dock_clock_ms = 0.0;
     if (const auto interval = MessageCountPollFromEnvironment()) {
         message_counters.SetPollIntervalMs(*interval);
         DF_INFO("app", "message-count poll overridden to %dms (verification hook)", *interval);
@@ -572,6 +598,41 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     };
     message_counters.Update();
     apply_message_counts();
+
+    // Taskbar progress (T-067, ADR-0024): the spike measured the preferred
+    // ITaskbarList3 proxy-state read path as dead (S_OK calls, zero window
+    // properties) and vtable hooking as forbidden (ADR-0022 class), so the
+    // shipped reader is the white-list poll - explorer copy dialogs via MSAA,
+    // read-only. Progress appears as the C-22 bottom bar on the matching tile.
+    shell::ProgressTracker progress_tracker;
+    if (const auto interval = ProgressPollFromEnvironment()) {
+        progress_tracker.SetPollIntervalMs(*interval);
+        DF_INFO("app", "taskbar-progress poll overridden to %dms (clamped) (verification hook)",
+                progress_tracker.poll_interval_ms());
+    }
+    // Every state change lands in the log: a probe must be able to tell
+    // "scanned and found nothing" from "never scanned".
+    progress_tracker.set_changed([](const std::wstring& target_app_id,
+                                    shell::ProgressState state, float fraction) {
+        DF_INFO("dock", "taskbar progress '%s' -> %s %.0f%%",
+                core::WideToUtf8(target_app_id).c_str(), shell::ToString(state),
+                fraction * 100.0f);
+    });
+    // Copies the last snapshot onto the tiles (AUMID-then-basename matching,
+    // the same two shapes CountForEntry uses).
+    auto apply_progress = [&]() {
+        for (dock::DockTile& tile : tiles) {
+            const shell::ProgressTracker::Snapshot snap = progress_tracker.StateForEntry(tile.app);
+            tile.progress_state = snap.state;
+            tile.progress_fraction = snap.fraction;
+        }
+    };
+    progress_tracker.Update(0.0);
+    apply_progress();
+    DF_INFO("app", "taskbar-progress white list: %zu entr%s, poll %dms",
+            std::size(shell::kProgressWhiteList),
+            std::size(shell::kProgressWhiteList) == 1 ? "y" : "ies",
+            progress_tracker.poll_interval_ms());
 
     platform::WindowDesc desc;
     desc.title = L"DockForge";
@@ -1333,6 +1394,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                 input.dpi = dpi;
                 input.geometry = geometry;
                 input.hover = dock_hover;
+                // Frozen-frame-friendly animation clock for the indeterminate
+                // progress pulse (T-067); see the tick handler.
+                input.clock_ms = dock_clock_ms;
                 // Non-null only while a drag is in flight: the painter draws the
                 // ghost and the insertion line, and skips the source slot. Passing
                 // the controller's own state (not a copy) keeps the ghost and the
@@ -1802,7 +1866,18 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
             running_tracker.ApplyToTiles(tiles);
             dirty = true;
         }
-        // Hover drives both the magnification ramp and the clickable region. The
+        // Taskbar progress (T-067): throttled MSAA white-list scan; Update
+        // returns true only when a reading appeared, moved, or a dialog left
+        // the scan (window destroyed - state drops in the same pass, the same
+        // side of the window lifecycle as the thumbnail cleanup).
+        if (progress_tracker.Update(delta_ms)) {
+            apply_progress();
+            dirty = true;
+        }
+        // Overlay animation clock: drives the indeterminate-progress pulse.
+        // Accumulated here (not read in Paint) so a frozen test frame is
+        // deterministic and a dropped frame cannot jump the animation.
+        dock_clock_ms += delta_ms;        // Hover drives both the magnification ramp and the clickable region. The
         // ramp runs at frame rate, so the tick is the only place it can advance
         // without a separate timer.
         const bool was_hovered = region_hovered;

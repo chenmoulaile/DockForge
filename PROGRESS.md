@@ -497,3 +497,11 @@ config=false 不动任务——不主动清除用户手工创建的同名任务�
   系统默认光标（未接 IDragSourceHelper）；Esc 物理键未注入（命令通道等价驱动
   同一 Escape()）；拖到资源管理器与拖到 Dock 同载荷但未逐一截图。
 - 下轮开始于：T-067 任务栏进度条同步（M6/P1.5）
+
+## 2026-10-25T17:15:00+08:00 | T-067 | PARTIAL
+- 做了什么：任务栏进度条同步（ADR-0024 白名单降级路径）。spike 实测两条读取路径：窗口属性代理状态死亡（SetProgressState/Value 全 S_OK 但 EnumPropsExW 属性表不变）、MSAA 白名单成立（OperationStatusWindow 类名——一个词、标题为空按标题永远打不中；子 HWND 树 + OBJID_WINDOW 递归；ROLE_SYSTEM_PROGRESSBAR get_accValue()='56%'）。产品层 src/shell/taskbar_progress.{h,cpp}：ProgressState 四态映射 TBPF_*（组合取最严重）、ParseProgressPercent（锚定 % 前数字串，"56% of 2 items"→56）、CopyDialogMsaaReader、ProgressTracker（250..5000ms 钳制、扫描即重建窗口表=wanted-list 清理）。绘制层 C-22 progress_bar：4DIP 高/2DIP 圆角/底部内侧 2DIP、accent/#E81123/#FFB900 精确分数常量、Indeterminate 600ms alpha 脉冲由 tick 时钟驱动（帧率无关）、message_badge 优先级抑制。main.cpp 集成 + DOCKFORGE_PROGRESS_POLL_MS 验证钩子。
+- 实测：gate -Action all 退出 0（357 用例 3973 断言，新增 dock_progress_test 23 用例）；实机探针 tools/progress_probe.ps1 A..D 全 PASS（白名单注册、normal 43%→69% 递增、复制结束清除事件、3 秒无残留）；像素验证 tools/progress_pixel_check.ps1 PASS（on/off 差异像素 134 个、y=181..188=8px=4DIP@200%DPI、#0063B1）；句柄短时稳态 tools/progress_handles.ps1 PASS（3 轮完整复制 GDI 0→0/USER 7→7，T-016 Get-Settled 法）。
+- 探针迭代教训（环境，非产品缺陷）：① fsutil createnew 全零文件走 NTFS 快速路径，"复制"亚秒完成对话框 <100ms——载荷必须真实随机；② 单个 2GB 随机文件本机 NVMe C:→D: 也仅 ~1.5s，对话框只在最后 1 秒可扫——有效载荷是几百个小随机文件（512×8MB 目录复制，对话框活 5-8s）；③ explorer tile 是 ShellItem（aumid=Microsoft.Windows.Explorer、target_path 空），白名单 id 用 exe 名匹配不上，改 AUMID；④ ITaskbarList3 的 CLSID 手写值 CoCreateInstance 返回 E_NOINTERFACE（用 libuuid 的 GUID 后通过，根因未深究）。
+- 附带修复（跨任务）：BadgeAccentColor 自 T-065 起只读 HKCU\...\Explorer\AccentColor，该值在默认配置机器不存在（本机实测 null）——一直走 fallback 红。改为 Win10 AccentColor → Win11 Accent\AccentColorMenu 两级读取（本机 0xFFB16300=#0063B1）。badge 与进度条共用，均受益。
+- 诚实边界（evidence/T-067/verify.txt）：Chrome 下载白名单未覆盖（需另起 spike）；Paused/Error 无法程序化触发 explorer 对话框，以常量级单测锁定；8 小时句柄长跑未执行（单会话不可行，tools/progress_handles.ps1 已就绪只需时长）。
+- 下轮开始于：T-068 或 T-067 补 8 小时长跑

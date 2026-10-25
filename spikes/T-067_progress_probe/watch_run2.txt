@@ -1,0 +1,26 @@
+=== Q3: watch explorer copy dialog (any process), 40 s ===
+start the copy NOW (e.g. PowerShell Shell.Application CopyHere of a big file)
+round 10: no copy dialog
+round 11: dialog hwnd=0000000000140e0e class='OperationStatusWindow' pid=23140
+[dialog] hwnd=0000000000140e0e props=4
+  prop '#43298 (atom)' handle=0000000000000001 (value not readable as pointer)
+  prop '#43294 (atom)' handle=000000000000c06c (value not readable as pointer)
+  prop '#43281 (atom)' handle=000000000000c06d (value not readable as pointer)
+  prop '#43282 (atom)' handle=0000000000030007 (value not readable as pointer)
+[dialog-child] hwnd=0000000000330b4e props=2
+  prop '#43294 (atom)' handle=000000000000c06c (value not readable as pointer)
+  prop '#43281 (atom)' handle=000000000000c06d (value not readable as pointer)
+[dialog-grandchild] hwnd=0000000000150d94 props=0
+[dialog-grandchild] hwnd=00000000000e0d0c props=0
+[dialog-grandchild] hwnd=00000000004d0674 props=0
+[dialog-grandchild] hwnd=0000000000210dda props=0
+[dialog-grandchild] hwnd=00000000000b0e28 props=0
+NEW window hwnd=0000000000140e0e class='OperationStatusWindow' title='' pid=23140
+round 20: no copy dialog
+round 30: no copy dialog
+round 40: no copy dialog
+round 50: no copy dialog
+round 60: no copy dialog
+round 70: no copy dialog
+round 80: no copy dialog
+watch done: 89 rounds, 0 msaa progress reports

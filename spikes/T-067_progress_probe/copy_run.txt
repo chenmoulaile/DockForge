@@ -1,0 +1,2 @@
+=== Q3: explorer copy dialog, src='big512.bin' dst='big512_copy.bin' ===
+FAIL CoCreateInstance(FileOperation) hr=0x80040154

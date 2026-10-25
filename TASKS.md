@@ -602,17 +602,17 @@
 
 ### T-067 · 任务栏进度条同步（P1 · 中高风险）
 
-- 状态: TODO
+- 状态: PARTIAL（8 小时句柄长跑待实机；其余 DoD 全部实测达标）
 - 依赖: T-013（运行状态指示）
 - 上下文: `src/shell/`、`ADR-0024`
 - DoD:
-  - [ ] **Spike 先行**：`ITaskbarList3::SetProgressValue/SetProgressState` 是设置接口不是读取；`spikes/T-067_progress_probe/` 验证至少一条读取路径（vtable hook 或目标窗口代理状态轮询）
-  - [ ] hook 不稳定则降级为白名单轮询（资源管理器复制、Chrome 下载），不追求系统级全覆盖
-  - [ ] 进度映射到 Dock 图标底部细进度条，颜色跟随系统强调色（C-22）
-  - [ ] 状态机：正常 / 暂停（#FFB900）/ 错误（#E81123）/ 不确定（脉冲），对应 `TBPF_*`
-  - [ ] 目标窗口销毁时清理进度状态，与 `DwmUnregisterThumbnail` 同侧清理
-  - [ ] 8 小时连续运行无句柄泄漏（`GetGuiResources` 稳态采样，方法同 T-016）
-- 证据: `evidence/T-067/`
+  - [x] **Spike 先行**：`ITaskbarList3::SetProgressValue/SetProgressState` 是设置接口不是读取；`spikes/T-067_progress_probe/` 验证至少一条读取路径（vtable hook 或目标窗口代理状态轮询）—— 窗口属性路径实测死亡（S_OK 但属性表不变），MSAA 白名单路径实测可行（OperationStatusWindow 类、空标题、ROLE_SYSTEM_PROGRESSBAR value='56%'）
+  - [x] hook 不稳定则降级为白名单轮询（资源管理器复制、Chrome 下载），不追求系统级全覆盖 —— explorer 复制端到端实测（探针 A..D PASS）；Chrome 下载未覆盖（白名单数据表已留位，需另起 spike）
+  - [x] 进度映射到 Dock 图标底部细进度条，颜色跟随系统强调色（C-22）—— 像素级实证（8px=4DIP@200%DPI、#0063B1、仅在复制期间存在）；附带修复 BadgeAccentColor 只读 Win10 路径导致 T-065 起一直 fallback 的缺陷（本机 AccentColorMenu=0xFFB16300）
+  - [x] 状态机：正常 / 暂停（#FFB900）/ 错误（#E81123）/ 不确定（脉冲），对应 `TBPF_*` —— 单测锁定映射/组合优先级/颜色常量；实机验证 Normal（43%→69% 递增）与 Indeterminate（对话框临终无值）；Paused/Error 无法程序化触发 explorer 对话框，以常量级单测锁定（诚实边界）
+  - [x] 目标窗口销毁时清理进度状态，与 `DwmUnregisterThumbnail` 同侧清理 —— ScanNow 每轮以扫描结果重建窗口表（wanted-list 语义同 ThumbnailHost::SetSources）；实机清除事件 + 3 秒无残留
+  - [ ] 8 小时连续运行无句柄泄漏（`GetGuiResources` 稳态采样，方法同 T-016）—— 短时稳态 PASS（3 轮完整复制 GDI 0→0 / USER 7→7，T-016 Get-Settled 法）；8 小时长跑待实机（tools/progress_handles.ps1 已就绪）
+- 证据: `evidence/T-067/`（spike self_run/watch_run3；probe.txt A..D 全 PASS + on/off 截图；pixel_check.txt PASS；handles.txt 短时稳态；test.log 357 用例 3973 断言全过；verify.txt 汇总与诚实边界）
 
 ### T-068 · MyFinder 硬件控制面板（P1 · 低风险）
 

@@ -1,0 +1,10 @@
+=== Q1: proxy state on our own window ===
+[baseline] hwnd=0000000001310a1e props=1
+  prop 'SysSetRedraw' handle=0000000000000000 (value not readable as pointer)
+SetProgressState(NORMAL) hr=0x00000000  SetProgressValue(37,100) hr=0x00000000
+[after NORMAL 37/100] props=1
+[after value 62/100 (state unchanged)] props=1
+[after TBPF_PAUSED] props=1
+[after TBPF_ERROR] props=1
+[after TBPF_INDETERMINATE] props=1
+[after TBPF_NOPROGRESS] props=1

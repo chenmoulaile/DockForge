@@ -1,0 +1,5 @@
+accent colour: R=0 G=99 B=177 (0x0063B1)
+pixels matching accent ONLY while the copy ran: 134
+rows: y=181..188 (8 rows), per-row counts: 181=10 182=11 183=12 184=12 185=12 186=12 187=11 188=54
+bar height in px: 8 (4 DIP at the screen's DPI scale)
+VERDICT: PASS - an accent-coloured bar existed only during the copy

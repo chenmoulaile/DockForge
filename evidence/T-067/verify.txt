@@ -1,0 +1,79 @@
+T-067 任务栏进度条同步 · 证据汇总
+====================================
+日期：2026-10-25。所有"PASS"均来自本目录日志的实际运行，可复现命令附后。
+
+一、Spike（DoD 第 1 条：读取路径先证明）
+----------------------------------------
+1. 窗口属性代理状态：不成立。self_run.txt —— SetProgressState/SetValue 全部
+   hr=0x00000000，EnumPropsExW 前后属性表不变（只有原有 SysSetRedraw）。
+   复现：spikes/T-067_progress_probe/spike.exe self
+2. vtable hook：未实现（ADR-0024 明文与 ADR-0022 禁止项同类）。
+3. MSAA 白名单轮询：成立。watch_run3.txt —— 类名 OperationStatusWindow
+   （标题为空）、子 HWND 树 + OBJID_WINDOW 递归、ROLE_SYSTEM_PROGRESSBAR
+   get_accValue()='56%'。复现：spike.exe watch 40 + drive_copy.ps1（4GB 载荷）。
+
+二、白名单轮询降级（DoD 第 2 条）
+----------------------------------
+explorer 复制：端到端 PASS（probe.txt 全部 4 部分）：
+  A 白名单注册（1 entry @250ms 验证钩子）+ explorer tile pin（AUMID
+    Microsoft.Windows.Explorer —— tile 是 ShellItem、target_path 空，exe 名
+    匹配不上，bring-up 期间实测修正）
+  B normal 读数出现且递增：43% -> 69%（16:54 轮 50%->86%、16:57 轮 62%）
+  C 复制结束清除事件 '-> none'（窗口销毁清理路径，DoD 第 5 条同证）
+  D 3 秒后无残留（最后一条仍 '-> none'）
+Chrome 下载：**未覆盖**（诚实边界，见"遗留"）。ADR-0024 允许白名单可用即
+达标、不追求系统级全覆盖；白名单是数据表，Chrome 是未来条目。
+
+三、C-22 进度条绘制（DoD 第 3 条）
+------------------------------------
+pixel_check.txt：PASS —— progress_on 与 progress_off 的差异像素 134 个、
+y=181..188（8 行 = 4 DIP @ 200% DPI）、颜色 #0063B1（注册表 AccentColorMenu
+实测值，即系统强调色）。Normal 与 Indeterminate 的 alpha 脉冲在代码中由
+tick 时钟驱动（Paint 不读钟，帧率无关，C-12 规则）。
+
+四、状态机 TBPF_*（DoD 第 4 条）
+---------------------------------
+TBPF_NORMAL/INDETERMINATE/PAUSED/ERROR -> 四态映射与组合优先级
+（Error>Paused>Indeterminate>Normal）单测锁定；#E81123/#FFB900 常量按
+0xXX/255.0f 精确分数断言（tests/dock_progress_test.cpp，tests 通过
+test.log：357 用例 3973 断言全过）。实机验证了 Normal（数值递增）与
+Indeterminate（对话框临终读不到值时正确映射）；Paused/Error 的实机触发
+需要把 explorer 对话框置为暂停/错误态，无程序化手段，以单测+颜色常量
+锁定（诚实边界）。
+
+五、窗口销毁清理（DoD 第 5 条）
+-------------------------------
+ProgressTracker::ScanNow 每轮以扫描结果重建窗口表（"与 DwmUnregister-
+Thumbnail 同侧"的生命周期纪律：ThumbnailHost::SetSources 同款 wanted-list
+语义）。实机：probe.txt C（'-> none' 清除事件）+ D（无残留）。单测：
+"tracker drops state when the target window is destroyed"（含 HWND 失效
+与"仍在但不再上报"两种路径）。
+
+六、句柄（DoD 第 6 条）
+-----------------------
+handles.txt：3 轮完整复制（MSAA 扫描 + 重绘）+ T-016 方法（Get-Settled
+8 采样取最小、预热 1 轮排除惰性分配）：GDI 0->0、USER 7->7，零增长，PASS。
+**8 小时连续运行未执行**（单会话不可行）——列为遗留，方法已就绪
+（tools/progress_handles.ps1，跑长些即可）。
+
+附带修复（跨任务，已在代码注释与本文件记录）
+---------------------------------------------
+BadgeAccentColor 自 T-065 起只读 HKCU\...\Explorer\AccentColor，该值在默认
+配置机器上不存在（本机实测 null），一直走 fallback 红。现按 Win10/Win11
+两级读取（AccentColor -> Accent\AccentColorMenu，后者本机实测 0xFFB16300
+= #0063B1）。badge 与进度条共用该函数，均受益。
+
+复现命令
+--------
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/gate.ps1 -Action all
+  （build + 全量单测；test.log 存档，exit 0）
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/progress_probe.ps1
+  （实机探针 A..D；需 512x8MB 随机载荷，首跑生成约 1 分钟）
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/progress_pixel_check.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/progress_handles.ps1
+
+遗留（下一会话）
+----------------
+1. 8 小时连续运行句柄泄漏长跑（DoD 第 6 条后半；方法同上，时长换 8h）。
+2. Chrome 下载白名单条目（DoD 白名单点名的第二应用；需要 UIA/MSAA 对
+   Chrome 下载气泡的读法验证，另起 spike）。

@@ -21,28 +21,38 @@ std::uint64_t Fnv1a16(const std::wstring& text) {
     return hash;
 }
 
-// System accent colour for the badge (C-22: "颜色: 跟随系统强调色").
+// System accent colour for the overlays (C-22: "颜色: 跟随系统强调色").
 //
 // Read once and cached: the accent colour changes only when the user revisits
 // personalisation settings, and a registry read on the paint path would sit in
 // a hot loop. A DockForge restart picks up a changed accent - acceptable for a
 // colour that does not carry state.
+//
+// Two registry shapes, both tried: Win10 writes AccentColor when the user picks
+// a custom accent; Win11 machines that never did carry the default in the
+// Accent subkey's AccentColorMenu instead (measured 0xFFB16300 = the Windows
+// default blue). Reading only the first made every default-config machine -
+// including this one - silently fall back since T-065; found while bringing up
+// the T-067 progress bar, whose Normal colour is the same accent.
 const render::ColorF& BadgeAccentColor() {
     static const render::ColorF color = [] {
+        auto read_dword = [](const wchar_t* subkey, const wchar_t* value, DWORD* out) {
+            DWORD size = sizeof(*out);
+            return RegGetValueW(HKEY_CURRENT_USER, subkey, value, RRF_RT_REG_DWORD, nullptr, out,
+                                &size) == ERROR_SUCCESS;
+        };
         DWORD abgr = 0;
-        DWORD size = sizeof(abgr);
-        if (RegGetValueW(HKEY_CURRENT_USER,
-                         L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer",
-                         L"AccentColor", RRF_RT_REG_DWORD, nullptr, &abgr, &size) ==
-                ERROR_SUCCESS &&
-            size == sizeof(abgr)) {
-            // Stored as 0xAABBGGRR.
-            const float r = static_cast<float>(abgr & 0xFF) / 255.0f;
-            const float g = static_cast<float>((abgr >> 8) & 0xFF) / 255.0f;
-            const float b = static_cast<float>((abgr >> 16) & 0xFF) / 255.0f;
-            return render::ColorF{r, g, b, 1.0f};
+        if (!read_dword(L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer",
+                        L"AccentColor", &abgr) &&
+            !read_dword(L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Accent",
+                        L"AccentColorMenu", &abgr)) {
+            return kBadgeFallbackColor;
         }
-        return kBadgeFallbackColor;
+        // Stored as 0xAABBGGRR.
+        const float r = static_cast<float>(abgr & 0xFF) / 255.0f;
+        const float g = static_cast<float>((abgr >> 8) & 0xFF) / 255.0f;
+        const float b = static_cast<float>((abgr >> 16) & 0xFF) / 255.0f;
+        return render::ColorF{r, g, b, 1.0f};
     }();
     return color;
 }
@@ -98,6 +108,31 @@ BadgeGeometry ComputeBadgeGeometry(const render::RectF& slot) {
     badge.dot = render::RectF{cx - radius, cy - radius, cx + radius, cy + radius};
     badge.font_dip = std::max(width * kBadgeFontFactor, kBadgeMinFontDip);
     return badge;
+}
+
+// ---- progress bar (T-067, C-22 progress_bar) --------------------------------
+
+ProgressGeometry ComputeProgressGeometry(const render::RectF& slot, float fraction) {
+    ProgressGeometry pg;
+    const float inset = kProgressBarInsetDip;
+    pg.track = render::RectF{slot.left + inset, slot.bottom - inset - kProgressBarHeightDip,
+                             slot.right - inset, slot.bottom - inset};
+    const float f = std::clamp(fraction, 0.0f, 1.0f);
+    const float width = pg.track.Width() * f;
+    pg.bar = render::RectF{pg.track.left, pg.track.top, pg.track.left + width, pg.track.bottom};
+    return pg;
+}
+
+render::ColorF ProgressOverlayColor(shell::ProgressState state) {
+    // Normal and Indeterminate share the accent (the C-22 text names one
+    // accent colour and two exception hues); Error and Paused are the literal
+    // contract values. Same accent source as the badge so the two overlays can
+    // never disagree about "the" accent colour.
+    switch (state) {
+        case shell::ProgressState::Error: return kProgressErrorColor;
+        case shell::ProgressState::Paused: return kProgressPausedColor;
+        default: return BadgeAccentColor();
+    }
 }
 
 std::vector<DockTile> BuildTiles(const std::vector<shell::AppEntry>& apps,
@@ -385,6 +420,34 @@ bool DockPainter::Paint(ID2D1DeviceContext& dc, render::IRenderBackend& backend,
                 backend.DrawLabel(text.c_str(), badge.dot, badge.font_dip,
                                   render::ColorF{1.0f, 1.0f, 1.0f, 1.0f}, render::TextAlign::Center);
             }
+        }
+
+        // Taskbar-progress bar (T-067, C-22 progress_bar), inside the icon's
+        // bottom edge. Same slot-geometry source rule as the badge. Suppressed
+        // while a badge is showing (C-22: message_badge > progress_bar - two
+        // overlays on one icon would both be unreadable) and while the tile is
+        // dragged (same phantom-app reasoning as the badge). Not hit-testable:
+        // the bar never intercepts a click meant for the app.
+        if (tile.progress_state != shell::ProgressState::NoProgress &&
+            tile.message_count <= 0 && i != drag_source) {
+            const float fraction =
+                tile.progress_state == shell::ProgressState::Indeterminate
+                    ? 1.0f  // indeterminate fills the lane and pulses instead of advancing
+                    : std::clamp(tile.progress_fraction, 0.0f, 1.0f);
+            const ProgressGeometry pg = ComputeProgressGeometry(slot, fraction);
+            render::ColorF color = ProgressOverlayColor(tile.progress_state);
+            if (tile.progress_state == shell::ProgressState::Indeterminate) {
+                // 600ms breathing cycle, 0.35..1.0 alpha. Driven by the tick's
+                // accumulated clock (input.clock_ms), never by frame count, so
+                // 120Hz and 60Hz animate at the same rate (C-12 rule).
+                const double phase = std::fmod(input.clock_ms, 600.0) / 600.0;
+                color.a *=
+                    0.35f + 0.65f * static_cast<float>(0.5 + 0.5 * std::sin(phase * 6.28318530718));
+            }
+            // Radius clamped to half the bar's own width: at tiny fractions the
+            // 2 DIP corner would otherwise describe a pill wider than the bar.
+            const float radius = std::min(kProgressBarCornerDip, pg.bar.Width() * 0.5f);
+            backend.FillRoundedRect(pg.bar, radius, color);
         }
     }
 
