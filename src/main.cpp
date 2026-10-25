@@ -18,6 +18,7 @@
 #include "dock/dock_view.h"
 #include "dock/drop_target.h"
 #include "dock/drag_controller.h"
+#include "dock/folder_panel.h"
 #include "dock/hover_timer.h"
 #include "dock/launchpad.h"
 #include "dock/running_tracker.h"
@@ -505,6 +506,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     // preview never appeared".
     const bool preview_class_ready = platform::PreviewWindow::RegisterWindowClass(instance);
 
+    // The folder drill-through panel (T-066) has its own class for the same
+    // reason. A failure is logged once; the click on a folder tile then falls
+    // back to the launch path instead of silently doing nothing.
+    const bool folder_panel_class_ready = dock::FolderPanel::RegisterWindowClass(instance);
+
     // Geometry needs the tile count, which needs the scan, which happens above.
     // The scale is unknown until the HWND exists, so start at 1.0 and recompute
     // inside apply_placement once Window::Dpi() is readable.
@@ -805,6 +811,16 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     // tray-level feature, and "changed system behaviour must have a switch that
     // defaults to off" (PROMPT.md).
     const bool preview_enabled = ReadEnvFlag(L"DOCKFORGE_PREVIEW", true) && preview_class_ready;
+
+    // Folder drill-through panel (T-066, ADR-0023). Owns its popup HWND and
+    // navigation stack; the Dock only decides when to open it (a folder tile
+    // click) and feeds its watcher/command channel from the tick. Disabled
+    // silently never: the registration result is logged and a failed click
+    // falls back to the launch path.
+    dock::FolderPanel folder_panel;
+    if (!folder_panel_class_ready) {
+        DF_WARN("dock", "folder panel class registration failed; folder tiles launch");
+    }
 
     // Launchpad (T-041). One overlay per display, one shared index. The index scan is
     // 360-1045ms on this machine (evidence/T-040), so it is warmed once at startup
@@ -1190,6 +1206,117 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         }
     };
 
+    // Folder-panel probe channel (T-066), the same file-channel pattern as the
+    // Launchpad's: RegisterHotKey-style gestures and a physical mouse cannot be
+    // driven from a script, so the *source* of the input is replaced while
+    // DrillInto/Back/Escape/Close run the exact code the mouse and WM_KEYDOWN
+    // take. Commands: `open <utf8 path>`, `drill <utf8 display-name>`, `back`,
+    // `esc`, `close`, `hover <row>`.
+    std::wstring folder_cmd_file;
+    {
+        wchar_t buffer[MAX_PATH]{};
+        const DWORD n = GetEnvironmentVariableW(L"DOCKFORGE_FOLDER_CMD_FILE", buffer,
+                                                ARRAYSIZE(buffer));
+        if (n > 0 && n < ARRAYSIZE(buffer)) {
+            folder_cmd_file.assign(buffer, n);
+            DF_INFO("folder", "probe file=%s", core::WideToUtf8(folder_cmd_file).c_str());
+        }
+    }
+    // T-066 startup hook: open the panel on this path right after the first
+    // placement, without a click. Evidence-only, like DOCKFORGE_TASKBAR_CRASH_TEST.
+    std::wstring folder_probe_path;
+    {
+        wchar_t buffer[MAX_PATH * 2]{};
+        const DWORD n = GetEnvironmentVariableW(L"DOCKFORGE_FOLDER_PROBE", buffer,
+                                                ARRAYSIZE(buffer));
+        if (n > 0 && n < ARRAYSIZE(buffer)) {
+            folder_probe_path.assign(buffer, n);
+            DF_INFO("folder", "probe auto-open=%s", core::WideToUtf8(folder_probe_path).c_str());
+        }
+    }
+    bool folder_probe_opened = false;
+    int folder_probe_tile_click = -1;  // consumed by the tick, runs ActivateTile
+    std::string folder_last_command;
+    double folder_cmd_since_read_ms = 1e9;
+    auto read_folder_command = [&](double delta_ms) {
+        folder_cmd_since_read_ms += delta_ms;
+        if (folder_cmd_since_read_ms < 50.0) return;
+        folder_cmd_since_read_ms = 0.0;
+        // Full sharing: the writer is another process (see read_hover_probe).
+        HANDLE h = CreateFileW(folder_cmd_file.c_str(), GENERIC_READ,
+                               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                               nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (h == INVALID_HANDLE_VALUE) return;
+        char raw[512]{};
+        DWORD got = 0;
+        const BOOL read_ok = ReadFile(h, raw, sizeof(raw) - 1, &got, nullptr);
+        CloseHandle(h);
+        if (!read_ok || got == 0) return;
+        raw[got] = '\0';
+        std::string command(raw);
+        while (!command.empty() &&
+               (command.back() == '\n' || command.back() == '\r' || command.back() == ' ')) {
+            command.pop_back();
+        }
+        if (command.empty() || command == folder_last_command) return;
+        folder_last_command = command;
+        DF_INFO("folder", "probe command=%s", command.c_str());
+
+        if (command == "back") {
+            folder_panel.Back();
+        } else if (command == "esc") {
+            folder_panel.Escape();
+        } else if (command == "close") {
+            folder_panel.Close();
+        } else if (command.rfind("open ", 0) == 0) {
+            const std::wstring path = core::Utf8ToWide(std::string(command.c_str() + 5));
+            RECT win_rect{};
+            GetWindowRect(window.Handle(), &win_rect);
+            const float row_scale = window.Scale() > 0.0f ? window.Scale() : 1.0f;
+            const int plate_top =
+                win_rect.bottom - static_cast<int>(geometry.plate_height_dip * row_scale);
+            folder_panel.Open(instance, path, (win_rect.left + win_rect.right) / 2,
+                              plate_top, static_cast<float>(window.Dpi()));
+        } else if (command.rfind("drill ", 0) == 0) {
+            const std::string name_utf8 = command.c_str() + 6;
+            const std::wstring name = core::Utf8ToWide(name_utf8);
+            // Match by display name among the visible rows, then drill the way
+            // a real click does: ActivateRow's folder arm calls DrillInto with
+            // the row's own full path; the probe re-derives that same path from
+            // current folder + display name, which is what the shell displayed.
+            bool matched = false;
+            for (int i = 0; i < folder_panel.RowCount() && !matched; ++i) {
+                if (folder_panel.RowName(i) == name) {
+                    std::wstring child = folder_panel.CurrentFolder();
+                    if (!child.empty() && child.back() != L'\\') child += L'\\';
+                    child += name;
+                    matched = folder_panel.DrillInto(child);
+                }
+            }
+            if (!matched) {
+                DF_WARN("folder", "probe drill: no row named %s", name_utf8.c_str());
+            }
+        } else if (command.rfind("hover ", 0) == 0) {
+            // Paint-level only: the hint strip and row highlight read the
+            // hovered row; SetHoveredRowForProbe is the state WM_MOUSEMOVE
+            // would leave behind.
+            const int row = atoi(command.c_str() + 6);
+            folder_panel.SetHoveredRowForProbe(row);
+            DF_INFO("folder", "probe hover row=%d", row);
+        } else if (command.rfind("tile ", 0) == 0) {
+            // The `tile <index>` command runs ActivateTile - the exact function
+            // a physical dock click's release arm runs - on the next tick (it
+            // is not captured here because it is defined later in the file).
+            const int index = atoi(command.c_str() + 5);
+            if (index >= 0 && index < static_cast<int>(tiles.size())) {
+                folder_probe_tile_click = index;
+            } else {
+                DF_WARN("folder", "probe tile: index %d out of range (%zu tiles)",
+                        index, tiles.size());
+            }
+        }
+    };
+
     auto repaint = [&] {
         const float dpi = static_cast<float>(window.Dpi());
         const std::int64_t paint_start = core::QueryPerformanceTicks();
@@ -1491,6 +1618,49 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     auto ActivateTile = [&](int index) {
         if (index < 0 || index >= static_cast<int>(tiles.size())) return;
         const shell::AppEntry& app = tiles[static_cast<std::size_t>(index)].app;
+
+        // Folder tiles (T-066, ADR-0023): a left click opens the drill-through
+        // panel above the dock instead of launching Explorer. Second click on
+        // the same folder toggles the panel closed. The unmagnified slot centre
+        // is the anchor - the panel pops over the tile the user pinned, not
+        // over wherever the magnified row happened to be.
+        if (folder_panel_class_ready && app.kind == shell::AppKind::Folder &&
+            !app.target_path.empty()) {
+            if (folder_panel.Visible() &&
+                folder_panel.RootFolder() == app.target_path) {
+                folder_panel.Close();
+                running_tracker.Invalidate();
+                return;
+            }
+            const float row_scale = window.Scale() > 0.0f ? window.Scale() : 1.0f;
+            const auto centres = dock::IdleCentersDip(geometry, row_scale);
+            RECT win_rect{};
+            GetWindowRect(window.Handle(), &win_rect);
+            const int anchor_x = centres.empty()
+                                     ? (win_rect.left + win_rect.right) / 2
+                                     : win_rect.left +
+                                           static_cast<int>(centres[static_cast<
+                                               std::size_t>(index)] * row_scale);
+            // The panel sits just above the plate's top edge. The window is
+            // taller than the plate (the magnified row needs headroom), so the
+            // anchor is derived from the same geometry the region uses.
+            const int plate_top_px =
+                win_rect.bottom -
+                static_cast<int>(geometry.plate_height_dip * row_scale);
+            if (folder_panel.Open(instance, app.target_path, anchor_x, plate_top_px,
+                                  window.Dpi())) {
+                DF_INFO("dock", "folder panel opened for tile[%d] %s", index,
+                        core::WideToUtf8(app.display_name).c_str());
+            } else {
+                DF_WARN("dock", "folder panel open failed; launching folder instead");
+                const shell::ActionResult result = shell::ActivateOrMinimizeTimed(app);
+                DF_INFO("dock", "tile[%d] fallback -> %s", index,
+                        shell::ToString(result.action));
+            }
+            running_tracker.Invalidate();
+            return;
+        }
+
         // Enumerate once per click rather than caching: the window set changes
         // without notice (apps close, dialogs open) and EnumWindows costs ~1ms, which
         // is affordable on a click and not on a frame.
@@ -1509,6 +1679,31 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         // it failed for a quarter second.
         running_tracker.Invalidate();
     };
+
+    // T-066 verification hook: pre-seed a folder tile exactly the way an OLE
+    // drop would (ResolveDroppedPath -> CommitOrder), because no script can
+    // perform a real drag onto the dock. The probe then clicks the tile through
+    // the `tile` command, which runs THIS ActivateTile - the same function the
+    // WM_LBUTTONUP release arm runs.
+    {
+        wchar_t buffer[MAX_PATH * 2]{};
+        const DWORD n = GetEnvironmentVariableW(L"DOCKFORGE_FOLDER_TILE", buffer,
+                                                ARRAYSIZE(buffer));
+        if (n > 0 && n < ARRAYSIZE(buffer)) {
+            const std::wstring path(buffer, n);
+            const int at = static_cast<int>(tiles.size());
+            if (InsertDroppedPath(path, at)) {
+                apply_placement();
+                apply_region();
+                InvalidateRect(window.Handle(), nullptr, FALSE);
+                DF_INFO("dock", "DOCKFORGE_FOLDER_TILE seeded a folder tile at [%d]",
+                        at);
+            } else {
+                DF_WARN("dock", "DOCKFORGE_FOLDER_TILE %s was not accepted",
+                        core::WideToUtf8(path).c_str());
+            }
+        }
+    }
 
     // Hides the preview popup and releases every DWM registration.
     //
@@ -1580,6 +1775,28 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         if (message_counters.Update()) {
             apply_message_counts();
             dirty = true;
+        }
+        // Folder panel (T-066). The watcher restarts per level and its 500ms
+        // debounce settles bursts; a settled change re-enumerates and repaints
+        // the panel itself. The probe channel is a no-op without the env var.
+        if (!folder_probe_path.empty() && !folder_probe_opened &&
+            window.Handle() != nullptr && IsWindowVisible(window.Handle())) {
+            folder_probe_opened = true;
+            RECT win_rect{};
+            GetWindowRect(window.Handle(), &win_rect);
+            const float row_scale = window.Scale() > 0.0f ? window.Scale() : 1.0f;
+            const int plate_top =
+                win_rect.bottom - static_cast<int>(geometry.plate_height_dip * row_scale);
+            folder_panel.Open(instance, folder_probe_path,
+                              (win_rect.left + win_rect.right) / 2, plate_top,
+                              static_cast<float>(window.Dpi()));
+        }
+        (void)folder_panel.TickWatcher();
+        read_folder_command(delta_ms);
+        if (folder_probe_tile_click >= 0) {
+            const int index = folder_probe_tile_click;
+            folder_probe_tile_click = -1;
+            ActivateTile(index);
         }
         if (running_tracker.Update(delta_ms)) {
             running_tracker.ApplyToTiles(tiles);
@@ -2028,6 +2245,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                 return true;
             }
             case WM_LBUTTONDOWN: {
+                // A dock press is outside the panel: the menu-like dismissal
+                // (T-066) closes it before the gesture resolves, so a click on
+                // another tile never fights a panel floating above the row.
+                if (folder_panel.Visible()) folder_panel.Close();
                 // The click handler is the ONLY place with foreground rights. Windows
                 // grants them to the process that received the click; from a timer or
                 // hotkey SetForegroundWindow is refused outright, and AttachThreadInput

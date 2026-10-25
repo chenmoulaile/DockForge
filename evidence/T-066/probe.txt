@@ -1,0 +1,12 @@
+﻿T-066 probe 2026-10-25T15:50:38  scratch=C:\Users\chenk\AppData\Local\Temp\dockforge-t066-14437062
+A  PASS  folder tile seeded at [0] (production drop path)
+B  PASS  REAL dock tile click opened the panel (not Explorer)
+C  PASS  hover state set on the long-name row; hint strip in shot
+D  PASS  drill re-enumerated inside the panel (back row + 1 file)
+E  PASS  back returned to the root level
+F  PASS  ReadDirectoryChangesW refresh observed after 617ms (500ms debounce)
+G  PASS  esc unwinds one level first, closes at the root
+H  PASS  real click outside (SendInput) closed the panel
+I  PASS  access-denied folder shows a placeholder, no crash
+J  PASS  empty folder shows the friendly empty body
+K  PASS  drag-out: panel folder dragged onto the dock, CF_HDROP accepted

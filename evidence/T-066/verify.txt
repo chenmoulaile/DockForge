@@ -1,0 +1,75 @@
+T-066 · Dock 文件夹穿透浏览器 · 验证汇总
+日期：2026-10-25 · 会话 1
+
+== 实际执行的命令 ==
+
+1. spike 编译+运行（Git Bash，仓库根）：
+   g++ -std=c++17 -O0 -g -o spikes/T-066_shellfolder_enum/spike.exe \
+       spikes/T-066_shellfolder_enum/spike.cpp -lole32 -lshell32 -lshlwapi -luser32 -lgdi32
+   ./spikes/T-066_shellfolder_enum/spike.exe
+   → spike_shellfolder_enum.log：14/14 PASS，0 failed，exit=0
+
+2. 单元测试（门禁内）：
+   powershell -NoProfile -ExecutionPolicy Bypass -File tools/gate.ps1 -Action all
+   → test.log：All tests passed (3908 assertions in 334 test cases)，gate exit=0
+   其中 tests/folder_browser_test.cpp：6 用例 55 断言（状态映射/占位文案/排序/导航栈/
+   真实枚举/失败形态含尾分隔符归一化）
+
+3. 实机探针（日志驱动快门模式）：
+   powershell -NoProfile -ExecutionPolicy Bypass -File tools/folder_panel_probe.ps1
+   → probe.txt：A..K 共 11 部分 ALL PASS（本文件由探针写出）
+   截图：panel_open / panel_hover_fullname / panel_drilled / panel_back /
+        panel_denied / panel_empty（.png）
+
+== 探针各部分与 DoD 对应 ==
+
+A  文件夹 tile 经生产 drop 解析器入 Dock（DOCKFORGE_FOLDER_TILE 种子，走
+   ResolveDroppedPath→CommitOrder，等价 T-014 拖入产物）
+B  真实鼠标点击 Dock 文件夹 tile → 面板在 Dock 上方弹出（不打开资源管理器）
+   [panel_open.png]
+C  长文件名行内截断；悬停提示条按字符折行显示完整名称（面板自动增高）
+   [panel_hover_fullname.png]
+D  点击子文件夹在面板内钻取（reload(drill) status=ok rows=2 = 返回行+文件）
+   [panel_drilled.png]
+E  返回上级（reload(back) status=ok rows=4）
+F  ReadDirectoryChangesW 监视 + 500ms 防抖：面板打开期间写入新文件 →
+   reload(refresh)，实测延迟 ~585-617ms（含防抖窗口）
+G  Esc 逐级退栈：子级先 reload(back)，根级再 Esc → panel closed
+H  真实 SendInput 点击面板外部（桌面）→ panel closed；面板打开后 ~400ms
+   内有效（系统前台回收窗口内，与真实用户操作节奏一致）
+I  无权限目录 C:\System Volume Information → status=access-denied，友好占位
+   不崩溃 [panel_denied.png]
+J  空文件夹 → status=ok rows=0，友好空占位 [panel_empty.png]
+K  拖出：真实 SendInput 拖拽面板行到 Dock 窗口 → OLE IDataObject(SHCreateDataObject,
+   CF_HDROP) → Dock 生产 IDropTarget 接受（drop enter/commit → drop: added …
+   at tile），DoDragDrop 返回 0x00040100(DRAGDROP_S_DROP) effect=COPY
+
+== Spike 关键结论（spike_shellfolder_enum.log）==
+
+- MinGW-w64 直连 IShellFolder::EnumObjects + IEnumIDList 完全可行：
+  SHParseDisplayName/SHBindToObject/EnumObjects/GetDisplayNameOf(SIGDN_*)
+  /GetAttributesOf/SHGetFileInfoW(PIDL)/ILFree 全部可用（shlobj.h + shell32）
+- 显示名（SIGDN_NORMALDISPLAY）、完整路径（SIGDN_DESKTOPABSOLUTEPARSING）、
+  图标（HICON 与系统图像列表索引双路）、PIDL（绝对 PIDL 字节数非零）四项全验证
+- 失败形态：空目录=S_OK+0 子项（非错误）；C:\System Volume Information=
+  0x80070005(ACCESS_DENIED)；不存在路径=0x80070002 —— 均可映射到友好占位
+- SHCreateDataObject(父绝对 PIDL, 子相对 PIDL) → IDataObject，QueryGetData
+  (CF_HDROP)=S_OK —— 拖出载荷在 MinGW 可构造（K 部分端到端实收）
+- 性能：冷 215ms / 热 5-20ms（每次 reload 实测），点击路径可接受
+
+== 诚实边界（未做/未验证）==
+
+1. 多选拖出未实现：面板行拖出一次一个 IDataObject（单击起拖），
+   Ctrl 多选+批量 CF_HDROP 未做。
+2. 拖出到桌面/资源管理器的视觉反馈依赖系统默认光标（GiveFeedback 返回
+   USEDEFAULTCURSORS），未自绘拖拽图像（IDragSourceHelper 未接）。
+3. ReadDirectoryChangesW 只监视"当前层级"目录（复用 T-040 watcher 的
+   单根模式），层级切换时重启监视；文件内容变化（非增删改名）不触发
+   刷新（FILE_NOTIFY_CHANGE 最后写时间在 T-040 watcher 的过滤集内与否
+   未单独验证——探针 F 部分验证的是"新增文件"路径）。
+4. 探针 B/H/K 的鼠标输入由 SendInput 注入：本机 PowerShell 进程 DPI
+   上下文偶发设置失败导致注入坐标漂移（同脚本一跑准一跑偏），探针用
+   重试+紧凑时序收敛到稳定通过；真实人手操作不受此影响。
+5. Esc 键盘路径：面板激活时 WM_KEYDOWN(VK_ESCAPE) 处理器与探针 esc
+   命令走同一 FolderPanel::Escape()；但"真实物理 Esc 键按下"未在探针
+   中注入（键盘注入未写），命令通道等价驱动。

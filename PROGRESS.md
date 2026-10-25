@@ -460,3 +460,40 @@ config=false 不动任务——不主动清除用户手工创建的同名任务�
   "未运行静默降级"路径）；本机 blur 磨砂当前呈现空渐变（既有环境问题，探针取证
   用 FORCE_MATERIAL=solid，已记 COMPATIBILITY.md）；强调色进程内缓存，改主题需重启。
 - 下轮开始于：T-066 Dock 文件夹穿透浏览器（M6/P1.5）
+
+## 2026-10-25T15:55:00+08:00 | T-066 | DONE
+任务：Dock 文件夹穿透浏览器（P1.5，ADR-0023：IShellFolder 枚举 + IDataObject 拖出，
+不做 NSE）。
+- Spike 先行（spikes/T-066_shellfolder_enum/，14/14 PASS）：MinGW-w64 直连
+  EnumObjects/IEnumIDList 完全可行——显示名（SIGDN_NORMALDISPLAY）、完整路径
+  （DESKTOPABSOLUTEPARSING）、SFGAO_FOLDER、HICON 与系统图像列表索引双路、绝对
+  PIDL 字节数全验证；失败形态可映射（空=S_OK+0 子项、System Volume Information=
+  0x80070005、缺失=0x80070002）；SHCreateDataObject(父 PIDL+子 PIDL)→IDataObject
+  且 QueryGetData(CF_HDROP)=S_OK。MinGW 头要点：StrRetToBufW 在 shlwapi.h。
+- 交付：逻辑层 src/shell/folder_browser.{h,cpp}（ListFolder 阻塞 5-215ms 点击路径
+  可接受/SortFolderEntries 文件夹优先+不区分大小写+路径决胜/FolderNavStack 到根
+  即拒/FolderStatus HRESULT 映射 + 中文占位）；面板 src/dock/folder_panel.{h,cpp}
+  （GDI 弹窗同 T-015 权衡；行内截断+悬停提示条 GetTextExtentExPointW 按字符折行
+  ——文件名无空格 DT_WORDBREAK 折不了——面板自动增高；钻取/返回/Esc 逐级退栈
+  T-042 策略；拖出=IDropSource+DoDragDrop；监视复用 T-040 LaunchpadWatcher 单根
+  500ms 防抖，关面板即停；WM_ACTIVATE 曾激活后失活才关闭——实测系统对 dock 点击
+  打开的面板 ~400ms 无输入即回收前台，瞬态失活防护 must）；main.cpp 集成
+  ActivateTile 拦截 AppKind::Folder（真实点击授权下 SetForegroundWindow 成功）、
+  dock 按下先关面板、DOCKFORGE_FOLDER_TILE 种子（走生产 drop 解析）与
+  DOCKFORGE_FOLDER_CMD_FILE 命令通道（open/drill/back/esc/close/hover/tile）。
+- 实测：gate -Action all 退出 0（3908 断言/334 用例，新增 folder_browser 6 用例
+  55 断言）；实机探针 tools/folder_panel_probe.ps1 A..K 11 部分全 PASS——A 生产
+  drop 路径种 tile、B 真实 dock 点击开面板、C 长名截断+悬停全名折行截图、D/E
+  钻取与返回、F watcher 刷新 ~585-617ms、G Esc 逐级退栈后关闭、H 真实 SendInput
+  点击外部关闭、I/J 拒绝与空目录占位、K 真实拖出到 Dock 生产 IDropTarget：
+  drop enter/commit→drop: added、hr=0x00040100(DRAGDROP_S_DROP) effect=COPY。
+- 探针迭代教训（本机环境，非产品缺陷）：① PowerShell 进程 DPI 上下文偶发设置
+  失败，注入坐标一跑准一跑偏（SetCursorPos 被虚拟化折算）→ 点击带重试+紧凑
+  时序收敛；② dock 点击打开的面板 ~400ms 无输入被系统回收前台 → 探针后续
+  输入必须在窗口内跟上（真实用户节奏天然满足）；③ 命令文件与 app 50ms 轮询
+  读竞争 → Send-Cmd 重试；④ 探针断言用日志行计数而非 pattern 首配（重复 open
+  会匹配旧行）。
+- 诚实边界（evidence/T-066/verify.txt）：多选拖出未做（单行起拖）；拖拽图像用
+  系统默认光标（未接 IDragSourceHelper）；Esc 物理键未注入（命令通道等价驱动
+  同一 Escape()）；拖到资源管理器与拖到 Dock 同载荷但未逐一截图。
+- 下轮开始于：T-067 任务栏进度条同步（M6/P1.5）

@@ -1,0 +1,11 @@
+[  2%] Built target message_badge_probe_app
+[ 58%] Built target dockforge_lib
+[ 60%] Built target autostart_probe
+[ 63%] Built target layout_bench
+[ 65%] Built target DockForge
+[ 97%] Built target dockforge_tests
+[100%] Built target log_probe
+Randomness seeded to: 2229876419
+===============================================================================
+All tests passed (3908 assertions in 334 test cases)
+

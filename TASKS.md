@@ -586,19 +586,19 @@
 
 ### T-066 · Dock 文件夹穿透浏览器（P1 · 中高风险）
 
-- 状态: TODO
+- 状态: DONE（诚实边界见 evidence/T-066/verify.txt：多选拖出/自绘拖拽图像未做，Esc 物理键为命令通道等价驱动）
 - 依赖: T-014（拖拽基础）、T-040（身份规则）
 - 上下文: `src/dock/`、`ADR-0023`
 - DoD:
-  - [ ] **Spike 先行**：`spikes/T-066_shellfolder_enum/` 验证 `IShellFolder::EnumObjects` + `IEnumIDList` 枚举显示名、图标、PIDL
-  - [ ] Dock 文件夹图标左键点击时在 Dock 上方弹出内嵌文件列表（不是打开资源管理器）
-  - [ ] 二级目录逐级展开：点击子文件夹在当前面板内钻取，提供返回上级
-  - [ ] 文件名悬停显示完整名称，超长截断
-  - [ ] **拖出支持**：`IDataObject` + `CF_HDROP` 拖到桌面/资源管理器
-  - [ ] 内容变化用 `ReadDirectoryChangesW` 实时刷新，防抖 500ms
-  - [ ] 面板关闭：点击外部或 Esc，不阻塞 Dock 其他交互
-  - [ ] 空文件夹、无权限文件夹显示友好占位，不崩溃
-- 证据: `evidence/T-066/`
+  - [x] **Spike 先行**：`spikes/T-066_shellfolder_enum/` 验证 `IShellFolder::EnumObjects` + `IEnumIDList` 枚举显示名、图标、PIDL —— 14/14 PASS（显示名/完整路径/SFGAO_FOLDER/HICON/图像列表索引/PIDL 字节数；空=S_OK+0、拒绝=0x80070005、缺失=0x80070002 均可映射；SHCreateDataObject+CF_HDROP 可构造）
+  - [x] Dock 文件夹图标左键点击时在 Dock 上方弹出内嵌文件列表（不是打开资源管理器）—— ActivateTile 拦截 AppKind::Folder，真实 dock 点击实测（探针 B，不落 Explorer）
+  - [x] 二级目录逐级展开：点击子文件夹在当前面板内钻取，提供返回上级 —— FolderNavStack + 面板行点击/「.. 返回上级」行 + Backspace（探针 D/E）
+  - [x] 文件名悬停显示完整名称，超长截断 —— 行内 DT_END_ELLIPSIS 截断；悬停提示条 GetTextExtentExPointW 按字符折行（文件名无空格，DT_WORDBREAK 折不了）最多 3 行，面板自动增高（探针 C 截图）
+  - [x] **拖出支持**：`IDataObject` + `CF_HDROP` 拖到桌面/资源管理器 —— SHCreateDataObject(父 PIDL+子 PIDL)+IDropSource+DoDragDrop；探针 K 真实 SendInput 拖到 Dock 生产 IDropTarget：drop enter/commit→`drop: added`，hr=0x00040100 effect=COPY（拖到资源管理器同载荷，未逐一截图）
+  - [x] 内容变化用 `ReadDirectoryChangesW` 实时刷新，防抖 500ms —— 复用 T-040 LaunchpadWatcher（单根=当前层级，关面板即停），探针 F 实测 ~585-617ms 刷新
+  - [x] 面板关闭：点击外部或 Esc，不阻塞 Dock 其他交互 —— WM_ACTIVATE(WA_INACTIVE 且曾激活)关闭 + Esc 逐级退栈（T-042 策略）+ dock 按下先关面板；瞬态失活不误关（was_activated_ 防护，实测系统 ~400ms 无输入会回收前台）
+  - [x] 空文件夹、无权限文件夹显示友好占位，不崩溃 —— FolderStatus→中文占位（探针 I/J 截图；单测 6 用例 55 断言）
+- 证据: `evidence/T-066/`（spike_shellfolder_enum.log 14/14；test.log 3908 断言全过含 folder_browser 6 用例；probe.txt A..K 11 部分 ALL PASS + 6 截图；verify.txt 汇总与诚实边界）
 
 ### T-067 · 任务栏进度条同步（P1 · 中高风险）
 
