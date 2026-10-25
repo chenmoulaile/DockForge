@@ -32,6 +32,9 @@ const std::unordered_set<std::string> kLaunchpadKeys = {"extra_paths", "columns"
 // adapter id, known or not, round-trips through IntegrationsConfig), so the
 // section owns everything under it.
 const std::unordered_set<std::string> kIntegrationsKeys = {"message_counts"};
+// T-075: the weather section owns exactly these keys.
+const std::unordered_set<std::string> kWeatherKeys = {"enabled", "provider", "city",
+                                                      "refresh_minutes"};
 
 // Upper bound on the persisted tile list.
 //
@@ -480,7 +483,8 @@ json StripUnknownKeys(const json& source) {
     json result = json::object();
     if (!source.is_object()) return result;
 
-        for (const char* section : {"dock", "appearance", "behavior", "launchpad", "integrations"}) {
+        for (const char* section :
+             {"dock", "appearance", "behavior", "launchpad", "integrations", "weather"}) {
         if (!source.contains(section) || !source[section].is_object()) continue;
         json section_out = json::object();
         const std::string name = section;
@@ -488,14 +492,17 @@ json StripUnknownKeys(const json& source) {
                             : name == "appearance"   ? kAppearanceKeys
                             : name == "behavior"     ? kBehaviorKeys
                             : name == "integrations" ? kIntegrationsKeys
+                            : name == "weather"      ? kWeatherKeys
                                                      : kLaunchpadKeys;
         PreserveUnknown(source[section], section_out, owned);
         if (!section_out.empty()) result[section] = section_out;
     }
-    // Top-level unknown keys. "hotkeys"/"hotspots" (T-069) are owned by the
-    // schema now, so they must NOT be double-preserved here.
+    // Top-level unknown keys. "hotkeys"/"hotspots" (T-069) and "weather"
+    // (T-075) are owned by the schema now, so they must NOT be
+    // double-preserved here.
     static const std::unordered_set<std::string> kTopKeys = {
-        "dock", "appearance", "behavior", "launchpad", "integrations", "hotkeys", "hotspots"};
+        "dock", "appearance", "behavior", "launchpad", "integrations", "hotkeys", "hotspots",
+        "weather"};
     PreserveUnknown(source, result, kTopKeys);
     return result;
 }
@@ -597,6 +604,12 @@ IntRange LaunchpadColumnsRange() { return {0, 12}; }
 IntRange LaunchpadIconSizeRange() { return {48, 192}; }
 IntRange LaunchpadPageSizeRange() { return {10, 70}; }
 IntRange HotspotSizeRange() { return {1, 256}; }
+IntRange WeatherRefreshMinutesRange() { return {5, 360}; }
+
+bool SameWeather(const WeatherConfig& a, const WeatherConfig& b) {
+    return a.enabled == b.enabled && a.provider == b.provider && a.city == b.city &&
+           a.refresh_minutes == b.refresh_minutes;
+}
 
 const char* ToString(FalloffCurve value) {
     switch (value) {
@@ -761,6 +774,23 @@ bool ClampConfig(Config& config) {
         config.hotspots.resize(kMaxHotspots);
         changed = true;
     }
+
+    // T-075: weather bounds. The city bound keeps a hand-edited file from
+    // turning the geocoding query into a request-line payload.
+    {
+        const int minutes = ClampInt(config.weather.refresh_minutes,
+                                     WeatherRefreshMinutesRange(), "weather.refresh_minutes");
+        if (minutes != config.weather.refresh_minutes) {
+            config.weather.refresh_minutes = minutes;
+            changed = true;
+        }
+        if (config.weather.city.size() > kMaxShortcutIdLength + 32) {
+            DF_WARN("core", "config weather.city longer than %zu bytes, truncated",
+                    kMaxShortcutIdLength + 32);
+            config.weather.city.resize(kMaxShortcutIdLength + 32);
+            changed = true;
+        }
+    }
     return changed;
 }
 
@@ -851,6 +881,42 @@ bool ParseConfig(const std::string& json_text, Config& out, std::string* error) 
     bad_value |= ReadHotkeys(document, parsed.hotkeys);
     const std::size_t hotspots_raw = parsed.hotspots.size();
     bad_value |= ReadHotspots(document, parsed.hotspots);
+    // T-075: the weather section. Same lenient shape as the rest of the
+    // schema - wrong types warn and keep defaults, never fail the file.
+    if (document.contains("weather")) {
+        const auto& node = document["weather"];
+        if (node.is_object()) {
+            bad_value |= ReadBool(node, "enabled", parsed.weather.enabled);
+            bad_value |= ReadNumber(node, "refresh_minutes", parsed.weather.refresh_minutes);
+            if (node.contains("provider")) {
+                const auto& value = node.at("provider");
+                if (value.is_string()) {
+                    const std::string provider = value.get<std::string>();
+                    if (provider == "open_meteo" || provider == "amap") {
+                        parsed.weather.provider = provider;
+                    } else {
+                        DF_WARN("core", "config weather.provider=\"%s\" is not known, keeping "
+                                        "default", provider.c_str());
+                        bad_value = true;
+                    }
+                } else {
+                    bad_value = true;
+                }
+            }
+            if (node.contains("city")) {
+                const auto& value = node.at("city");
+                if (value.is_string()) {
+                    parsed.weather.city = value.get<std::string>();
+                } else {
+                    DF_WARN("core", "config weather.city is not a string, keeping default");
+                    bad_value = true;
+                }
+            }
+        } else if (!node.is_null()) {
+            DF_WARN("core", "config weather is not an object, keeping default");
+            bad_value = true;
+        }
+    }
     parsed.unknown_keys_json = StripUnknownKeys(document).dump();
 
     // Snapshot the raw parsed values so we can tell whether clamping actually
@@ -858,6 +924,7 @@ bool ParseConfig(const std::string& json_text, Config& out, std::string* error) 
     const DockConfig raw_dock = parsed.dock;
     const AppearanceConfig raw_appearance = parsed.appearance;
     const LaunchpadConfig raw_launchpad = parsed.launchpad;
+    const WeatherConfig raw_weather = parsed.weather;
 
     ClampConfig(parsed);
 
@@ -875,7 +942,8 @@ bool ParseConfig(const std::string& json_text, Config& out, std::string* error) 
         raw_launchpad.extra_paths != parsed.launchpad.extra_paths ||
         raw_launchpad.folders.size() != parsed.launchpad.folders.size() ||
         hotkeys_raw != parsed.hotkeys.size() ||
-        hotspots_raw != parsed.hotspots.size();
+        hotspots_raw != parsed.hotspots.size() ||
+        !SameWeather(raw_weather, parsed.weather);
 
     out = std::move(parsed);
     return true;
@@ -963,6 +1031,19 @@ std::string SerializeConfig(const Config& config) {
             });
         }
         document["hotspots"] = std::move(array);
+    }
+    // T-075: written only when the widget is not at its defaults, same
+    // quiet-file rule as integrations. A city alone (enabled=false) is still
+    // written: the user typed it, losing it on the next save would be a
+    // silent config reset.
+    if (config.weather.enabled || !config.weather.city.empty() ||
+        config.weather.refresh_minutes != 30 || config.weather.provider != "open_meteo") {
+        document["weather"] = {
+            {"enabled", config.weather.enabled},
+            {"provider", config.weather.provider},
+            {"city", config.weather.city},
+            {"refresh_minutes", config.weather.refresh_minutes},
+        };
     }
 
     // Re-attach unknown keys captured at load time.

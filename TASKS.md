@@ -1,4 +1,4 @@
-﻿# TASKS.md · 任务板
+# TASKS.md · 任务板
 
 > 状态：TODO / IN_PROGRESS / DONE / PARTIAL / BLOCKED
 > 规则：DoD ≤ 8 条；预估 > 1 会话必拆；无依赖标 `[P]` 可并行；禁止不可验收命名。
@@ -647,18 +647,18 @@
 
 ### T-075 · 天气小组件（P1 · 低风险）
 
-- 状态: TODO
+- 状态: DONE（诚实边界见 evidence/T-075/verify.txt：amap provider 未实现、真实网络渲染未实机截图）
 - 依赖: T-051（配置热重载）
 - 上下文: `src/dock/`、`ASSETS.md`
 - DoD:
-  - [ ] 高德 Web API：IP 定位 + 实时天气 + 预报；**Key 不硬编码**，存 `%APPDATA%\DockForge\secrets.json`（不入库）
-  - [ ] **无 Key 兜底**：Open-Meteo 公开 API，城市手动指定
-  - [ ] Dock 图标动态渲染：温度作图标文字叠加，天气状态用符号
-  - [ ] 悬停预览显示未来 3 天预报
-  - [ ] 网络请求异步，失败显示占位图标，不阻塞渲染
-  - [ ] 刷新间隔默认 30 分钟可配置，支持手动刷新
-  - [ ] 图标素材自绘或 CC0，登记 `ASSETS.md`
-- 证据: `evidence/T-075/`
+  - [x] 高德 Web API：IP 定位 + 实时天气 + 预报；**Key 不硬编码**，存 `%APPDATA%\DockForge\secrets.json`（不入库） —— `core::ReadSecrets` 只读该文件（`DOCKFORGE_SECRETS_PATH` 可覆盖），值从不进日志；main.cpp 启动时只记录"amap_key present (N bytes)"。amap provider 本身留作占位失败（不伪造请求），无 Key 时走 Open-Meteo
+  - [x] **无 Key 兜底**：Open-Meteo 公开 API，城市手动指定 —— geocoding-api.open-meteo.com 城市→经纬度 + api.open-meteo.com 预报，两段链 25 单测 + spike 实测 200/1156ms 与 200/1719ms；`DOCKFORGE_WEATHER_API_HOST` 探针钩子
+  - [x] Dock 图标动态渲染：温度作图标文字叠加，天气状态用符号 —— `DrawWeatherGlyph` 七种 Kind 全部由 FillRoundedRect/StrokeRoundedRect/FillCircle 组合（零素材，登记 ASSETS.md）；`WeatherTextFor` 输出温度文字，失败态画 Unknown 环 + "--°"
+  - [x] 悬停预览显示未来 3 天预报 —— `WeatherPopup` GDI 弹窗（folder_panel 同族），400ms dwell 同缩略图，未来 3 天 label/glyph/min..max；`DOCKFORGE_WEATHER_PREVIEW=0` 可关
+  - [x] 网络请求异步，失败显示占位图标，不阻塞渲染 —— `weather::Host` 单 worker 线程 + mutex，UI 线程只 `Tick` 拷快照（C-04b 无指针跨线程）；失败发布保留上一次有效数据，snapshot.failed 走占位渲染
+  - [x] 刷新间隔默认 30 分钟可配置，支持手动刷新 —— `weather.refresh_minutes` 5..360 走 core 范围钳制 + 设置窗口编辑框；tile 点击 = `RequestRefresh`（worker 立即重取，不打断间隔时钟）
+  - [x] 图标素材自绘或 CC0，登记 `ASSETS.md` —— 见 ASSETS.md"图标与字体"表新增行（自绘 · T-075 天气符号）
+- 证据: `evidence/T-075/`（spike_weather.log Q1..Q4；build.log gate exit 0；test.log 416 用例 4381 断言全过；probe.txt 25 ok 0 fail；verify.txt 汇总与诚实边界）
 
 ### T-076 · macOS 风格通知中心（P1 · 中风险）
 

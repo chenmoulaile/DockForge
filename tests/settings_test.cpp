@@ -128,6 +128,52 @@ TEST_CASE("CurrentValueText mirrors the stored value for the control echo",
     CHECK(settings::SettingsModel::CurrentValueText(config, "behavior.autostart") == "0");
 }
 
+// T-075: the weather fields ride the same C-20 path as every other control, so
+// they get the same three guarantees - a clamped echo, a persisted round-trip,
+// and no silent drop of an unparsable edit.
+TEST_CASE("Weather fields clamp, echo and persist through the model",
+          "[settings][model][weather]") {
+    core::Config config;
+    settings::SettingsModel model;
+    model.Record("weather.enabled", "1");
+    model.Record("weather.city", "  Beijing  ");
+    model.Record("weather.refresh_minutes", "900");  // above the 360 cap
+    REQUIRE(model.Apply(config) == 3);
+    CHECK(config.weather.enabled);
+    CHECK(config.weather.city == "Beijing");  // trimmed, exactly what was typed
+    CHECK(config.weather.refresh_minutes == 360);  // clamped, not rejected
+
+    // The echo must show disk truth, not what was typed.
+    CHECK(settings::SettingsModel::CurrentValueText(config, "weather.enabled") == "1");
+    CHECK(settings::SettingsModel::CurrentValueText(config, "weather.city") ==
+          "Beijing");
+    CHECK(settings::SettingsModel::CurrentValueText(config,
+                                                    "weather.refresh_minutes") == "360");
+
+    REQUIRE(core::SaveConfig(config));
+    const core::Config reloaded = core::LoadConfig();
+    CHECK(reloaded.weather.enabled);
+    CHECK(reloaded.weather.city == "Beijing");
+    CHECK(reloaded.weather.refresh_minutes == 360);
+    // The same-value guard the dock owner uses must not report a change here,
+    // or the settings flush would rebuild the weather host for nothing.
+    CHECK(core::SameWeather(reloaded.weather, config.weather));
+}
+
+TEST_CASE("An empty weather city is a legal edit that disables the tile",
+          "[settings][model][weather]") {
+    core::Config config;
+    config.weather.enabled = true;
+    config.weather.city = "Beijing";
+    settings::SettingsModel model;
+    model.Record("weather.city", "   ");  // user cleared the box
+    std::vector<std::string> rejected;
+    REQUIRE(model.Apply(config, nullptr, &rejected) == 1);
+    CHECK(rejected.empty());
+    CHECK(config.weather.city.empty());
+    CHECK_FALSE(core::SameWeather(config.weather, core::WeatherConfig{}));
+}
+
 TEST_CASE("A flushed model round-trips through the config file", "[settings][model]") {
     core::Config config;
     config.dock.icon_size = 56;

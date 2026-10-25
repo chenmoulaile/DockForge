@@ -1,0 +1,51 @@
+# T-075 证据汇总与诚实边界
+
+## 交付物
+
+| 模块 | 文件 | 作用 |
+|---|---|---|
+| HTTP 传输 | `src/platform/http_client.{h,cpp}` | WinHTTP 阻塞式 `HttpsGetText`（connect/send/receive 各自 timeout，resolve 固定 5s） |
+| 密钥 | `src/core/secrets.{h,cpp}` | `ReadSecrets` 只读 `%APPDATA%\DockForge\secrets.json`（`DOCKFORGE_SECRETS_PATH` 可覆盖），值从不进日志 |
+| 天气模型 | `src/dock/weather.{h,cpp}` | 纯函数（UrlEncode/GeocodePath/ForecastPath/WeekdayLabel/ParseGeocode/ParseForecast/KindFromWmo）+ `Host`（单 worker 线程） |
+| 悬停弹窗 | `src/dock/weather_popup.{h,cpp}` | GDI 预报弹窗，folder_panel 同族，双缓冲绘制 |
+| 渲染 | `src/dock/dock_view.{h,cpp}` | `DrawWeatherGlyph` 七种 Kind + `ComputeWeatherGlyphLayout` + `WeatherTextFor` |
+| 配置 | `src/core/config.{h,cpp}` | `WeatherConfig`（默认关闭）+ `SameWeather` + `WeatherRefreshMinutesRange` 5..360 |
+| 设置 UI | `src/settings/settings_window.cpp`、`settings_model.{h,cpp}` | Behavior 分节三行（enabled / city / refresh_minutes）+ `City` 字段类型 |
+| 集成 | `src/main.cpp` | fixture tile、host 启停、dwell 弹窗、点击刷新、ConfigChanged 重应用、拖拽排除 |
+
+## 验证
+
+- spike（weather_spike.log，pid=29536，全部 PASS）：
+  - Q1+Q3 forecast：ok=1 status=200 ms=1156 len=652，`current` 与 `daily` min/max 字段齐备
+  - Q2 geocode：ok=1 status=200 ms=1719 len=347，body 含 `latitude`/`longitude`
+  - Q4 死主机：ok=0 status=0 err=12007（ERROR_WINHTTP_NAME_NOT_RESOLVED）ms=16 → 快速失败，不挂 worker
+- 构建：`cmake --build D:\MacDock\build -j 8` 全目标 0 error（build.log）
+- 测试：全量 416 用例 4381 断言全过；`[weather]` 27 用例 138 断言；`[settings]` 10 用例 53 断言
+- 单测覆盖：WMO 码→Kind 映射、geocode/forecast JSON 解析、星期标签（Sakamoto，含跨周/超 7 天）、
+  URL 编码、间隔时钟（6 小时不自动重取）、手动刷新、失败保留上次有效数据、geocode 坐标缓存、
+  设置模型钳制/回显/落盘 round-trip、空城市合法编辑
+
+## 诚实边界（未验证项）
+
+1. **amap provider 未实现**：DoD 1 的入口存在（Key 只从 secrets.json 读、只记字节数不记值），
+   但 provider=="amap" 时 worker 明确发布 `amap provider not implemented` 失败快照，
+   不伪造任何请求。Open-Meteo 无 Key 链路是实际可用路径。
+2. **真实网络下未实机截图**：dock 图标 glyph/温度叠加与悬停弹窗的像素级外观未在
+   本机 UI 会话内截图验证（运行环境无交互桌面）。绘制路径由 27 个 weather 单测 +
+   dock_view 现有渲染契约覆盖，几何由 `ComputeWeatherGlyphLayout` 单元断言。
+3. **设置窗口三行控件未实机点击**：与 T-062/T-069 的 Export/Import 按钮同一
+   WM_COMMAND → RecordEdit 转发路径；模型层 6 单测覆盖钳制、回显与落盘 round-trip。
+4. **IP 定位未使用**：Open-Meteo 无 IP 定位接口，城市由用户手动指定（DoD 2 的兜底路径）；
+   amap 的 IP 定位随 provider 一起留待实现。
+
+## 复现命令
+
+```powershell
+cmake --build D:\MacDock\build -j 8
+& D:\MacDock\build\bin\dockforge_tests.exe                 # 416 cases / 4381 assertions
+& D:\MacDock\build\bin\dockforge_tests.exe "[weather]"     # 27 cases / 138 assertions
+& D:\MacDock\build\bin\dockforge_tests.exe "[settings]"    # 10 cases / 53 assertions
+```
+
+探针钩子：`DOCKFORGE_WEATHER_API_HOST` 覆盖 API 主机；`DOCKFORGE_WEATHER_PREVIEW=0` 关闭悬停弹窗；
+`DOCKFORGE_SECRETS_PATH` 指向隔离 secrets.json。

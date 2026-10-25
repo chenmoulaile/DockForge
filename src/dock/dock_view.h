@@ -11,6 +11,7 @@
 #include "dock/drag_controller.h"
 #include "dock/drop_target.h"
 #include "dock/layout.h"
+#include "dock/weather.h"
 #include "platform/win_common.h"
 #include "render/backend.h"
 #include "render/material.h"
@@ -104,6 +105,35 @@ struct BadgeGeometry {
 };
 BadgeGeometry ComputeBadgeGeometry(const render::RectF& slot);
 
+// ---- weather glyph (T-075, C-22 weather_text) --------------------------------
+// The glyph occupies the upper part of the slot, the temperature the lower
+// part. The temperature's font size follows the C-22 number rule (22% of the
+// icon width, minimum 9pt = 12 DIP at 96 DPI) - the same rule the badge
+// number uses, so the two text overlays on one dock read at one weight.
+inline constexpr float kWeatherFontFactor = 0.22f;
+inline constexpr float kWeatherMinFontDip = 12.0f;  // 9pt at 96 DPI
+// Glyph box: centred horizontally, filling 62% of the slot's height from the
+// top; the text band takes the remaining bottom third. Both derive from the
+// slot rect alone - the same single-geometry-source rule as the badge.
+inline constexpr float kWeatherGlyphHeightFactor = 0.62f;
+
+struct WeatherGlyphLayout {
+    render::RectF glyph{};       // square, centred in the upper band
+    render::RectF text{};        // temperature band at the bottom
+    float font_dip = 0.0f;
+};
+WeatherGlyphLayout ComputeWeatherGlyphLayout(const render::RectF& slot);
+
+// Temperature label for the overlay: "23°" for a valid reading, "--°" for
+// the failure placeholder (never an empty string - an empty tile reads as a
+// rendering bug, C-11's missing-icon reasoning).
+std::wstring WeatherTextFor(const weather::Snapshot& snapshot);
+
+// Draws the weather symbol inside `glyph`. Pure geometry, backend calls only,
+// so a unit test with the fake backend can assert what was painted where.
+void DrawWeatherGlyph(render::IRenderBackend& backend, const render::RectF& glyph,
+                      weather::Kind kind);
+
 // A tile's relationship to a live window, refreshed by the tracker (T-012).
 //
 // Three states rather than a bool because "running" and "frontmost" are answered by
@@ -143,6 +173,12 @@ struct DockTile {
     // message_badge > progress_bar), handled in the paint path.
     shell::ProgressState progress_state = shell::ProgressState::NoProgress;
     float progress_fraction = 0.0f;  // 0..1, meaningful for Normal only
+    // Weather widget marker (T-075). A weather tile renders a self-drawn
+    // glyph plus the temperature as the C-22 weather_text overlay instead of
+    // an app icon; there is no app behind it, so run-state/badge/progress
+    // never apply. The snapshot itself lives in DockPaintInput (one widget,
+    // not per-tile data).
+    bool weather = false;
 };
 
 // FNV-1a over the UTF-16 source string. Only needs to be collision-resistant
@@ -232,6 +268,10 @@ struct DockPaintInput {
     // In-flight OLE drag from another application, or nullptr. Same rule as `drag`:
     // the drop target owns it, the painter only reads.
     const DropPointer* drop = nullptr;
+    // Weather snapshot (T-075), or nullptr when the widget is off. Read by the
+    // weather tile's paint path only; a nullptr with a weather tile on the
+    // row paints the failure placeholder (never assumed to be valid data).
+    const weather::Snapshot* weather = nullptr;
 };
 
 // Opacity of the lifted tile's ghost while dragging.

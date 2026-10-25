@@ -123,6 +123,22 @@ struct HotspotConfig {
     bool enabled = false;
 };
 
+// Weather widget (T-075). Defaults are quiet on purpose: fetching weather is
+// the first outbound network request this app makes, so nothing happens until
+// the user opts in with a city. `provider` selects the source; only the
+// no-key Open-Meteo fallback is implemented - "amap" keeps the configuration
+// entry point for the keyed provider (its key lives in secrets.json, never
+// here). `city` is a free-text geocoding query (Chinese or English); it is
+// resolved to coordinates once per change and cached by the weather host.
+struct WeatherConfig {
+    bool enabled = false;
+    std::string provider = "open_meteo";  // open_meteo | amap
+    std::string city;                     // <=64 bytes, geocoding query
+    int refresh_minutes = 30;             // 5..360
+};
+
+bool SameWeather(const WeatherConfig& a, const WeatherConfig& b);
+
 struct Config {
     DockConfig dock;
     AppearanceConfig appearance;
@@ -134,6 +150,9 @@ struct Config {
     // file advertises nothing" rule as dock.tiles.
     std::vector<HotkeyConfig> hotkeys;
     std::vector<HotspotConfig> hotspots;
+    // T-075: weather widget. Off by default (outbound network), so a default
+    // config.json carries no "weather" key either.
+    WeatherConfig weather;
 
     // Raw JSON as loaded from disk. Unknown keys live here so that a
     // save round-trip never silently drops user data (C-01 实现约束).
@@ -185,6 +204,7 @@ IntRange LaunchpadColumnsRange();
 IntRange LaunchpadIconSizeRange();
 IntRange LaunchpadPageSizeRange();
 IntRange HotspotSizeRange();
+IntRange WeatherRefreshMinutesRange();
 
 // Hotspot enum <-> string helpers (C-24 canonical spellings).
 const char* ToString(HotspotEdge value);

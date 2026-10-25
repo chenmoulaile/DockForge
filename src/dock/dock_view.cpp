@@ -135,6 +135,155 @@ render::ColorF ProgressOverlayColor(shell::ProgressState state) {
     }
 }
 
+// ---- weather glyph (T-075, C-22 weather_text) --------------------------------
+//
+// All glyphs are composed from FillRoundedRect calls only (circles are
+// rounded rects with radius = half width, diagonal strokes are stepped
+// squares), which keeps the drawing inside the C-04 backend contract and lets
+// the unit-test fake backend assert shapes by rectangle. Registered in
+// ASSETS.md as self-drawn (code-generated, zero external assets).
+
+namespace {
+
+// Glyph palette. White family for the icon body (the plate's frost renders
+// behind it), warm amber for the sun so Clear reads at a glance, cool blue
+// for precipitation. Alpha kept below 1.0 so the glyph sits IN the plate
+// rather than on top of it, matching the indicator dots' treatment.
+constexpr render::ColorF kWeatherBodyColor{0.92f, 0.94f, 0.98f, 0.95f};
+constexpr render::ColorF kWeatherSunColor{0.98f, 0.80f, 0.36f, 0.98f};
+constexpr render::ColorF kWeatherPrecipColor{0.55f, 0.72f, 0.95f, 0.95f};
+
+void FillCircle(render::IRenderBackend& backend, float cx, float cy, float radius,
+                const render::ColorF& color) {
+    const render::RectF rect{cx - radius, cy - radius, cx + radius, cy + radius};
+    backend.FillRoundedRect(rect, radius, color);
+}
+
+// Axis-aligned bar between two points (either dx or dy must be 0).
+void FillBar(render::IRenderBackend& backend, float x1, float y1, float x2, float y2,
+             float thickness, const render::ColorF& color) {
+    const float half = thickness * 0.5f;
+    const render::RectF rect{std::min(x1, x2) - half, std::min(y1, y2) - half,
+                             std::max(x1, x2) + half, std::max(y1, y2) + half};
+    backend.FillRoundedRect(rect, half, color);
+}
+
+// One cloud = a big disc, two side discs and a skirt bar, all one colour, so
+// the union reads as a single silhouette. Centred on (cx, cy), sized to `w`.
+void DrawCloudShape(render::IRenderBackend& backend, float cx, float cy, float w,
+                    const render::ColorF& color) {
+    const float r = w * 0.30f;
+    FillCircle(backend, cx - r * 0.7f, cy + r * 0.15f, r * 0.75f, color);
+    FillCircle(backend, cx + r * 0.85f, cy + r * 0.10f, r * 0.66f, color);
+    FillCircle(backend, cx, cy - r * 0.35f, r, color);
+    FillBar(backend, cx - w * 0.32f, cy + r * 0.35f, cx + w * 0.34f, cy + r * 0.35f, r * 0.9f,
+            color);
+}
+
+}  // namespace
+
+WeatherGlyphLayout ComputeWeatherGlyphLayout(const render::RectF& slot) {
+    WeatherGlyphLayout layout;
+    const float width = slot.Width();
+    const float height = slot.Height();
+    // Square glyph, centred horizontally, upper band.
+    const float glyph_size = std::min(width, height * kWeatherGlyphHeightFactor);
+    const float glyph_left = slot.left + (width - glyph_size) * 0.5f;
+    const float glyph_top = slot.top + height * (1.0f - kWeatherGlyphHeightFactor) * 0.35f;
+    layout.glyph = render::RectF{glyph_left, glyph_top, glyph_left + glyph_size,
+                                 glyph_top + glyph_size};
+    // Text band fills the bottom third.
+    const float text_top = slot.top + height * kWeatherGlyphHeightFactor +
+                           height * (1.0f - kWeatherGlyphHeightFactor) * 0.15f;
+    layout.text = render::RectF{slot.left, text_top, slot.right, slot.bottom};
+    layout.font_dip = std::max(width * kWeatherFontFactor, kWeatherMinFontDip);
+    return layout;
+}
+
+std::wstring WeatherTextFor(const weather::Snapshot& snapshot) {
+    if (!snapshot.valid || snapshot.failed) return L"--\u00B0";  // "--°"
+    const int temp = static_cast<int>(std::lround(snapshot.temp_c));
+    return std::to_wstring(temp) + L"\u00B0";
+}
+
+void DrawWeatherGlyph(render::IRenderBackend& backend, const render::RectF& glyph,
+                      weather::Kind kind) {
+    const float w = glyph.Width();
+    const float h = glyph.Height();
+    const float cx = glyph.left + w * 0.5f;
+    const float cy = glyph.top + h * 0.5f;
+
+    switch (kind) {
+        case weather::Kind::Clear: {
+            // Sun: solid disc + outer ring.
+            FillCircle(backend, cx, cy, w * 0.26f, kWeatherSunColor);
+            const float ring = w * 0.38f;
+            backend.StrokeRoundedRect(
+                render::RectF{cx - ring, cy - ring, cx + ring, cy + ring}, ring,
+                kWeatherSunColor, w * 0.05f);
+            break;
+        }
+        case weather::Kind::PartlyCloudy: {
+            // Small sun peeking top-right, cloud lower-left.
+            FillCircle(backend, cx + w * 0.20f, cy - h * 0.16f, w * 0.16f, kWeatherSunColor);
+            DrawCloudShape(backend, cx - w * 0.06f, cy + h * 0.14f, w * 0.72f, kWeatherBodyColor);
+            break;
+        }
+        case weather::Kind::Cloudy:
+            DrawCloudShape(backend, cx, cy, w * 0.86f, kWeatherBodyColor);
+            break;
+        case weather::Kind::Fog: {
+            // Three staggered bars.
+            FillBar(backend, glyph.left + w * 0.08f, cy - h * 0.16f, glyph.right - w * 0.20f,
+                    cy - h * 0.16f, h * 0.09f, kWeatherBodyColor);
+            FillBar(backend, glyph.left + w * 0.16f, cy, glyph.right - w * 0.08f, cy, h * 0.09f,
+                    kWeatherBodyColor);
+            FillBar(backend, glyph.left + w * 0.10f, cy + h * 0.16f, glyph.right - w * 0.24f,
+                    cy + h * 0.16f, h * 0.09f, kWeatherBodyColor);
+            break;
+        }
+        case weather::Kind::Rain: {
+            DrawCloudShape(backend, cx, cy - h * 0.10f, w * 0.80f, kWeatherBodyColor);
+            for (int i = 0; i < 3; ++i) {
+                const float x = glyph.left + w * (0.30f + 0.20f * static_cast<float>(i));
+                FillBar(backend, x, cy + h * 0.14f, x, cy + h * 0.40f, w * 0.045f,
+                        kWeatherPrecipColor);
+            }
+            break;
+        }
+        case weather::Kind::Snow: {
+            DrawCloudShape(backend, cx, cy - h * 0.10f, w * 0.80f, kWeatherBodyColor);
+            for (int i = 0; i < 3; ++i) {
+                const float x = glyph.left + w * (0.30f + 0.20f * static_cast<float>(i));
+                FillCircle(backend, x, cy + h * 0.27f, w * 0.035f, kWeatherPrecipColor);
+            }
+            break;
+        }
+        case weather::Kind::Thunder: {
+            DrawCloudShape(backend, cx, cy - h * 0.12f, w * 0.80f, kWeatherBodyColor);
+            // Lightning: a stepped diagonal of three squares (the backend has
+            // no free rotation; steps read as a bolt at 48 DIP).
+            const float s = w * 0.07f;
+            backend.FillRoundedRect(render::RectF{cx + w * 0.02f, cy + h * 0.04f,
+                                                  cx + w * 0.02f + s, cy + h * 0.04f + s},
+                                    s * 0.3f, kWeatherSunColor);
+            backend.FillRoundedRect(render::RectF{cx - w * 0.10f, cy + h * 0.16f,
+                                                  cx - w * 0.10f + s, cy + h * 0.16f + s},
+                                    s * 0.3f, kWeatherSunColor);
+            backend.FillRoundedRect(render::RectF{cx + w * 0.01f, cy + h * 0.28f,
+                                                  cx + w * 0.01f + s, cy + h * 0.28f + s},
+                                    s * 0.3f, kWeatherSunColor);
+            break;
+        }
+        case weather::Kind::Unknown:
+            // Placeholder ring: visibly occupied, honestly unknown.
+            backend.StrokeRoundedRect(
+                render::RectF{cx - w * 0.30f, cy - h * 0.30f, cx + w * 0.30f, cy + h * 0.30f},
+                w * 0.30f, kWeatherBodyColor, w * 0.05f);
+            break;
+    }
+}
+
 std::vector<DockTile> BuildTiles(const std::vector<shell::AppEntry>& apps,
                                  shell::IconCache& icons, int max_tiles, int icon_px) {
     std::vector<DockTile> tiles;
@@ -370,7 +519,23 @@ bool DockPainter::Paint(ID2D1DeviceContext& dc, render::IRenderBackend& backend,
         }
 
         if (i != drag_source) {
-            if (tile.icon.valid()) {
+            if (tile.weather) {
+                // Weather tile (T-075): the glyph IS the icon (self-drawn,
+                // ASSETS.md) and the temperature is the C-22 weather_text
+                // overlay, sized by the same number rule as the badge. The
+                // failure placeholder (no snapshot yet, or last fetch failed)
+                // draws the Unknown ring plus "--" so the slot is visibly
+                // occupied and honestly empty at once.
+                const WeatherGlyphLayout layout = ComputeWeatherGlyphLayout(slot);
+                const weather::Snapshot empty;
+                const weather::Snapshot& snapshot =
+                    input.weather != nullptr ? *input.weather : empty;
+                DrawWeatherGlyph(backend, layout.glyph,
+                                 snapshot.valid && !snapshot.failed ? snapshot.kind
+                                                                    : weather::Kind::Unknown);
+                backend.DrawLabel(WeatherTextFor(snapshot).c_str(), layout.text, layout.font_dip,
+                                  kWeatherBodyColor, render::TextAlign::Center);
+            } else if (tile.icon.valid()) {
                 const render::BitmapView view{tile.icon.width, tile.icon.height,
                                               tile.icon.pixels.data()};
                 backend.DrawBitmap(tile.icon_key, view, slot, 1.0f);

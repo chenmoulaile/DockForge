@@ -17,8 +17,8 @@ constexpr char kLogModule[] = "settings";
 struct FieldSpec {
     const char* name;
     // Kind discriminator: int/float ranges come from core, enums parse by name,
-    // bools parse 0/1/false/true.
-    enum class Kind { Int, Float, Bool, Position, Material, Falloff, Theme } kind;
+    // bools parse 0/1/false/true, City is a free-text identifier.
+    enum class Kind { Int, Float, Bool, Position, Material, Falloff, Theme, City } kind;
 };
 
 // The field table is the single place a settings control maps onto C-01. The
@@ -39,6 +39,11 @@ constexpr FieldSpec kFields[] = {
     {"appearance.corner_radius", FieldSpec::Kind::Int},
     {"behavior.autostart", FieldSpec::Kind::Bool},
     {"behavior.hide_taskbar", FieldSpec::Kind::Bool},
+    // T-075: the weather tile config. SameWeather() is the owner's change
+    // detector, so an edit that lands on the stored value moves nothing.
+    {"weather.enabled", FieldSpec::Kind::Bool},
+    {"weather.city", FieldSpec::Kind::City},
+    {"weather.refresh_minutes", FieldSpec::Kind::Int},
     // T-065 (C-25): one switch per shipped adapter. The adapter id sits verbatim
     // in the field name, matching the C-01 template
     // integrations.message_counts.<adapter_id>.enabled.
@@ -137,6 +142,7 @@ std::string SettingsModel::CurrentValueText(const core::Config& config,
             if (field == "launchpad.icon_size") std::snprintf(buffer, sizeof(buffer), "%d", config.launchpad.icon_size);
             if (field == "launchpad.page_size") std::snprintf(buffer, sizeof(buffer), "%d", config.launchpad.page_size);
             if (field == "appearance.corner_radius") std::snprintf(buffer, sizeof(buffer), "%d", config.appearance.corner_radius);
+            if (field == "weather.refresh_minutes") std::snprintf(buffer, sizeof(buffer), "%d", config.weather.refresh_minutes);
             // T-069: hotspot size reads the entry, or the catalog default when
             // the entry does not exist yet.
             {
@@ -163,6 +169,7 @@ std::string SettingsModel::CurrentValueText(const core::Config& config,
         case FieldSpec::Kind::Bool:
             if (field == "behavior.autostart") return config.behavior.autostart ? "1" : "0";
             if (field == "behavior.hide_taskbar") return config.behavior.hide_taskbar ? "1" : "0";
+            if (field == "weather.enabled") return config.weather.enabled ? "1" : "0";
             // T-065: adapter switches default to ON when the id is absent.
             if (field == "integrations.message_counts.weixin.exe.enabled") {
                 const auto it = config.integrations.message_counts.find("weixin.exe");
@@ -197,6 +204,8 @@ std::string SettingsModel::CurrentValueText(const core::Config& config,
             return core::ToString(config.dock.hover_falloff);
         case FieldSpec::Kind::Theme:
             return config.appearance.theme;
+        case FieldSpec::Kind::City:
+            return config.weather.city;
     }
     return std::string(buffer);
 }
@@ -248,6 +257,13 @@ int SettingsModel::Apply(core::Config& config, std::vector<std::string>* changed
                     target = ClampInt(static_cast<int>(value), core::CornerRadiusRange());
                     moved = target != config.appearance.corner_radius;
                     config.appearance.corner_radius = target;
+                } else if (edit.field == "weather.refresh_minutes") {
+                    // The range lives in core next to the clamp the loader uses,
+                    // so the UI can never accept an interval the dock rejects.
+                    target = ClampInt(static_cast<int>(value),
+                                      core::WeatherRefreshMinutesRange());
+                    moved = target != config.weather.refresh_minutes;
+                    config.weather.refresh_minutes = target;
                 }
                 // T-069: hotspot size. The entry is created on first edit with
                 // the catalog's defaults (edge/corner/action) so a size edit
@@ -309,6 +325,9 @@ int SettingsModel::Apply(core::Config& config, std::vector<std::string>* changed
                 } else if (edit.field == "behavior.hide_taskbar") {
                     moved = value != config.behavior.hide_taskbar;
                     config.behavior.hide_taskbar = value;
+                } else if (edit.field == "weather.enabled") {
+                    moved = value != config.weather.enabled;
+                    config.weather.enabled = value;
                 } else if (edit.field.rfind("integrations.message_counts.", 0) == 0 &&
                            edit.field.size() > strlen("integrations.message_counts.") &&
                            edit.field.substr(edit.field.size() - strlen(".enabled")) ==
@@ -411,6 +430,26 @@ int SettingsModel::Apply(core::Config& config, std::vector<std::string>* changed
                 if (!parsed) break;
                 moved = value != config.appearance.theme;
                 config.appearance.theme = value;
+                break;
+            }
+            case FieldSpec::Kind::City: {
+                // T-075: the city is free text that goes into a URL query, so it
+                // is trimmed and the same byte cap the loader applies is enforced
+                // here - an edit the UI accepted would otherwise be clamped at
+                // the next reload and echo a different value back.
+                std::string value = edit.text;
+                const std::size_t first = value.find_first_not_of(" \t\r\n");
+                if (first == std::string::npos) {
+                    value.clear();
+                } else {
+                    const std::size_t last = value.find_last_not_of(" \t\r\n");
+                    value = value.substr(first, last - first + 1);
+                }
+                constexpr std::size_t kMaxCityBytes = 40;  // config.cpp clamp width
+                if (value.size() > kMaxCityBytes) value.resize(kMaxCityBytes);
+                parsed = true;  // an empty city is legal: it just disables the tile
+                moved = value != config.weather.city;
+                config.weather.city = value;
                 break;
             }
         }

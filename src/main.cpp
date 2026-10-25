@@ -15,6 +15,7 @@
 #include "core/frame_clock.h"
 #include "core/log.h"
 #include "core/paths.h"
+#include "core/secrets.h"
 #include "core/taskbar.h"
 #include "dock/dock_view.h"
 #include "dock/drop_target.h"
@@ -24,6 +25,8 @@
 #include "dock/launchpad.h"
 #include "dock/running_tracker.h"
 #include "dock/tile_order.h"
+#include "dock/weather.h"
+#include "dock/weather_popup.h"
 #include "finderbar/audio_hardware.h"
 #include "finderbar/hardware_panel.h"
 #include "finderbar/media_sidecar.h"
@@ -55,6 +58,7 @@
 #include <cmath>
 #include <functional>
 #include <optional>
+#include <map>
 #include <vector>
 
 namespace {
@@ -500,6 +504,40 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                  tiles[i].icon.valid() ? "ok" : "missing");
     }
 
+    // ---- weather tile (T-075) -------------------------------------------
+    // Appended after the app row, never part of the curated order: the widget
+    // is a fixture, not a launchable, and writing it into dock.tiles would
+    // make the identity list reference something no shell scan can resolve.
+    // The count change flows into the geometry on the next apply_placement.
+    const auto weather_tile_index = [&tiles]() -> int {
+        for (std::size_t i = 0; i < tiles.size(); ++i) {
+            if (tiles[i].weather) return static_cast<int>(i);
+        }
+        return -1;
+    };
+    auto SetWeatherTile = [&](bool on) {
+        const int current = weather_tile_index();
+        if (on && current < 0) {
+            dock::DockTile tile;
+            tile.weather = true;
+            tile.app.display_name = L"Weather";
+            tiles.push_back(std::move(tile));
+        } else if (!on && current >= 0) {
+            tiles.erase(tiles.begin() + current);
+        } else {
+            return false;
+        }
+        return true;
+    };
+    if (config.weather.enabled && !config.weather.city.empty()) {
+        SetWeatherTile(true);
+        DF_INFO("weather", "tile on: city='%s' provider=%s refresh=%dmin",
+                config.weather.city.c_str(), config.weather.provider.c_str(),
+                config.weather.refresh_minutes);
+    } else if (config.weather.enabled) {
+        DF_WARN("weather", "enabled but weather.city is empty; no tile this run");
+    }
+
     // ---- material tier resolution (T-005) -------------------------------
     // The configured tier is a request, not a promise: Mica needs Win11 22000+
     // and a rectangular plate, and the self-drawn frost needs a desktop capture.
@@ -883,6 +921,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     // tray-level feature, and "changed system behaviour must have a switch that
     // defaults to off" (PROMPT.md).
     const bool preview_enabled = ReadEnvFlag(L"DOCKFORGE_PREVIEW", true) && preview_class_ready;
+    // Weather forecast popup (T-075): same switch shape, defaults on because it
+    // paints nothing until the weather tile itself is enabled in config.
+    const bool weather_preview_enabled = ReadEnvFlag(L"DOCKFORGE_WEATHER_PREVIEW", true);
 
     // Folder drill-through panel (T-066, ADR-0023). Owns its popup HWND and
     // navigation stack; the Dock only decides when to open it (a folder tile
@@ -892,6 +933,37 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     dock::FolderPanel folder_panel;
     if (!folder_panel_class_ready) {
         DF_WARN("dock", "folder panel class registration failed; folder tiles launch");
+    }
+
+    // ---- weather host + popup (T-075) ------------------------------------
+    // The host owns the worker thread; every fetch happens there and results
+    // cross back as snapshot copies (Tick adopts at most one per frame). The
+    // popup is the hover-preview for the weather tile: a GDI popover in the
+    // folder-panel family, shown after the same 400ms dwell that gates
+    // thumbnails.
+    const bool weather_popup_class_ready = dock::WeatherPopup::RegisterWindowClass(instance);
+    if (!weather_popup_class_ready) {
+        DF_WARN("weather", "popup class registration failed; no forecast preview this run");
+    }
+    dock::WeatherPopup weather_popup;
+    dock::weather::Host weather_host;
+    dock::weather::Snapshot weather_snapshot;  // failed/invalid until the first fetch lands
+    bool weather_host_started = false;
+    if (weather_tile_index() >= 0) {
+        // Keyed-provider entry point (DoD 1): the AMap key is read from
+        // secrets.json only - never from config.json, never logged, never
+        // stored anywhere else. With a key present the provider stays
+        // "amap" (whose API chain is not implemented this session); without
+        // one the no-key Open-Meteo fallback serves the tile.
+        const std::map<std::string, std::string> secrets = core::ReadSecrets();
+        if (secrets.count("amap_key") != 0) {
+            DF_INFO("weather", "amap_key present in secrets.json (%zu bytes, value not logged)",
+                    secrets.at("amap_key").size());
+        }
+        weather_host.SetFetcher(dock::weather::DefaultFetcher());
+        weather_host.Start(config.weather);
+        weather_host_started = true;
+        DF_INFO("weather", "host started (worker thread fetching)");
     }
 
     // Launchpad (T-041). One overlay per display, one shared index. The index scan is
@@ -1570,6 +1642,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                 // insertion slot from disagreeing mid-gesture.
                 input.drag = drag.Active() ? &drag.State() : nullptr;
                 input.drop = drop_pointer.active ? &drop_pointer : nullptr;
+                // Weather snapshot (T-075): handed to the painter only when the
+                // fixture tile is on the row; a missing pointer paints the
+                // placeholder inside the weather branch.
+                input.weather = weather_tile_index() >= 0 ? &weather_snapshot : nullptr;
                 if (!dock_painter.Paint(dc, *render_backend, plate, input)) {
                     DF_WARN("dock", "dock paint failed at %.0f dpi", dpi);
                 }
@@ -1897,6 +1973,37 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         ApplyShortcuts();
     });
 
+    // T-075: weather re-apply. The settings flush and the hot reload both
+    // land here; only a real change against the running config acts. Turning
+    // the widget on/off appends/removes the fixture tile and re-derives the
+    // geometry; a city/interval edit reconfigures the host in place (a
+    // changed city clears the host's geocode cache, an unchanged one keeps
+    // it, so an interval edit never re-runs the geocoder).
+    bus.Subscribe<core::ConfigChanged>([&](const core::ConfigChanged& event) {
+        if (core::SameWeather(config.weather, event.config.weather)) return;
+        config.weather = event.config.weather;
+        const bool want = config.weather.enabled && !config.weather.city.empty();
+        if (SetWeatherTile(want)) {
+            apply_placement();
+            apply_region();
+            InvalidateRect(window.Handle(), nullptr, FALSE);
+        }
+        if (want && !weather_host_started) {
+            weather_host.SetFetcher(dock::weather::DefaultFetcher());
+            weather_host.Start(config.weather);
+            weather_host_started = true;
+        } else if (want) {
+            weather_host.Reconfigure(config.weather);
+        } else if (weather_host_started) {
+            weather_host.Stop();
+            weather_host_started = false;
+            weather_popup.Hide();
+        }
+        DF_INFO("weather", "config applied: enabled=%d city='%s' refresh=%dmin",
+                config.weather.enabled ? 1 : 0, config.weather.city.c_str(),
+                config.weather.refresh_minutes);
+    });
+
     // ---- OLE drop target (T-014) ----------------------------------------
     // The sink is a set of std::functions rather than a subclass because every piece
     // of state it needs is a local in this function, and threading a subclass through
@@ -2042,6 +2149,19 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     auto ActivateTile = [&](int index) {
         if (index < 0 || index >= static_cast<int>(tiles.size())) return;
         const shell::AppEntry& app = tiles[static_cast<std::size_t>(index)].app;
+
+        // Weather tile (T-075): there is no app to activate - a click IS the
+        // manual refresh the DoD asks for. The fetch itself still happens on
+        // the worker thread; RequestRefresh only wakes it.
+        if (tiles[static_cast<std::size_t>(index)].weather) {
+            if (weather_host_started) {
+                weather_host.RequestRefresh();
+                DF_INFO("weather", "manual refresh requested (tile click)");
+            } else {
+                DF_WARN("weather", "manual refresh requested but host is not running");
+            }
+            return;
+        }
 
         // Folder tiles (T-066, ADR-0023): a left click opens the drill-through
         // panel above the dock instead of launching Explorer. Second click on
@@ -2229,6 +2349,68 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
             hw_panel.Tick(delta_ms);
             read_hw_command(delta_ms);
         }
+        // Weather (T-075): the countdown to the next automatic refresh runs
+        // here, and a published snapshot is adopted at most once per frame.
+        // The fetch itself is on the host's worker thread; this branch only
+        // ever copies - the C-04b capture rule (no pointers across threads).
+        if (weather_host_started && weather_tile_index() >= 0) {
+            if (weather_host.Tick(delta_ms, weather_snapshot)) {
+                if (weather_snapshot.failed) {
+                    DF_WARN("weather", "refresh failed: %s (showing placeholder)",
+                            weather_snapshot.error.c_str());
+                } else {
+                    DF_INFO("weather",
+                            "refreshed city=%s temp=%.0fC kind=%s days=%zu updated=%s",
+                            weather_snapshot.city.c_str(), weather_snapshot.temp_c,
+                            dock::weather::ToString(weather_snapshot.kind),
+                            weather_snapshot.days.size(),
+                            weather_snapshot.updated_at.c_str());
+                }
+                dirty = true;
+                // A visible forecast popup restyles with the new data.
+                if (weather_popup.Visible()) {
+                    SYSTEMTIME now{};
+                    GetLocalTime(&now);
+                    char today[16] = {};
+                    std::snprintf(today, sizeof(today), "%04d-%02d-%02d", now.wYear, now.wMonth,
+                                  now.wDay);
+                    const float popup_scale =
+                        window.Scale() > 0.0f ? window.Scale() : 1.0f;
+                    const auto centres = dock::IdleCentersDip(geometry, popup_scale);
+                    const int index = weather_tile_index();
+                    RECT win_rect{};
+                    GetWindowRect(window.Handle(), &win_rect);
+                    const int anchor_x =
+                        win_rect.left +
+                        static_cast<int>(centres[static_cast<std::size_t>(
+                                             std::clamp(index, 0,
+                                                         static_cast<int>(centres.size()) - 1))] *
+                                         popup_scale);
+                    const int plate_top = win_rect.bottom - static_cast<int>(
+                                                                 geometry.plate_height_dip *
+                                                                 popup_scale);
+                    weather_popup.Show(weather_snapshot, today, anchor_x, plate_top,
+                                       window.Dpi());
+                }
+            }
+        }
+        // The weather preview follows the hover, not a timer: the pointer
+        // leaving the dock (or moving to another tile) dismisses it on the
+        // next tick, the same transition contract as the thumbnail popup.
+        // The probe tile counts as "the hover" here too - driving the dwell
+        // from outside is the only way a script can test this popup.
+        if (weather_popup.Visible()) {
+            const int hovered_now = [&] {
+                if (hover_probe_tile >= 0) return hover_probe_tile;
+                if (dock_hover.active) {
+                    return dock_painter.HitTest(dock_hover.mouse_x_dip, window.Scale());
+                }
+                return -1;
+            }();
+            if (hovered_now != weather_tile_index()) {
+                weather_popup.Hide();
+            }
+        }
         // Screen hotspots (T-069, C-24): GetCursorPos polling throttled to
         // 10Hz inside the frame tick - the C-24 ceiling, and the spike
         // measured this exact loop shape at 0 us of process CPU over 5s.
@@ -2324,9 +2506,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
             if (hover_probe_tile != before && preview_visible) {
                 HidePreview();
             }
+            if (hover_probe_tile != before && weather_popup.Visible()) {
+                weather_popup.Hide();
+            }
         }
-        if (preview_enabled && !preview_visible && !thumbnails_pending && !drag.Active() &&
-            !drop_pointer.active) {
+        if ((preview_enabled && !preview_visible) ||
+            (weather_preview_enabled && !weather_popup.Visible())) {
+            if (!thumbnails_pending && !drag.Active() && !drop_pointer.active) {
             const int hovered =
                 hover_probe_tile >= 0
                     ? hover_probe_tile
@@ -2361,6 +2547,36 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
             if (hover_timer.Update(hovered, static_cast<float>(delta_ms))) {
                 if (hovered >= 0 && hovered < static_cast<int>(tiles.size())) {
                     const auto& tile = tiles[static_cast<size_t>(hovered)];
+                    // Weather tile (T-075): the dwell shows the forecast popup
+                    // instead of a thumbnail - there is no window to preview.
+                    // Same dwell, same dismissal rules; only the content
+                    // differs. DOCKFORGE_WEATHER_PREVIEW=0 disables it for
+                    // probes (the mirror of DOCKFORGE_PREVIEW).
+                    if (tile.weather) {
+                        if (weather_preview_enabled && weather_popup_class_ready &&
+                            weather_popup.Create(instance)) {
+                            SYSTEMTIME now{};
+                            GetLocalTime(&now);
+                            char today[16] = {};
+                            std::snprintf(today, sizeof(today), "%04d-%02d-%02d", now.wYear,
+                                          now.wMonth, now.wDay);
+                            const auto centres = dock::IdleCentersDip(geometry, safe_scale);
+                            const int anchor_x =
+                                dock_rect.left +
+                                static_cast<int>(lroundf(
+                                    centres[static_cast<size_t>(hovered)] * safe_scale)) +
+                                static_cast<int>(lroundf(
+                                    static_cast<float>(config.dock.icon_size) * safe_scale * 0.5f));
+                            const int plate_top_px =
+                                dock_rect.bottom -
+                                static_cast<int>(geometry.plate_height_dip * safe_scale);
+                            weather_popup.Show(weather_snapshot, today, anchor_x,
+                                               plate_top_px, window.Dpi());
+                        } else {
+                            DF_DEBUG("weather", "dwell on weather tile; preview unavailable");
+                        }
+                        hover_timer.Reset();
+                    } else {
                     // The window list comes from the running tracker's last poll,
                     // which is at most 300ms old and already paid for. Polling here
                     // would add an EnumWindows to a frame that just decided to show
@@ -2442,6 +2658,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                     // preview is shown: a preview that stays visible for a long hover
                     // keeps its latch until the pointer leaves, so moving the pointer
                     // across the dock cannot re-fire on the same tile.
+                }
                 } else {
                     // The dwell elapsed on a tile with no window to preview. This is
                     // a legitimate state (an installed app that is not running) and
@@ -2450,7 +2667,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                     // cannot be told apart from the outside.
                     DF_DEBUG("preview", "dwell elapsed on tile %d with no window", hovered);
                     hover_timer.Reset();
-                    }
+                }
+            }
             }
         }
 
@@ -2705,6 +2923,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                     if (preview_visible) {
                         HidePreview();
                     }
+                    if (weather_popup.Visible()) {
+                        weather_popup.Hide();
+                    }
                 }
                 InvalidateRect(hwnd, nullptr, FALSE);
                 out = 0;
@@ -2743,12 +2964,21 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                 // on release, when the gesture has resolved into click, reorder, or
                 // removal. Capture is taken now so the pointer can leave the window
                 // without ending the gesture.
-                drag.Begin(index, x_dip, y_dip);
+                //
+                // The weather fixture tile never drags: it has no identity the
+                // curated order could store, so a reorder would either corrupt
+                // dock.tiles or silently drop the tile on the next load.
+                if (!tiles[static_cast<std::size_t>(index)].weather) {
+                    drag.Begin(index, x_dip, y_dip);
+                    SetCapture(hwnd);
+                }
                 // A press means the user wants this tile, not its preview.
                 if (preview_visible) {
                     HidePreview();
                 }
-                SetCapture(hwnd);
+                if (weather_popup.Visible()) {
+                    weather_popup.Hide();
+                }
                 // The region has to widen to the whole window the moment the drag
                 // starts, not on the next hover transition. It is trimmed to the plate
                 // and the magnified row while idle, and the ghost follows the pointer

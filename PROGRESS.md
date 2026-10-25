@@ -1,4 +1,4 @@
-﻿# PROGRESS.md · 执行日志（按时间正序追加）
+# PROGRESS.md · 执行日志（按时间正序追加）
 
 > 每任务追加一条。格式见 PROMPT.md · CLOSE PROTOCOL。
 
@@ -537,8 +537,7 @@ config=false 不动任务——不主动清除用户手工创建的同名任务�
   未在无媒体会话环境观察到。多显示器 DPI 位置未验证。
 - 下轮开始于：T-069 热区与全局热键系统（P1）
 
-## 2026-10-25T18:57:00+08:00 | T-069 | DONE
-- 做了什么：热区与全局热键系统（C-24）。src/core/hotkeys.{h,cpp}：HotkeyHost
+## 2026-10-25T18:57:00+08:00 | T-069 | DONE- 做了什么：热区与全局热键系统（C-24）。src/core/hotkeys.{h,cpp}：HotkeyHost
   （Register/Unregister 封装、MOD_NOREPEAT 单点 OR 入、1409 冲突分类、析构全注销、
   注册函数可注入 fake 供单测）；HotspotTracker（GetCursorPos 10Hz 节流 +
   fire-once-per-entry 重臂语义）+ HotspotRect 纯几何（四角/四边/负原点副屏）；
@@ -562,3 +561,25 @@ config=false 不动任务——不主动清除用户手工创建的同名任务�
   按钮未实机点击（T-062 已验的同一 WM_COMMAND 转发路径 + 导入导出核心 6 单测）；
   多显示器热区仅 dock 所在屏（负原点单测覆盖，无双屏实测）。
 - 下轮开始于：T-075 天气小组件（P1）
+
+## 2026-10-26T02:10:00+08:00 | T-075 | DONE
+- 做了什么：天气小组件（C-22 weather_text）。src/platform/http_client.{h,cpp}：WinHTTP 阻塞式
+  `HttpsGetText`（connect/send/receive 各自 timeout，resolve 固定 5s）；src/core/secrets.{h,cpp}：
+  `ReadSecrets` 只读 `%APPDATA%\DockForge\secrets.json`（DOCKFORGE_SECRETS_PATH 覆盖，值从不
+  进日志）；src/dock/weather.{h,cpp}：纯函数（UrlEncode/GeocodePath/ForecastPath/WeekdayLabel/
+  ParseGeocode/ParseForecast/KindFromWmo）+ `Host`（单 worker 线程 + mutex/condition_variable，
+  UI 线程只 Tick 拷快照，C-04b）；src/dock/weather_popup.{h,cpp}：GDI 悬停预报弹窗（folder_panel
+  同族，双缓冲）；dock_view 增 DrawWeatherGlyph 七种 Kind（全 FillRoundedRect/StrokeRoundedRect/
+  FillCircle 组合，零素材）+ ComputeWeatherGlyphLayout + WeatherTextFor；config 增 WeatherConfig
+  （默认关闭，SameWeather 比较，refresh_minutes 5..360）；main.cpp 接线：fixture tile（不入
+  dock.tiles 身份列表）、host 启停、dwell 400ms 弹窗、点击 = RequestRefresh、ConfigChanged 里
+  SameWeather 比较后 SetWeatherTile + apply_placement/region、拖拽排除；设置窗口 Behavior 分节
+  增三行（enabled / city / refresh_minutes）+ settings_model 增 City 类型（trim + 40 字节钳制）。
+- 实测：spike Q1..Q4（forecast 200/1156ms/652B；geocode 200/1719ms/347B；死主机 err=12007
+  16ms 快速失败）；gate -Action all 退出 0（416 用例 4381 断言，+29 用例）；单测覆盖 WMO 码映射、
+  geocode/forecast 解析、星期标签（含 Sakamoto）、URL 编码、间隔时钟、手动刷新、失败保留上次
+  有效数据、geocode 缓存、settings 模型钳制/回显/落盘 round-trip。
+- 诚实边界（evidence/T-075/verify.txt）：amap provider 只有入口没有实现（读 Key 后明确失败，
+  不伪造请求）；真实网络下的 dock 渲染与弹窗未实机截图（本机 UI 会话外运行）；设置窗口三行控件
+  未实机点击（与 T-062/T-069 同一 WM_COMMAND 转发路径 + 模型层 6 单测）。
+- 下轮开始于：T-076 macOS 风格通知中心（P1）

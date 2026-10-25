@@ -90,6 +90,12 @@ constexpr ControlRow kAppearanceRows[] = {
 constexpr ControlRow kBehaviorRows[] = {
     {"behavior.autostart", L"Start with Windows", ControlRow::Kind::Check, nullptr, 0},
     {"behavior.hide_taskbar", L"Hide the taskbar", ControlRow::Kind::Check, nullptr, 0},
+    // T-075: the weather tile. Off by default (C-01 default), so the dock keeps
+    // its shape until the user asks for the tile; the city is required because
+    // open-meteo has no IP-location lookup.
+    {"weather.enabled", L"Weather tile", ControlRow::Kind::Check, nullptr, 0},
+    {"weather.city", L"City (e.g. Beijing)", ControlRow::Kind::Edit, nullptr, 0},
+    {"weather.refresh_minutes", L"Refresh minutes (5-360)", ControlRow::Kind::Edit, nullptr, 0},
     // T-065 (C-25): one independent switch per message-count adapter. The two
     // adapters ship enabled (a badge that is off until hunted down in settings
     // would never get validated); the switch lives in

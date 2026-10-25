@@ -18,6 +18,7 @@
 | （运行时提取） | 应用图标 | 系统 `.lnk` / `.exe` | 用户本机资产 | 否 | `IShellItemImageFactory` 运行时提取，**不打包 Apple 专有图标** | 设计内 |
 | Segoe UI Variable / Segoe UI | 字体 | 系统自带 | 系统授权 | 否 | 直接引用，**禁止打包 SF Pro** | OK |
 | （自绘） | Dock 底板/指示器/圆角遮罩 | 代码生成 | 项目自有 | 否 | Direct2D 几何绘制，零素材文件 | 设计内 |
+| （自绘） | T-075 天气符号（晴/多云/阴/雾/雨/雪/雷） | 代码生成 | 项目自有 | 否 | `dock::weather` 渲染层：`DrawWeatherGlyph` 由 FillRoundedRect/StrokeRoundedRect/FillCircle 组合，零素材文件，随 DPI 缩放 | T-075 OK |
 
 ## 壁纸
 
