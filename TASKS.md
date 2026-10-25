@@ -570,7 +570,7 @@
 
 ### T-065 · 消息计数适配框架（P1 · 高风险）
 
-- 状态: PARTIAL（剩余：UserNotificationListener 适配器按 ADR-0022 转投 T-076；腾讯系适配器待真机长测）
+- 状态: PARTIAL（剩余：UserNotificationListener 适配器已判定不实现——理由见「剩余工作」①；腾讯系适配器待真机长测）
 - 依赖: T-040（索引稳定）、C-01 配置 schema
 - 上下文: `src/shell/`、`ADR-0022`
 - DoD:
@@ -667,10 +667,10 @@
 - 上下文: `src/notifications/`、`ADR-0025`
 - DoD:
   - [x] **Spike 先行**：`UserNotificationListener` 需清单声明 `userNotificationListener` 能力；MSIX 打包前用非打包方式验证可用性，受限则降级为仅显示本应用通知
-  - [x] 右上角 macOS 风格通知窗，支持堆叠、超时收起、点击跳转
-  - [x] 通知窗使用与 Dock 一致的材质降级链（C-21）
+  - [x] 右上角 macOS 风格通知窗，支持堆叠、超时收起、点击跳转 —— 堆叠与超时实机实测；点击跳转只做代码路径 + 单测，未做真人鼠标点击实机验证
+  - [x] 通知窗使用与 Dock 一致的材质降级链（C-21）—— 实机实测 banner/panel 同步 blur → solid → blur（设备丢失分支）；电池省电分支未被实机触发
   - [x] 与 Dock 图标红点联动：通知到达时对应图标短暂脉冲
-  - [x] 通知历史面板（点击 Finder Bar 时钟区域展开），支持清除
+  - [x] 通知历史面板（点击 Finder Bar 时钟区域展开），支持清除 —— 面板与清除已实现并实测；**锚点不是 Finder Bar**：Finder Bar 属 M2 仍 TODO，暂挂主显示器工作区右上角（沿用 T-068 先例），M2 落地后只改锚点
   - [x] 通知数据仅存内存，不落盘、不采集内容
 - 证据: `evidence/T-076/`（verify.txt 含逐条 DoD 与诚实边界）
 - 实现要点:
