@@ -1,0 +1,5 @@
+[ 58%] Built target dockforge_lib
+[ 61%] Built target layout_bench
+[ 64%] Built target DockForge
+[ 66%] Built target autostart_probe
+[100%] Built target dockforge_tests

@@ -14,4 +14,12 @@ struct ConfigChanged {
     core::Config config;
 };
 
+// Published by the taskbar module wiring (T-061) whenever Shell_TrayWnd's
+// observed visibility flips, so consumers can react without polling the shell
+// window (C-20 table). The payload is the observed state, not the requested
+// one: ShowWindowAsync settles asynchronously.
+struct TaskbarVisibilityChanged {
+    bool visible;
+};
+
 }  // namespace dockforge::core

@@ -13,6 +13,7 @@
 #include "core/frame_clock.h"
 #include "core/log.h"
 #include "core/paths.h"
+#include "core/taskbar.h"
 #include "dock/dock_view.h"
 #include "dock/drop_target.h"
 #include "dock/drag_controller.h"
@@ -319,6 +320,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     core::Logger::Instance().Init(L"app");
     DF_INFO("app", "DockForge %s starting", "0.1.0");
     DF_INFO("app", "config path = %s", core::WideToUtf8(core::ConfigPath()).c_str());
+    // Crash recovery (T-061) installs before anything can hide the taskbar and
+    // before any code that could crash in earnest. On a machine that never
+    // hides the taskbar the filter's restore is a harmless no-op show.
+    core::InstallTaskbarCrashRecovery();
     ApplyDpiOverrideFromEnvironment();
     // Remembered separately from Window::DpiOverride() because the WM_DPICHANGED
     // handler writes a synthetic override of its own; without this flag an
@@ -803,6 +808,55 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                 ok ? "ok" : "FAILED", detail.c_str());
     });
 
+    // Taskbar visibility (T-061). Same shape as the autostart switch: the
+    // settings checkbox lands in config.json through the normal flush, this
+    // subscription applies it, and only a *change* acts (hot reloads republish
+    // the same snapshot untouched). The default is off and off only ever
+    // SHOWS - the most invasive feature in the app must fail towards "taskbar
+    // visible". Startup applies the config's current value once, after the
+    // dock window exists (see below ShowWindow), never re-asserting it later:
+    // a restarted explorer brings the taskbar back by design (spike Q6).
+    bool last_hide_taskbar = config.behavior.hide_taskbar;
+    bool taskbar_visible_published = true;  // the steady state at startup
+    // Publishes the observed C-20 state, deduplicated so a no-op apply cannot
+    // spam placement work. The event carries the OBSERVED visibility, not the
+    // requested one - ShowWindowAsync settles asynchronously.
+    auto publish_taskbar_state = [&](bool force) {
+        const bool visible = core::TaskbarCurrentlyVisible();
+        if (force || visible != taskbar_visible_published) {
+            taskbar_visible_published = visible;
+            bus.Publish(core::TaskbarVisibilityChanged{visible});
+        }
+    };
+    bus.Subscribe<core::ConfigChanged>([&](const core::ConfigChanged& event) {
+        if (event.config.behavior.hide_taskbar == last_hide_taskbar) return;
+        last_hide_taskbar = event.config.behavior.hide_taskbar;
+        std::string detail;
+        // Idempotent decision layer: hide when turning on, "already hidden" is
+        // a success no-op, turning off shows.
+        core::ShellTraywndTaskbar backend;
+        const bool ok =
+            core::ApplyTaskbarVisibility(last_hide_taskbar, backend, &detail);
+        DF_INFO("core", "hide_taskbar switch -> %d: %s (%s)", last_hide_taskbar ? 1 : 0,
+                ok ? "ok" : "FAILED", detail.c_str());
+        publish_taskbar_state(false);
+    });
+
+    // C-20: the taskbar module publishes visibility flips; the dock re-reads
+    // the work area in response. The spike measured the work area unchanged
+    // while hidden, so today this is a cheap no-op - it exists so a future
+    // Windows that DOES shrink the work area cannot leave the dock floating
+    // over the (hidden) taskbar strip.
+    bus.Subscribe<core::TaskbarVisibilityChanged>(
+        [&](const core::TaskbarVisibilityChanged& event) {
+            DF_INFO("core", "taskbar visibility -> %d; re-reading work area",
+                    event.visible ? 1 : 0);
+            if (platform::PrimaryDisplay(target_display)) {
+                apply_dpi_override(target_display);
+                apply_placement();
+            }
+        });
+
     // The Launchpad's open gesture. A registered hotkey, not a low-level keyboard hook:
     // WH_KEYBOARD_LL would sit in the input path of every process on the machine, and
     // RegisterHotKey already fails cleanly when the combination is taken (which is
@@ -818,6 +872,24 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
             DF_WARN("launchpad", "RegisterHotKey failed (%lu); use the environment trigger",
                     GetLastError());
         }
+    }
+
+    // Emergency taskbar restore (T-061): Ctrl+Alt+T. Registered
+    // UNCONDITIONALLY - not behind hide_taskbar, not behind any module being
+    // ready - because the whole point is that the recovery must exist even
+    // when the feature misbehaved. The modifier set carries MOD_NOREPEAT (C-24
+    // rule): key repeat must not machine-gun ShowWindow. The handler restores
+    // the taskbar AND persists hide_taskbar=false so the recovery survives a
+    // restart; see the WM_HOTKEY arm.
+    constexpr int kTaskbarRestoreHotkeyId = 0x5442;  // 'TB'
+    const bool taskbar_hotkey = RegisterHotKey(window.Handle(), kTaskbarRestoreHotkeyId,
+                                               MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'T');
+    if (taskbar_hotkey) {
+        DF_INFO("core", "emergency hotkey registered: Ctrl+Alt+T restores the taskbar");
+    } else {
+        // Logged, never fatal: losing the hotkey degrades recovery to the
+        // settings switch, which is exactly why that switch keeps working too.
+        DF_WARN("core", "emergency hotkey RegisterHotKey failed (%lu)", GetLastError());
     }
 
     // Verification hook for the Launchpad, same precedent and same reason as the hover
@@ -1368,11 +1440,35 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     core::AppLoop loop;
     loop.SetTargetIntervalMs(16);  // 60 FPS target (PERFORMANCE.md)
 
+    // Verification hook for the T-061 crash path (evidence only, never a
+    // product feature): DOCKFORGE_TASKBAR_CRASH_TEST=1 arms a countdown that
+    // dereferences a null pointer 3s after startup, producing a genuine
+    // unhandled exception AFTER the taskbar was hidden. The probe uses this to
+    // prove SetUnhandledExceptionFilter restores the taskbar; there is no
+    // other honest way to exercise a crash path on demand.
+    const bool crash_test_armed = ReadEnvFlag(L"DOCKFORGE_TASKBAR_CRASH_TEST");
+    double crash_test_remaining_ms = 3000.0;
+    if (crash_test_armed) {
+        DF_WARN("app", "crash test armed: null dereference in 3000ms "
+                       "(DOCKFORGE_TASKBAR_CRASH_TEST)");
+    }
+
     // Pull a fresh backdrop at most once per frame, and only when the worker
     // published something new. At 60 FPS with a 200ms capture interval that skips
     // the pixel copy on ~11 of every 12 frames.
     loop.SetTickHandler([&](double delta_ms) {
         bool dirty = false;
+        if (crash_test_armed) {
+            crash_test_remaining_ms -= delta_ms;
+            if (crash_test_remaining_ms <= 0.0) {
+                DF_ERROR("app", "crash test firing: dereferencing null now");
+                // A volatile store through a null pointer cannot be optimized
+                // away and always raises EXCEPTION_ACCESS_VIOLATION, which
+                // lands in the T-061 unhandled-exception filter.
+                volatile int* bomb = static_cast<volatile int*>(nullptr);
+                *bomb = 0x42;
+            }
+        }
         if (capture_active) {
             if (capture.AcquireIfNew(backdrop_generation, backdrop_pixels, backdrop_w,
                                      backdrop_h, backdrop_generation)) {
@@ -1947,6 +2043,39 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                     out = 0;
                     return true;
                 }
+                if (wp == static_cast<WPARAM>(kTaskbarRestoreHotkeyId)) {
+                    // Emergency restore (T-061). Works without the settings
+                    // window, without the config being on, and without any
+                    // module being "ready" - the registration is unconditional,
+                    // so this arm is the recovery of last resort while the
+                    // process is alive.
+                    std::string detail;
+                    const bool ok = core::RestoreTaskbarSystem(&detail);
+                    DF_INFO("core", "emergency restore (Ctrl+Alt+T): %s (%s)",
+                            ok ? "ok" : "FAILED", detail.c_str());
+                    if (config.behavior.hide_taskbar) {
+                        // Persist the recovery: the user just asked for the
+                        // taskbar back, so a restart must not re-hide it. The
+                        // write goes through the production SaveConfig path
+                        // and the publish updates the settings checkbox.
+                        core::Config updated = config;
+                        updated.behavior.hide_taskbar = false;
+                        if (core::SaveConfig(updated)) {
+                            config = updated;
+                            last_hide_taskbar = false;
+                            DF_INFO("core",
+                                    "emergency restore persisted hide_taskbar=false");
+                            bus.Publish(core::ConfigChanged{config});
+                        } else {
+                            DF_WARN("core",
+                                    "emergency restore could not persist config; "
+                                    "taskbar shown for this run only");
+                        }
+                    }
+                    publish_taskbar_state(true);
+                    out = 0;
+                    return true;
+                }
                 return false;
             case WM_KEYDOWN:
                 if (wp == 'Q' && (GetKeyState(VK_CONTROL) & 0x8000)) {
@@ -1992,8 +2121,35 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     }
     repaint();
 
+    // Taskbar hide, startup application (T-061). Deliberately AFTER the dock
+    // window is placed and shown: hiding the shell's taskbar is the last thing
+    // startup does, so every earlier failure path (exit codes 2..5) leaves the
+    // machine untouched. Applied once, never re-asserted - a restarted explorer
+    // brings the taskbar back on its own, and that is the emergency path
+    // working, not a bug to fix.
+    if (last_hide_taskbar) {
+        std::string detail;
+        core::ShellTraywndTaskbar backend;
+        const bool ok = core::ApplyTaskbarVisibility(true, backend, &detail);
+        DF_INFO("core", "hide_taskbar startup apply: %s (%s)", ok ? "ok" : "FAILED",
+                detail.c_str());
+        publish_taskbar_state(false);
+    } else {
+        DF_INFO("core", "hide_taskbar off (default); taskbar untouched");
+    }
+
     const int code = loop.Run();
     DF_INFO("app", "app loop exited with code %d", code);
+    // Normal-exit recovery (T-061): the app hid the taskbar, so the app shows
+    // it again. Runs for every return through loop.Run() - WM_CLOSE, WM_DESTROY
+    // and Quit() all end here. The crash path is covered separately by the
+    // SetUnhandledExceptionFilter installed at startup.
+    {
+        std::string detail;
+        const bool ok = core::RestoreTaskbarSystem(&detail);
+        DF_INFO("core", "exit restore: %s (%s)", ok ? "ok" : "FAILED", detail.c_str());
+        publish_taskbar_state(true);
+    }
     // Revoked before the window is destroyed: OLE keeps a reference to the HWND, and a
     // destroyed window still registered is the classic shutdown hang.
     drop_target.Revoke();
@@ -2007,6 +2163,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     // targets. They go before the Dock's surface for the same reason the preview does:
     // a live composition target on a destroyed HWND is a shutdown hang, not a leak.
     if (launchpad_hotkey) UnregisterHotKey(window.Handle(), kLaunchpadHotkeyId);
+    if (taskbar_hotkey) UnregisterHotKey(window.Handle(), kTaskbarRestoreHotkeyId);
     launchpad.Shutdown();
     capture.Stop();
     plate.Reset();

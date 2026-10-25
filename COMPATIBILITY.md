@@ -36,6 +36,15 @@
 | 竖屏 | 不可测（单显示器） | — |
 | 负原点副屏 | 逻辑通过 | `tests/display_test.cpp` 负坐标用例 |
 
+## 任务栏显隐（T-061）
+
+| 场景 | 状态 | 证据 |
+|---|---|---|
+| Win11 26300：ShowWindowAsync 显/隐、恢复、Explorer 重启自然恢复 | 通过 | `evidence/T-061/`（verify.txt verdict=PASS、A2/B1/C1/D2/E2/F2-F4 + 五张截图）；spike `spikes/t061_taskbar/`（显/隐 ~16ms 收敛；隐藏时 SPI_GETWORKAREA 不变） |
+| Win10 21H2/22H2：Shell_TrayWnd 行为差异 | 待测（无 Win10 环境，NOT RUN） | `spikes/t061_taskbar/findings.md` 未测边界一节 |
+| 多显示器 `Shell_SecondaryTrayWnd` | 不可测（单显示器，代码按枚举覆盖） | — |
+| 任务栏"自动隐藏"模式交互 | 待测（本机未开自动隐藏） | — |
+
 ## 已知限制
 
 - 无 MSVC/Windows SDK：MSIX 打包暂不可做（见 BLOCKERS.md B-002）。

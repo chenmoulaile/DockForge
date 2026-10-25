@@ -2,13 +2,13 @@
     "project": "DockForge",
     "schema": 1,
     "milestone": "M5",
-    "last_task": "T-060",
+    "last_task": "T-061",
     "last_commit": "d35ba8e",
     "current_module": "core",
-    "current_task": "T-060",
+    "current_task": "T-061",
     "counters": {
-        "total": 24,
-        "done": 24,
+        "total": 25,
+        "done": 25,
         "partial": 0,
         "blocked": 0
     },
@@ -130,7 +130,9 @@
         "FrameClock 是 1000 样本滚动窗，p99 必须在 frames>=1000 之后读，否则仍含启动首帧（实测 frames=377 时 19.6ms，frames=1000 后 16.5ms）",
         "TASKS.md / CONTRACTS.md 在 HEAD 中是 UTF-8 无 BOM + LF；用 WriteAllText 写中文后必须把 CRLF 归一化成 LF，否则 git diff 会把整文件标成改动",
         "PowerShell function 参数名 $Args 与自动变量同名会被吞：实测 [string[]]$Args 绑定恒为 count=0，schtasks /tn 静默丢失退化成整库查询 rc=0；参数必须改名（T-060 探针 9 个假阴性全部源于此）",
-        "schtasks /create /sc onlogon 非提升必拒（Access denied，/rl limited 与 /ru 变体同拒）；COM ITaskFolder::RegisterTaskDefinition + LogonTrigger + TASK_LOGON_INTERACTIVE_TOKEN 非提升可注册（T-060 spike 实测，注册成员在 ITaskFolder 不在 ITaskService，MinGW 成员名 get_Xml/GetTask）"
+        "schtasks /create /sc onlogon 非提升必拒（Access denied，/rl limited 与 /ru 变体同拒）；COM ITaskFolder::RegisterTaskDefinition + LogonTrigger + TASK_LOGON_INTERACTIVE_TOKEN 非提升可注册（T-060 spike 实测，注册成员在 ITaskFolder 不在 ITaskService，MinGW 成员名 get_Xml/GetTask）",
+        "PowerShell P/Invoke FindWindowExW 必须标 CharSet=Unicode：缺省按 ANSI 编组进 W 函数使类名恒找不到，显/隐断言两个方向同时说谎（T-061 探针第一版 9 个假结果全部源于此，应用侧日志零缺陷）",
+        "隐藏 Shell_TrayWnd 不改变工作区：SPI_GETWORKAREA 隐藏前后实测全等（T-061 spike），Dock 无需随任务栏隐藏挪位；显隐必须 ShowWindowAsync + IsWindowVisible 轮询收敛（~16ms），同步 ShowWindow 阻塞在 explorer 消息泵上"
     ],
-    "updated_at": "2026-10-25T11:59:00+08:00"
+    "updated_at": "2026-10-25T12:40:00+08:00"
 }

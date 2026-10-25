@@ -426,17 +426,18 @@
 - 备注: spike 反转了工具链提示的推荐——schtasks 参数路径恰好是被拒路径；探针第一版 FAIL(9) 全部为脚本自身缺陷（PowerShell `$Args` 撞自动变量绑定成空 → `/tn` 丢失 → 整库查询 rc=0），改名 `$SchTasksArgs` 后 verdict=PASS，产品代码无需改动
 
 ### T-061 · 任务栏显隐（默认关闭 + 紧急恢复）
-- 状态: TODO
+- 状态: DONE
 - 优先级: P1
 - 依赖: T-060
 - 预估: 1 会话
 - DoD:
-  - [ ] spike 先验证 `Shell_TrayWnd` 在 Win10 与 Win11 的行为差异（任务书反幻觉条款要求）
-  - [ ] `ShowWindow` 控制显隐，默认关闭，设置窗口显式开启
-  - [ ] 全局快捷键 `Ctrl+Alt+T` 强制恢复，不依赖设置窗口可达
-  - [ ] 退出与崩溃路径都恢复任务栏（`SetUnhandledExceptionFilter` + 正常退出）
-  - [ ] 本机版本实测一次并记录
-- 证据: `evidence/T-061/`
+  - [x] spike 先验证 `Shell_TrayWnd` 在 Win10 与 Win11 的行为差异（任务书反幻觉条款要求）——Win11 26300 全实测（`spikes/t061_taskbar/findings.md` Q1-Q6：类名仍是 Shell_TrayWnd；ShowWindowAsync 显/隐 ~16ms 收敛而同步 ShowWindow 阻塞在 explorer 消息泵上；隐藏时 SPI_GETWORKAREA 不变；taskkill explorer 后新窗口 0.5s 自然恢复可见）。**Win10 侧本机无环境 NOT RUN**，按反幻觉条款如实声明于 findings 未测边界与 COMPATIBILITY.md，不外推"行为一致"
+  - [x] `ShowWindow` 控制显隐，默认关闭，设置窗口显式开启——产品路径用 ShowWindowAsync + IsWindowVisible 收敛轮询（同步 ShowWindow 弃用，见 spike Q2）；`behavior.hide_taskbar` C-01 默认 false，默认配置启动日志 "hide_taskbar off (default); taskbar untouched"（探针 A2）；T-050 复选框经 RecordEdit→防抖→SaveConfig→ConfigChanged→ApplyTaskbarVisibility 生效（探针 B1）
+  - [x] 全局快捷键 `Ctrl+Alt+T` 强制恢复，不依赖设置窗口可达——RegisterHotKey 无条件注册（MOD_NOREPEAT），ForceShowTaskbar 不读可见性直接 SW_SHOW，并经 SaveConfig 持久化 hide_taskbar=false；真实 keybd_event 注入实测（探针 C1/C2）
+  - [x] 退出与崩溃路径都恢复任务栏（`SetUnhandledExceptionFilter` + 正常退出）——正常退出 exit restore（探针 D2）；崩溃路径用 DOCKFORGE_TASKBAR_CRASH_TEST 钩子真实空指针解引用（exit code -1073741819），过滤器恢复任务栏并追加 taskbar-crash.txt 标记（探针 E2/E3）；Explorer 重启自然恢复 + 不重新隐藏（探针 F2/F3）
+  - [x] 本机版本实测一次并记录——Windows 10.0.26300，探针六段 verdict=PASS；截图五张（默认可见/隐藏/热键恢复/退出恢复/崩溃恢复）像素校验一致
+- 证据: `evidence/T-061/`（verify.txt、build.log、test.log 3485 断言全绿、五张 PNG、spike 输出两份；探针 tools/taskbar_probe.ps1）
+- 备注: 探针第一版 FAIL(9) 全部为脚本自身缺陷（P/Invoke FindWindowExW 缺 CharSet.Unicode，ANSI 编组使命中类名恒失败，显/隐断言两个方向同时说谎），修正后产品代码零改动重跑 PASS；决策层 ForceShowTaskbar 与显隐决策矩阵进了单元测试（fake backend，10 用例）
 
 ### T-062 · 崩溃转储与日志轮转
 - 状态: TODO

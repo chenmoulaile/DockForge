@@ -1,0 +1,21 @@
+== T-061 taskbar spike ==
+  os build=26300 monitor-secondary-trays=0
+  [baseline] hwnd=0000000000020216 visible=1 rect=0,912,1440,960
+  [baseline] SPI_GETWORKAREA=0,0,1440,912 monitor.rcWork=0,0,1440,912
+  ShowWindow(SW_HIDE) blocking call took 4.13ms, visible right after=0
+  [after sync hide + 200ms] hwnd=0000000000020216 visible=0 rect=0,912,1440,960
+  [while hidden] SPI_GETWORKAREA=0,0,1440,912 monitor.rcWork=0,0,1440,912
+  ShowWindowAsync(0x0005) posted=1 settled visible=1 after 16.50ms
+  [after async show + 200ms] hwnd=0000000000020216 visible=1 rect=0,912,1440,960
+  ShowWindowAsync(0x0000) posted=1 settled visible=0 after 16.24ms
+  [after async hide + 200ms] hwnd=0000000000020216 visible=0 rect=0,912,1440,960
+  ShowWindowAsync(0x0005) posted=1 settled visible=1 after 15.16ms
+  [after async restore + 200ms] hwnd=0000000000020216 visible=1 rect=0,912,1440,960
+  [after restore] SPI_GETWORKAREA=0,0,1440,912 monitor.rcWork=0,0,1440,912
+  summary: async-hide and async-restore both settle; restore took 15.16ms
+  --restart: killing explorer.exe
+  after taskkill: Shell_TrayWnd=null (null means gone)
+  --restart: starting explorer.exe
+  natural recovery: new Shell_TrayWnd=0000000000040852 visible after 0.5s (no ShowWindow call from this process)
+  [after explorer restart] hwnd=0000000000040852 visible=1 rect=0,912,1440,960
+== spike done (taskbar left VISIBLE) ==

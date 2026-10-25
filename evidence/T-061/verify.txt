@@ -1,0 +1,44 @@
+== T-061 taskbar probe 2026-10-25T12:19:35.5392100+08:00 ==
+exe=build\bin\DockForge.exe tempconfig=C:\Users\chenk\AppData\Local\Temp\dockforge-t061-1774203\config.json os=Microsoft Windows NT 10.0.26300.0
+--- Part A: default off (fresh profile) ---
+[A1] baseline: taskbar visible before anything runs
+A1 ok: taskbar visible (IsWindowVisible=1)
+[A2] startup with behavior.hide_taskbar=false: taskbar must stay visible
+A2 log: 2026-10-25T12:19:36.591+08:00 INFO [core] hide_taskbar off (default); taskbar untouched
+A2 ok: taskbar visible with default config
+shot: A2-default-off-visible.png
+--- Part B: settings switch -> taskbar hidden ---
+[B1] set behavior.hide_taskbar 1 (RecordEdit -> debounce -> SaveConfig -> publish)
+B1 log: 2026-10-25T12:19:43.312+08:00 INFO [core] hide_taskbar switch -> 1: ok (hidden)
+B1 ok: taskbar HIDDEN (IsWindowVisible=0)
+shot: B1-hidden.png
+[B2] the switch wrote the flag to disk
+B2 ok: config.json holds hide_taskbar=true
+--- Part C: emergency hotkey Ctrl+Alt+T (real injected keys) ---
+[C1] keybd_event Ctrl+Alt+T -> forced restore + persisted off
+C1 log: 2026-10-25T12:19:44.140+08:00 INFO [core] emergency restore (Ctrl+Alt+T): ok (restored (forced show))
+C1 ok: taskbar RESTORED by the hotkey
+shot: C1-restored-hotkey.png
+C2 ok: recovery persisted hide_taskbar=false
+--- Part D: graceful exit restores the taskbar ---
+D1 ok: taskbar hidden again (switch path)
+[D2] graceful exit: PostMessage WM_CLOSE to DockForgeHostWindow
+D2 log: 2026-10-25T12:19:48.717+08:00 INFO [core] exit restore: ok (restored (forced show))
+D2 ok: taskbar visible after normal exit
+shot: D2-restored-after-exit.png
+--- Part E: crash -> SetUnhandledExceptionFilter restores ---
+E1 ok: taskbar hidden by the startup apply
+[E2] waiting for the armed null dereference (3s countdown)...
+E2 ok: process crashed with exit code -1073741819
+E2 ok: taskbar RESTORED after the crash
+shot: E2-restored-after-crash.png
+E3 ok: crash marker appended: crash filter: taskbar restore posted, window_found=1 tick=1791656
+--- Part F: explorer restart restores naturally (product level) ---
+F1 ok: taskbar hidden (switch path)
+[F2] taskkill /f /im explorer.exe; restart the shell
+F2 ok: taskbar naturally VISIBLE after the shell restart
+[F3] the app must NOT re-hide (hide applied once per transition)
+F3 ok: taskbar still visible; app did not re-assert the hide
+F4 ok: exit restore after the restart test
+cleanup ok: taskbar visible
+== verdict=PASS ==

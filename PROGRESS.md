@@ -373,3 +373,25 @@ autostart:true（439 字节）→ set 0 → 日志 `task deleted` → schtasks �
 config=false 不动任务——不主动清除用户手工创建的同名任务之外的任何东西。
 
 - 下轮开始于：T-061 任务栏显隐（M5）
+
+## 2026-10-25T12:35:00+08:00 | T-061 | DONE
+- 做了什么：spike `spikes/t061_taskbar/`（Win11 26300 实测 Shell_TrayWnd：ShowWindowAsync 显/隐
+  ~16ms 收敛、同步 ShowWindow 在 explorer 消息泵上阻塞、隐藏时 SPI_GETWORKAREA 不变、
+  taskkill explorer 后新窗口 0.5s 自然恢复）；新增 `src/core/taskbar.{h,cpp}`（决策层
+  ApplyTaskbarVisibility 幂等矩阵 + ForceShowTaskbar 强制恢复 + ShellTraywndTaskbar 真后端 +
+  SetUnhandledExceptionFilter 崩溃恢复过滤器，raw Win32 无堆分配）；main.cpp 接线（启动应用
+  在窗口就位后、ConfigChanged 开关订阅、Ctrl+Alt+T 无条件热键 + MOD_NOREPEAT、C-20
+  TaskbarVisibilityChanged 事件发布/重读工作区、正常退出恢复、DOCKFORGE_TASKBAR_CRASH_TEST
+  崩溃验证钩子）；tests/taskbar_test.cpp 10 用例（fake backend， hermetic）。
+- 实测：gate -Action all 退出 0；单测 3485 断言 / 304 用例全绿；探针 tools/taskbar_probe.ps1
+  六段 verdict=PASS——A 默认关闭任务栏不动、B 设置开关经生产链隐藏、C 真实注入 Ctrl+Alt+T
+  恢复并持久化 hide_taskbar=false、D WM_CLOSE 优雅退出恢复、E 空指针崩溃（exit
+  -1073741819）由过滤器恢复 + taskbar-crash.txt 标记、F explorer 重启自然恢复且应用不重新
+  隐藏；五张截图（A2/B1/C1/D2/E2）底带像素校验与 IsWindowVisible 读数一致。
+- 诚实边界：Win10 差异 NOT RUN（本机无 Win10 环境，findings/COMPATIBILITY.md 已声明，未外推）；
+  多显示器 Shell_SecondaryTrayWnd 与任务栏自动隐藏模式未实测（单屏/未开自动隐藏）；
+  SetUnhandledExceptionFilter 覆盖不了 abort()/CRT terminate（DoD 只要求 SEH 路径）。
+- 关键缺陷（已修）：探针第一版 FAIL(9) 全为脚本自身缺陷——P/Invoke FindWindowExW 缺
+  CharSet.Unicode，ANSI 编组进 W 函数使命中类名恒失败，显/隐断言两个方向同时说谎（基线
+  读隐藏、恢复断言全假阴性）；修正后产品代码零改动重跑 PASS。
+- 下轮开始于：T-062 崩溃转储与日志轮转（M5）
