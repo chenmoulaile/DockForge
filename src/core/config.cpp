@@ -704,9 +704,15 @@ Config LoadConfig() {
 }
 
 bool SaveConfig(const Config& config) {
-    if (!EnsureDirectory(ConfigDir())) return false;
-
     const std::wstring path = ConfigPath();
+    // The config path can be overridden (tests, portable setups) to point
+    // anywhere, so the directory that actually needs to exist is the file's own
+    // parent, not ConfigDir. Ensuring ConfigDir only was measured to break the
+    // test-isolation path (%TEMP%\dockforge-tests-<pid>\config.json): the parent
+    // was never created and every save silently failed.
+    const std::size_t slash = path.find_last_of(L"\\/");
+    if (slash == std::wstring::npos || slash == 0) return false;
+    if (!EnsureDirectory(path.substr(0, slash))) return false;
     const std::wstring temp = path + L".tmp";
     const std::string text = SerializeConfig(config);
 

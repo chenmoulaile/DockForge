@@ -1,0 +1,91 @@
+[ 61%] Built target dockforge_lib
+[ 64%] Built target layout_bench
+[ 66%] Building CXX object CMakeFiles/DockForge.dir/src/main.cpp.obj
+[ 98%] Built target dockforge_tests
+[100%] Linking CXX executable bin\DockForge.exe
+[100%] Built target DockForge
+[  1%] Building CXX object CMakeFiles/dockforge_lib.dir/src/settings/settings_window.cpp.obj
+D:\MacDock\src\settings\settings_window.cpp: In member function 'void dockforge::settings::SettingsWindow::CreateControls()':
+D:\MacDock\src\settings\settings_window.cpp:306:25: warning: unused variable 'style' [-Wunused-variable]
+  306 |             const DWORD style = WS_CHILD | (row.kind == ControlRow::Kind::Check
+      |                         ^~~~~
+[  3%] Linking CXX static library libdockforge_lib.a
+[ 61%] Built target dockforge_lib
+[ 63%] Linking CXX executable bin\layout_bench.exe
+[ 64%] Linking CXX executable bin\DockForge.exe
+[ 66%] Building CXX object CMakeFiles/dockforge_tests.dir/tests/settings_test.cpp.obj
+[ 67%] Built target layout_bench
+[ 69%] Built target DockForge
+[ 70%] Linking CXX executable bin\dockforge_tests.exe
+[100%] Built target dockforge_tests
+[ 61%] Built target dockforge_lib
+[ 64%] Built target layout_bench
+[ 66%] Building CXX object CMakeFiles/dockforge_tests.dir/tests/settings_test.cpp.obj
+[ 69%] Built target DockForge
+D:\MacDock\tests\settings_test.cpp: In function 'void CATCH2_INTERNAL_TEST_14()':
+D:\MacDock\tests\settings_test.cpp:132:5: error: 'TempConfigPath' was not declared in this scope
+  132 |     TempConfigPath guard;
+      |     ^~~~~~~~~~~~~~
+mingw32-make[2]: *** [CMakeFiles\dockforge_tests.dir\build.make:289: CMakeFiles/dockforge_tests.dir/tests/settings_test.cpp.obj] Error 1
+mingw32-make[1]: *** [CMakeFiles\Makefile2:159: CMakeFiles/dockforge_tests.dir/all] Error 2
+mingw32-make: *** [Makefile:100: all] Error 2
+[ 61%] Built target dockforge_lib
+[ 64%] Built target layout_bench
+[ 66%] Building CXX object CMakeFiles/dockforge_tests.dir/tests/settings_test.cpp.obj
+[ 69%] Built target DockForge
+[ 70%] Linking CXX executable bin\dockforge_tests.exe
+[100%] Built target dockforge_tests
+[  1%] Building CXX object CMakeFiles/dockforge_lib.dir/src/core/config.cpp.obj
+D:\MacDock\src\core\config.cpp: In function 'bool dockforge::core::SaveConfig(const Config&)':
+D:\MacDock\src\core\config.cpp:713:49: warning: unknown escape sequence: '\/'
+  713 |     const std::size_t slash = path.find_last_of(L"\/");
+      |                                                 ^~~~~
+[  3%] Linking CXX static library libdockforge_lib.a
+[ 61%] Built target dockforge_lib
+[ 63%] Linking CXX executable bin\DockForge.exe
+[ 64%] Linking CXX executable bin\layout_bench.exe
+[ 66%] Linking CXX executable bin\dockforge_tests.exe
+[ 67%] Built target layout_bench
+[ 69%] Built target DockForge
+[100%] Built target dockforge_tests
+[  1%] Building CXX object CMakeFiles/dockforge_lib.dir/src/core/config.cpp.obj
+D:\MacDock\src\core\config.cpp: In function 'bool dockforge::core::SaveConfig(const Config&)':
+D:\MacDock\src\core\config.cpp:713:49: warning: unknown escape sequence: '\/'
+  713 |     const std::size_t slash = path.find_last_of(L"\/");
+      |                                                 ^~~~~
+[  3%] Linking CXX static library libdockforge_lib.a
+[ 61%] Built target dockforge_lib
+[ 63%] Linking CXX executable bin\DockForge.exe
+[ 64%] Linking CXX executable bin\layout_bench.exe
+[ 66%] Linking CXX executable bin\dockforge_tests.exe
+[ 67%] Built target layout_bench
+[ 69%] Built target DockForge
+[100%] Built target dockforge_tests
+[  1%] Building CXX object CMakeFiles/dockforge_lib.dir/src/core/config.cpp.obj
+[  3%] Linking CXX static library libdockforge_lib.a
+[ 61%] Built target dockforge_lib
+[ 63%] Linking CXX executable bin\layout_bench.exe
+[ 64%] Linking CXX executable bin\DockForge.exe
+[ 66%] Linking CXX executable bin\dockforge_tests.exe
+[ 67%] Built target layout_bench
+[ 69%] Built target DockForge
+[100%] Built target dockforge_tests
+[ 61%] Built target dockforge_lib
+[ 63%] Building CXX object CMakeFiles/DockForge.dir/src/main.cpp.obj
+[ 66%] Built target layout_bench
+[ 98%] Built target dockforge_tests
+[100%] Linking CXX executable bin\DockForge.exe
+[100%] Built target DockForge
+[  1%] Building CXX object CMakeFiles/dockforge_lib.dir/src/settings/settings_window.cpp.obj
+D:\MacDock\src\settings\settings_window.cpp: In member function 'void dockforge::settings::SettingsWindow::CreateControls()':
+D:\MacDock\src\settings\settings_window.cpp:306:25: warning: unused variable 'style' [-Wunused-variable]
+  306 |             const DWORD style = WS_CHILD | (row.kind == ControlRow::Kind::Check
+      |                         ^~~~~
+[  3%] Linking CXX static library libdockforge_lib.a
+[ 61%] Built target dockforge_lib
+[ 63%] Linking CXX executable bin\DockForge.exe
+[ 64%] Linking CXX executable bin\layout_bench.exe
+[ 66%] Linking CXX executable bin\dockforge_tests.exe
+[ 67%] Built target layout_bench
+[ 69%] Built target DockForge
+[100%] Built target dockforge_tests

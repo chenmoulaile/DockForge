@@ -17,6 +17,7 @@
 #include "dock/launchpad.h"
 #include "dock/running_tracker.h"
 #include "dock/tile_order.h"
+#include "settings/settings_window.h"
 #include "platform/composition.h"
 #include "platform/display.h"
 #include "platform/hit_region.h"
@@ -718,6 +719,31 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         DF_INFO("launchpad", "disabled by DOCKFORGE_LAUNCHPAD");
     }
 
+    // Settings window (T-050). Off by default in the steady state - there is no
+    // dock affordance to open it yet - so the env trigger and the probe file are
+    // the two entry points, exactly like the Launchpad's channel. The bus
+    // subscription here is the C-20 proof for the probe: a `set` command has to
+    // produce one "config published" line per flush, after the save.
+    core::EventBus bus;  // declared before every subscriber it serves
+    settings::SettingsWindow settings;
+    bool settings_ready = false;
+    const bool settings_enabled = ReadEnvFlag(L"DOCKFORGE_SETTINGS", false);
+    if (settings_enabled) {
+        if (settings::SettingsWindow::RegisterWindowClass(instance)) {
+            if (settings.Create(instance, bus, config)) {
+                settings_ready = true;
+                if (ReadEnvFlag(L"DOCKFORGE_SETTINGS_SHOW", false)) settings.Show();
+                DF_INFO("settings", "ready (window deferred until show)");
+            }
+        } else {
+            DF_WARN("settings", "window class registration failed");
+        }
+    }
+    bus.Subscribe<core::ConfigChanged>([](const core::ConfigChanged& event) {
+        DF_INFO("settings", "config published icon_size=%d launchpad_columns=%d",
+                event.config.dock.icon_size, event.config.launchpad.columns);
+    });
+
     // The Launchpad's open gesture. A registered hotkey, not a low-level keyboard hook:
     // WH_KEYBOARD_LL would sit in the input path of every process on the machine, and
     // RegisterHotKey already fails cleanly when the combination is taken (which is
@@ -826,6 +852,63 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                 } else {
                     launchpad.ReleaseAt(0, x, y);
                 }
+            }
+        }
+    };
+
+    // Settings probe channel (T-050), same file-channel pattern as the Launchpad.
+    // Commands: `show`, `hide`, `close`, `section <name>`, `set <field> <value>`.
+    // `set` takes the RecordEdit path, so the debounce, clamp, save and publish
+    // all run the production code.
+    std::wstring settings_cmd_file;
+    if (settings_ready) {
+        wchar_t buffer[MAX_PATH]{};
+        const DWORD n = GetEnvironmentVariableW(L"DOCKFORGE_SETTINGS_CMD_FILE", buffer,
+                                                ARRAYSIZE(buffer));
+        if (n > 0 && n < ARRAYSIZE(buffer)) {
+            settings_cmd_file.assign(buffer, n);
+            DF_INFO("settings", "probe file=%s", core::WideToUtf8(settings_cmd_file).c_str());
+        }
+    }
+    std::string settings_last_command;
+    double settings_cmd_since_read_ms = 1e9;
+    auto read_settings_command = [&](double delta_ms) {
+        settings_cmd_since_read_ms += delta_ms;
+        if (settings_cmd_since_read_ms < 50.0) return;
+        settings_cmd_since_read_ms = 0.0;
+        if (settings_cmd_file.empty()) return;
+        HANDLE h = CreateFileW(settings_cmd_file.c_str(), GENERIC_READ,
+                               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                               nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (h == INVALID_HANDLE_VALUE) return;
+        char raw[192]{};
+        DWORD got = 0;
+        const BOOL read_ok = ReadFile(h, raw, sizeof(raw) - 1, &got, nullptr);
+        CloseHandle(h);
+        if (!read_ok || got == 0) return;
+        raw[got] = '\0';
+        std::string command(raw);
+        while (!command.empty() &&
+               (command.back() == '\n' || command.back() == '\r' || command.back() == ' ')) {
+            command.pop_back();
+        }
+        if (command.empty() || command == settings_last_command) return;
+        settings_last_command = command;
+        DF_DEBUG("settings", "probe command=%s", command.c_str());
+        if (command == "show") {
+            settings.Show();
+        } else if (command == "hide") {
+            settings.Hide();
+        } else if (command == "close") {
+            settings.Destroy();
+        } else if (command.rfind("section ", 0) == 0) {
+            settings.ShowSection(command.c_str() + 8);
+        } else if (command.rfind("set ", 0) == 0) {
+            const std::size_t first = command.find(' ');
+            const std::size_t second = command.find(' ', first + 1);
+            if (first != std::string::npos && second != std::string::npos) {
+                settings.RecordEdit(command.substr(first + 1, second - first - 1),
+                                    command.substr(second + 1));
             }
         }
     };
@@ -1208,7 +1291,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         DF_DEBUG("preview", "hidden");
     };
 
-    core::EventBus bus;
     core::AppLoop loop;
     loop.SetTargetIntervalMs(16);  // 60 FPS target (PERFORMANCE.md)
 
@@ -1438,6 +1520,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         if (!launchpad_cmd_file.empty()) {
             read_launchpad_command(delta_ms);
         }
+        // Independent channel: the settings probe must work even when the
+        // Launchpad channel is unused (measured - it sat inside this if and
+        // never fired without DOCKFORGE_LAUNCHPAD_CMD_FILE).
+        read_settings_command(delta_ms);
         if (launchpad_ready && launchpad.Tick(delta_ms, config)) {
             dirty = true;
         }

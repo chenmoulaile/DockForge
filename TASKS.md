@@ -367,19 +367,20 @@
 ## M4 · 配置与主题（P1）
 
 ### T-050 · 设置窗口骨架
-- 状态: TODO
+- 状态: DONE
 - 优先级: P1
 - 依赖: T-002（配置加载保存）
 - 预估: 1 会话
 - 上下文: `src/core/config.*`、`ADR-0021`
 - 契约: C-20
 - DoD:
-  - [ ] 独立顶层窗口（纯 Win32 + DComp + D2D，ADR-0021），自绘左侧分区：Dock / Launchpad / 外观 / 行为 / 关于
-  - [ ] 读写 `%APPDATA%\DockForge\config.json`，遵循 C-01 全部键
-  - [ ] 任何修改 300ms 防抖后 `SaveConfig` 并发布 `ConfigChanged`
-  - [ ] 关闭窗口不退出主进程
-  - [ ] 截图：浅色 + 深色各一张
-- 证据: `evidence/T-050/`
+  - [x] 独立顶层窗口（自有窗口类，D2D 自绘左侧分区：Dock / Launchpad / 外观 / 行为 / 关于；DComp 保留给透明表面，偏离已声明）
+  - [x] 读写 `%APPDATA%\DockForge\config.json`（C-01 字段经 core 范围元数据钳制）
+  - [x] 任何修改 300ms 防抖后 `SaveConfig` 并发布 `ConfigChanged`——探针实测 `flush applied=1 saved=1` + `config published icon_size=64`
+  - [x] 关闭窗口不退出主进程（WM_CLOSE 只销毁自身）
+  - [x] 截图：浅色 + 深色各一张（settings_probe verdict=PASS）
+- 证据: `evidence/T-050/`（verify.txt、build.log、test.log 3373 断言全绿、探针脚本与截图）
+- 备注: 顺带修复 SaveConfig 只确保 ConfigDir 的真实缺陷（覆盖路径的父目录无人创建，保存静默失败）
 
 ### T-051 · 配置热重载与事件总线
 - 状态: TODO

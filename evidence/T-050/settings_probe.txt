@@ -1,0 +1,6 @@
+﻿shot_light=True
+shot_dark=True
+set_64 flush=True published=True line=2026-10-25T10:21:01.912+08:00 INFO [settings] flush applied=1 changed=1 saved=1
+config_icon_size=64 (expected 64)
+clamp_9999 flush=True config_icon_size=96 (expected 96)
+verdict=PASS

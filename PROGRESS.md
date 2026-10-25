@@ -260,3 +260,23 @@ ADR-0031..0036（提示词的 C-15..17/ADR-0018..23 顺延，原编号已被占�
 T-200（审计）与 P0 修复；P4 修复任务须在 P1/P1.5/P2 完成后执行。
 
 - 下轮开始于：T-050 设置窗口骨架（M4 · P1），随后 T-065 起的 P1.5 队列
+
+## 2026-10-25T10:25:00+08:00 | T-050 | DONE
+
+**产物**：`src/settings/`（SettingsModel 纯逻辑 + SettingsWindow 窗口）、`src/core/config_events.h`
+（C-20 完整快照事件）、`tests/settings_test.cpp` 8 例、`tools/settings_probe.ps1`。窗口为自有
+窗口类（规避 platform::Window 的 PostQuitMessage 陷阱），D2D 自绘左侧导航（亮暗双色板，探针可
+强制），右栏原生控件绑定 C-01 字段，300ms 防抖 → 钳制 → SaveConfig → Publish(ConfigChanged)。
+
+**实测**：构建 0 警告；单测 3373 断言 / 270 用例全绿；探针 verdict=PASS——`set dock.icon_size 64`
+→ `flush applied=1 saved=1` + `config published icon_size=64`，config 回读 64；越界 9999 → 落盘
+96（范围上限）；浅/深截图齐全（PrintWindow 捕获——CopyFromScreen 被遮挡时抓到的是用户屏幕）。
+
+**顺带修复的真实缺陷**：① SaveConfig 只 EnsureDirectory(ConfigDir())，覆盖路径（测试隔离）父目录
+无人创建导致保存静默失败；② 设置探针读取器被嵌进 Launchpad 命令守卫；③ 组合框类名
+"ComboBox" 与 "COMBOBOX" 精确比较失败导致下拉回显永远空白。
+
+**诚实边界**：导航用 D2D HwndRenderTarget 而非 DComp（不透明表面 + 原生控件，偏离已声明）；
+热重载订阅属 T-051（ReloadConfig 接口已备）；界面英文，i18n 属 T-310。
+
+- 下轮开始于：T-051 配置热重载与事件总线

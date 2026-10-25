@@ -1,0 +1,51 @@
+﻿DockForge T-050 · 设置窗口骨架 — 验证报告
+=================================================
+日期: 2026-10-25  环境: 2880x1920@192 DPI, MinGW-w64 g++ 15.2.0 (ADR-0002)
+
+一、产物
+--------
+- src/core/config_events.h: ConfigChanged 事件（C-20 冻结的完整快照形态）
+- src/settings/settings_model.{h,cpp}: 纯逻辑——编辑聚合（同字段替换）、Apply 时经 core 范围元数据钳制、
+  changed/rejected 出参、CurrentValueText 回显
+- src/settings/settings_window.{h,cpp}: 自有窗口类（不复用 platform::Window——其 WndProc 在
+  WM_DESTROY 时 PostQuitMessage，会杀死主进程，T-015/T-041 同类教训）；D2D HwndRenderTarget
+  自绘左侧导航（Dock/Launchpad/Appearance/Behavior/About，跟随系统亮暗或
+  DOCKFORGE_SETTINGS_THEME 覆盖）；右栏原生控件（EDIT/COMBOBOX/AUTOCHECKBOX）绑定 C-01 字段；
+  WM_TIMER 300ms 防抖（C-20）→ Apply → SaveConfig → Publish(ConfigChanged)；WM_CLOSE 只销毁
+  自身，主进程存活
+- main.cpp: DOCKFORGE_SETTINGS / DOCKFORGE_SETTINGS_SHOW 环境触发；
+  DOCKFORGE_SETTINGS_CMD_FILE 探针通道（show/hide/close/section/set），
+  `set` 走与键盘相同的 RecordEdit 路径；bus.Subscribe<ConfigChanged> 打日志作为 C-20 证据
+- tests/settings_test.cpp: 8 例（越界钳制、同字段合并、多字段一次 Apply、枚举解析与拒绝、
+  布尔、未知字段、回显文本、经文件的完整回环）
+
+二、实际执行的命令与结果
+------------------------
+1) 构建: cmake --build build -j 8 → exit=0, warning=0（evidence/T-050/build.log 含全部迭代）
+2) 测试: dockforge_tests.exe → All tests passed (3373 assertions in 270 test cases)
+3) 实机探针: tools/settings_probe.ps1（配置隔离到 %TEMP%，不动真实 config）
+   verdict=PASS：
+   - shot_light=True shot_dark=True（PrintWindow 捕获，亮/暗两种配色，见 settings_light.png / settings_dark.png）
+   - set dock.icon_size 64 → "flush applied=1 changed=1 saved=1" + "config published icon_size=64"
+     （防抖、保存、C-20 发布全链路，config 回读 = 64）
+   - set dock.icon_size 9999 → 落盘 96（IconSizeRange 上限），UI 回显钳制值
+
+三、过程中发现并修复的真实缺陷
+------------------------------
+1. [产品] core::SaveConfig 只 EnsureDirectory(ConfigDir())，而 ConfigPath 可被覆盖指向任意
+   位置——测试隔离路径 %TEMP%\dockforge-tests-<pid>\config.json 的父目录从未被创建，
+   所有保存静默失败。修复：确保 ConfigPath 自身父目录。
+2. [产品] 设置探针命令读取器被错误地嵌进 Launchpad 命令通道的空文件守卫内，
+   DOCKFORGE_LAUNCHPAD_CMD_FILE 缺席时永不执行。修复：独立调用。
+3. [产品] 组合框回显用 wcscmp(cls, L"COMBOBOX")，而 GetClassNameW 返回 "ComboBox"，
+   CBS_DROPDOWNLIST 无可编辑文本 → SetWindowTextW 失效，下拉框永远空白。修复：_wcsicmp。
+
+四、诚实边界
+------------
+- 左侧导航用 D2D HwndRenderTarget（原生子窗口重定向表面），未走 DComp：设置窗口是不透明
+  表面且承载原生控件，DComp 的透明合成价值在此不存在；ADR-0021 的 DComp 栈针对的是
+  Dock/Launchpad 透明表面。此偏离已在此声明。
+- 关窗即销毁（下次打开从磁盘重播种）；ConfigChanged 订阅刷新（T-051 热重载）未实现，
+  ReloadConfig 接口已备好。
+- 界面文本为英文；i18n（.resw + 双语）属 T-310。
+- DoD 中"浅色+深色截图"由 DOCKFORGE_SETTINGS_THEME 探针覆盖驱动，不要求用户改系统主题。
