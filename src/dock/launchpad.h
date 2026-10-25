@@ -63,9 +63,12 @@ enum class LaunchpadPhase {
 const char* ToString(LaunchpadPhase phase);
 
 struct LaunchpadOptions {
-    // Caps the number of icons resolved per open. One page is all that is ever drawn,
-    // and 208 entries at 256px would be ~54MB of pixels for a grid that shows 35.
-    int max_icon_tiles = 70;  // two pages of headroom for a fast page flip
+    // How many icons are extracted up front when the tiles are built. A search or an
+    // open folder can surface any item of the index, so tiles beyond this budget are
+    // extracted lazily on the first paint that needs them (T-042) - one page of cold
+    // extractions is ~900ms once, while extracting all 208 up front is ~5s on every
+    // cold start. Two pages of headroom keeps paging and the first searches warm.
+    int max_icon_tiles = 70;
     int icon_px = 128;
 };
 
@@ -117,8 +120,17 @@ class Launchpad {
     int Page() const { return page_; }
     int PageCount() const;
 
-    // Routes a click at (x_dip, y_dip) on `display_index`. Returns the entry that was
-    // launched, or nullptr. The Launchpad closes itself after a successful launch.
+    // Mouse gesture (T-042). A press records the cell under the pointer and shows the
+    // field caret; movement past the drag threshold turns the gesture into a drag; the
+    // release either drops (drag) or launches the pressed cell (click). Chip, search
+    // field and scrim are decided at press time, like every full-screen launcher.
+    void PressAt(std::size_t display_index, float x_dip, float y_dip);
+    void ReleaseAt(std::size_t display_index, float x_dip, float y_dip);
+
+    // A complete press+release at one point, which is what a click is. Returns the
+    // entry that was launched, or nullptr. Kept as one call because the probe channel
+    // (main.cpp) injects clicks, not gestures - the real mouse path goes through
+    // PressAt/ReleaseAt via the overlay's WM_LBUTTONDOWN/WM_LBUTTONUP.
     const shell::LaunchpadItem* ClickAt(std::size_t display_index, float x_dip, float y_dip);
 
     // Types `text` into the search field, replacing the current query. An empty string
@@ -145,12 +157,21 @@ class Launchpad {
 
     // Keyboard: Escape closes, Left/Right/PageUp/PageDown page, Home/End jump.
     void KeyPressed(unsigned int vk);
+    // Escape unwinds one level at a time: a rename first, then an open folder, then
+    // the Launchpad itself. Split out of the dismissed callback so the probe channel
+    // can drive the same unwind the real keyboard takes.
+    void Escape();
     // Typed characters go to the search field while it has focus, or to the rename
     // field while a folder is being renamed (T-042). Anything else is ignored.
     void Character(wchar_t ch);
     // Backspace in the search field removes one character; in the rename field it
     // edits the pending name. Enter commits a rename, Escape cancels it.
     void Backspace();
+    // Wipes the active field in one gesture: the whole pending name while renaming,
+    // the whole query otherwise. The keyboard path to it is select-all + delete;
+    // the probe channel uses it because a command file cannot send N identical
+    // backspaces (the channel drops a command equal to the previous one).
+    void ClearField();
     void CommitRename();
     void CancelRename();
     // Begins renaming the folder under the pointer, or by id. The field is drawn over
@@ -199,6 +220,18 @@ class Launchpad {
     // Resolves config.launchpad.folders against the index. Cheap enough to call on
     // demand; cached here so the chip strip and the click handler agree on ordering.
     void RefreshFolderViews(const core::Config& config);
+    // Rebuilds the strip labels from `folder_views_` (wide strings for the painter).
+    // Kept beside RefreshFolderViews because both must agree on order and existence.
+    void UpdateFolderNames();
+    // Index of a folder id in the strip, or -1. The strip is what the painter draws
+    // and what PressAt hit-tests, so open/rename states are expressed in strip space.
+    int ChipIndexOf(const std::string& id) const;
+    // Extraction size for tiles, following the largest display's scale.
+    int IconPxFor(const core::Config& config) const;
+    // Resolves one tile's icon on first need. Safe to call repeatedly: the attempted
+    // flag makes every call after the first a no-op, including tiles the shell
+    // genuinely cannot provide an icon for.
+    void ExtractTile(std::size_t index);
 
     HINSTANCE instance_ = nullptr;
     LaunchpadOptions options_{};
@@ -219,11 +252,12 @@ class Launchpad {
 
     // Folder state (T-042). `current_folder_id_` empty means the flat grid. The views
     // are a projection of config.launchpad.folders against the index, refreshed when
-    // the config or the index changes.
+    // the config or the index changes; `folder_names_` is the wide-string strip the
+    // painter draws, in the same order.
     std::vector<shell::LaunchpadFolderView> folder_views_;
+    std::vector<std::wstring> folder_names_;
     std::string current_folder_id_;
     std::string caret_folder_id_;  // folder pending rename, "" when not renaming
-    int caret_folder_index_ = -1;
 
     LaunchpadPhase phase_ = LaunchpadPhase::Closed;
     float progress_ = 0.0f;
@@ -243,11 +277,27 @@ class Launchpad {
     double caret_ms_ = 0.0;
     bool caret_visible_ = false;
 
-    // Drag-to-create state (T-042). `drag_identity_` is the app being dragged;
-    // `rename_text_` is the folder name being edited, valid only while
-    // `caret_folder_id_` is set.
+    // Drag-to-create state (T-042). A press records the cell and its identity; moving
+    // past the drag threshold promotes the gesture to a drag (`drag_identity_` set);
+    // the release either drops or launches. `rename_text_` is the folder name being
+    // edited, valid only while `caret_folder_id_` is set.
+    bool press_active_ = false;
+    std::size_t press_display_ = 0;
+    int press_cell_ = -1;
+    std::string press_identity_;
+    float press_x_ = 0.0f;
+    float press_y_ = 0.0f;
     std::string drag_identity_;
     std::wstring rename_text_;
+    // The entry launched by the most recent complete gesture, returned by ClickAt.
+    const shell::LaunchpadItem* last_launched_ = nullptr;
+
+    // Scratch for the painter: the page slice of `visible_` for the display being
+    // painted. A member so the per-frame allocation does not churn the heap.
+    std::vector<int> paint_page_;
+    // Extraction size the current tiles were built for; lazy extraction must ask for
+    // the same size or the shell returns a differently scaled bitmap.
+    int tile_icon_px_ = 96;
 
     // Last page handed to the painter, so the per-frame debug line only appears when the
     // page actually changes instead of 60 times a second.

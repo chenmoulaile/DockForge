@@ -33,12 +33,15 @@ struct OverlayCallbacks {
     // Pointer moved to (x, y) in DIP relative to the overlay's client area.
     std::function<void(float x_dip, float y_dip)> pointer_moved;
     std::function<void()> pointer_left;
-    // Left button, in DIP. `double_click` is true when Windows reported a
-    // double-click; the Launchpad treats it the same as a single click today but the
-    // distinction is already at the boundary.
-    std::function<void(float x_dip, float y_dip, bool double_click)> clicked;
-    // A key was pressed. `vk` is a virtual-key code; the overlay does not translate
-    // text (T-042 will need WM_CHAR, and that arrives separately).
+    // Left button went down / came up, in DIP. The press/release split is what makes
+    // drag-to-create expressible (T-042): a press that moves onto another cell before
+    // its release is a drag, a press released where it started is a click. The owner
+    // owns that distinction; the overlay only reports the two edges.
+    std::function<void(float x_dip, float y_dip)> pressed;
+    std::function<void(float x_dip, float y_dip)> released;
+    // A key was pressed. `vk` is a virtual-key code; text arrives separately through
+    // `character` (WM_CHAR), which also carries a second copy of keys WM_KEYDOWN
+    // already reported - the owner filters the overlap.
     std::function<void(unsigned int vk)> key_pressed;
     // A character was typed, for the search field.
     std::function<void(wchar_t ch)> character;

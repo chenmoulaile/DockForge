@@ -25,6 +25,7 @@
 #include "dock/launchpad_search.h"
 #include "render/backend.h"
 #include "shell/app_identity.h"
+#include "shell/launchpad_index.h"
 
 namespace dock = dockforge::dock;
 namespace core = dockforge::core;
@@ -346,4 +347,72 @@ TEST_CASE("NewFolderId does not repeat within a process", "[launchpad][folders]"
     std::sort(sorted.begin(), sorted.end());
     CHECK(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
     CHECK(config.launchpad.folders.size() == ids.size());
+}
+
+// ------------------------------------------------------------- query matching
+
+TEST_CASE("MatchesQuery folds case and only prefixes by default", "[launchpad][search][match]") {
+    using Mode = shell::LaunchpadIndex::MatchMode;
+    // The folding rule is CompareStringEx NORM_IGNORECASE (C-18 / T-042 DoD 1), so
+    // "VIS" finds "Visual Studio Code" the way the Start menu's own box does.
+    CHECK(shell::LaunchpadIndex::MatchesQuery(L"Visual Studio Code", L"vis", Mode::Prefix));
+    CHECK(shell::LaunchpadIndex::MatchesQuery(L"VISUAL STUDIO CODE", L"visual", Mode::Prefix));
+    // A prefix filter must not match the middle of a name.
+    CHECK_FALSE(shell::LaunchpadIndex::MatchesQuery(L"Visual Studio Code", L"studio",
+                                                    Mode::Prefix));
+    // The same query in substring mode does.
+    CHECK(shell::LaunchpadIndex::MatchesQuery(L"Visual Studio Code", L"studio",
+                                              Mode::Substring));
+    // CJK passes through unchanged - there is no case to fold, and the comparison
+    // must not break one.
+    CHECK(shell::LaunchpadIndex::MatchesQuery(L"记事本", L"记", Mode::Prefix));
+    CHECK(shell::LaunchpadIndex::MatchesQuery(L"记事本", L"事本", Mode::Substring));
+    // An empty query is "match everything", which is what the grid shows before the
+    // user types.
+    CHECK(shell::LaunchpadIndex::MatchesQuery(L"Anything", L"", Mode::Prefix));
+    // A query longer than the name can never be a prefix of it.
+    CHECK_FALSE(shell::LaunchpadIndex::MatchesQuery(L"ab", L"abc", Mode::Prefix));
+}
+
+TEST_CASE("Filter returns index positions and agrees with the empty-query identity",
+          "[launchpad][search][match]") {
+    ComScope com;
+    if (!com.ok) {
+        WARN("COM unavailable; skipping");
+        return;
+    }
+    shell::LaunchpadIndex index;
+    index.Rebuild(core::LaunchpadConfig{});
+    if (index.Empty()) {
+        WARN("AppsFolder scan produced no items; skipping");
+        return;
+    }
+
+    // An empty query is the identity projection: every position, in order.
+    const std::vector<int> all = index.Filter(L"", shell::LaunchpadIndex::MatchMode::Prefix);
+    REQUIRE(all.size() == index.Items().size());
+    for (std::size_t i = 0; i < all.size(); ++i) {
+        CHECK(all[i] == static_cast<int>(i));
+    }
+
+    // A prefix that cannot match anything returns nothing rather than everything,
+    // which is the failure mode of a broken filter.
+    CHECK(index.Filter(L"zzzz-no-such-app-zzzz",
+                       shell::LaunchpadIndex::MatchMode::Prefix)
+              .empty());
+
+    // Every prefix hit must really be a prefix of the item it points at, checked with
+    // the same folding rule the filter uses - the two cannot disagree silently.
+    const std::vector<int> hits =
+        index.Filter(index.Items().front().app.display_name.substr(0, 1),
+                     shell::LaunchpadIndex::MatchMode::Prefix);
+    for (const int position : hits) {
+        REQUIRE(position >= 0);
+        REQUIRE(position < static_cast<int>(index.Items().size()));
+        const std::wstring& name = index.Items()[static_cast<std::size_t>(position)]
+                                       .app.display_name;
+        CHECK(shell::LaunchpadIndex::MatchesQuery(
+            name, index.Items().front().app.display_name.substr(0, 1),
+            shell::LaunchpadIndex::MatchMode::Prefix));
+    }
 }

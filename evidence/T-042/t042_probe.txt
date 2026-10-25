@@ -1,0 +1,20 @@
+﻿machine=2880x1920 dpi_aware=1
+config_isolated=C:\Users\chenk\AppData\Local\Temp\dockforge-t042-48695359\config.json
+open=2026-10-25T09:17:19.564+08:00 INFO [launchpad] open items=208 pages=6 page=0
+grid origin=64,205 cell=105.2x120 columns=10
+search_7=True line=2026-10-25T09:17:21.366+08:00 DEBUG [launchpad] search '7' -> 1 item(s)
+search_diff ratio=0.1419
+empty_state=True line=2026-10-25T09:17:22.317+08:00 DEBUG [launchpad] search '7zzzzprobe' -> 0 item(s)
+probe_scale=2
+empty_diff_cell0 ratio=0.1553
+alive_after_empty=True
+folder_created=True line=2026-10-25T09:17:25.641+08:00 INFO [launchpad] folder created id=ffc7eed2-92b4-4c44-b90a-b202435464fa items=2 saved=1
+folder_entered=True line=2026-10-25T09:17:26.326+08:00 INFO [launchpad] folder opened id=ffc7eed2-92b4-4c44-b90a-b202435464fa name=New Folder items=2
+rename_started=True
+folder_renamed=True line=2026-10-25T09:17:27.405+08:00 INFO [launchpad] folder renamed id=ffc7eed2-92b4-4c44-b90a-b202435464fa saved=1
+rename_cancelled=True
+esc_left_folder=True
+alive_after_unwind=True
+persisted_folder_opens=True line=2026-10-25T09:17:34.245+08:00 INFO [launchpad] folder opened id=ffc7eed2-92b4-4c44-b90a-b202435464fa name=Play items=2
+config_folder_name=Play config_folder_items=2
+verdict=PASS

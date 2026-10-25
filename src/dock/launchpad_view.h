@@ -28,6 +28,12 @@ struct LaunchpadTile {
     shell::IconBitmap icon;
     std::uint64_t icon_key = 0;
     std::string identity;  // C-15a identity; what launchpad.folders[].items refers to
+    // True once the shell was asked for this tile's icon, successfully or not. The
+    // tail of a large index is extracted lazily on first paint (T-042): a search or
+    // a folder can surface any item, and extracting all 208 up front would cost
+    // ~5s on a cold cache at startup. The flag keeps a tile whose icon the shell
+    // genuinely cannot provide from being re-requested every frame.
+    bool attempted = false;
 };
 
 // Stable per-tile bitmap identity for the render backend.
@@ -83,13 +89,16 @@ struct LaunchpadPaintInput {
     const std::wstring* query = nullptr;
     bool caret_visible = false;
 
-    // T-042 folder strip. `folder_names` is the config order, already clipped to what
-    // fits; `open_folder` is the id of the folder being shown, empty for the flat grid.
+    // T-042 folder strip. `folder_names` is the strip order (the index sorts folders
+    // by name), already clipped by the chip layout to what fits; `open_chip` and
+    // `renaming_chip` are indexes into that same list, -1 when the grid is flat or
+    // nothing is being renamed. The painter cannot map an id to a chip itself, so the
+    // controller resolves the indexes once per frame.
     const std::vector<std::wstring>* folder_names = nullptr;
-    const std::string* open_folder = nullptr;
-    // The folder whose name is being edited, and the text in the field. When set, the
-    // strip draws an editor over that chip instead of its label.
-    const std::string* renaming_folder = nullptr;
+    int open_chip = -1;
+    int renaming_chip = -1;
+    // The pending name while `renaming_chip` is set; the editor draws it over the
+    // chip's label with a caret.
     const std::wstring* rename_text = nullptr;
     bool rename_caret_visible = false;
 };
@@ -107,6 +116,9 @@ class LaunchpadPainter {
     void PaintBackdrop(render::IRenderBackend& backend, const LaunchpadPaintInput& input);
     void PaintCells(render::IRenderBackend& backend, const LaunchpadPaintInput& input);
     void PaintDots(render::IRenderBackend& backend, const LaunchpadPaintInput& input);
+    void PaintSearchField(render::IRenderBackend& backend, const LaunchpadPaintInput& input);
+    void PaintFolderStrip(render::IRenderBackend& backend, const LaunchpadPaintInput& input);
+    void PaintEmptyState(render::IRenderBackend& backend, const LaunchpadPaintInput& input);
 };
 
 }  // namespace dockforge::dock

@@ -1,0 +1,85 @@
+﻿DockForge T-042 · Launchpad 搜索与文件夹分组 — 验证报告
+===========================================================
+日期: 2026-10-25  环境: 单屏 2880x1920@192 DPI (scale=2.0), Windows build 26300,
+工具链: MinGW-w64 g++ 15.2.0 / CMake 4.4.2 (ADR-0002)
+
+一、实际执行的命令与结果
+------------------------
+1) 构建（含新增源文件后的重新 configure，build.log 含三次迭代全程）
+   powershell tools/build.ps1 与 cmake --build build -j 8
+   最终结果: exit=0, warning=0, error=0 (grep 计数)
+
+2) 单元测试
+   ./build/bin/dockforge_tests.exe
+   结果: All tests passed (3315 assertions in 260 test cases)
+   (较 T-041 的 2914/240 新增 launchpad_search_test 12 例 + layout strip 1 例;
+    断言数因环境相关的 WARN 跳过在 3315-3323 间浮动, 两次均全绿)
+
+3) 实机探针 (tools/launchpad_t042_probe.ps1, 配置隔离到 %TEMP%, 未触碰真实 config)
+   结果: verdict=PASS, 关键原始行:
+   open=... [launchpad] open items=208 pages=6 page=0
+   search '7' -> 1 item(s)                       search_diff ratio=0.1419
+   search '7zzzzprobe' -> 0 item(s)              empty_diff_cell0 ratio=0.1553
+   alive_after_empty=True
+   folder created id=ffc7eed2-... items=2 saved=1     (press cell0 -> hover cell1 -> release)
+   folder opened id=ffc7eed2-... name=New Folder items=2   (click chip 100,73)
+   rename started id=ffc7eed2-... (key 113 = VK_F2)
+   folder renamed id=ffc7eed2-... saved=1        (clear -> type Play -> key 13)
+   rename cancelled id=ffc7eed2-...              (key 113 -> type X -> key 27)
+   folder closed                                 (Esc 逐级回退: 文件夹开着时只退出文件夹)
+   persisted: 重启后 click chip -> folder opened name=Play items=2
+   config_folder_name=Play config_folder_items=2 (读回隔离 config JSON 核对)
+   截图: t042_open/search/empty/folder_created/folder_open/renamed/cancelled.png
+
+二、DoD 逐条对应
+----------------
+[x] 顶部搜索框实时过滤, 不区分大小写: shell::LaunchpadIndex::MatchesQuery 用
+    CompareStringEx(LOCALE_NAME_USER_DEFAULT, NORM_IGNORECASE); 前缀匹配(契约语义),
+    CompareStringEx 失败回退 ASCII 折叠。实测 '7' -> 1 item。
+[x] 无结果空状态不崩溃: PaintEmptyState 画 "No results"; 文件夹内全部失效时画
+    "Empty folder"。实测 0-item 后进程存活。
+[x] 拖图标到另一图标创建文件夹并持久化: overlay 新增 WM_LBUTTONDOWN/WM_LBUTTONUP
+    的 pressed/released 回调, 指针移过 14 DIP 阈值提升为拖拽; 落点解析为 cell 身份,
+    dock::CreateLaunchpadFolder 写 launchpad.folders 并 SaveConfig。实测 saved=1,
+    重启后仍在。
+[x] 文件夹点击展开内嵌网格, 支持重命名: chip 点击 EnterFolder; F2 进入重命名
+    (编辑器预填旧名, caret 闪烁), Enter 提交 / Esc 取消; 重命名保持 id 不变
+    (launchpad_folders.cpp 的设计约束)。
+[x] schema 符合 C-18: id 为小写 v4 UUID 且进程内不重复(单测), 空 items 拒绝创建
+    /腾空即删组(单测), 坏身份跳过不整组失效(LaunchpadIndex::Folders 保留 missing
+    列表, 单测覆盖), 全部经 ClampConfig 落盘。
+
+三、本轮修复的真实缺陷
+----------------------
+1. [承接的 WIP 未编译] checkpoint be0bf46 的 WIP 缺 LaunchpadPainter 三个 Paint
+   方法的声明、launchpad_search.h 重复声明、launchpad_view.cpp 缺 include、
+   open_chip_index_ 从未赋值(引用了不存在的成员)。全部修复: chip 开/重命名状态
+   改为 PaintInput 传 strip 下标(open_chip/renaming_chip), 控制器用 ChipIndexOf 解析。
+2. [T-041 遗留] 第 3 页起图标全空: BuildLaunchpadTiles 按 max_icon_tiles=70 截断,
+   PaintCells 直接用 page*per_page 索引 tiles_。修复: tiles_ 预填全部条目的
+   identity/app/icon_key, 前 70 个预提取, 其余在首次绘制时懒提取(attempted 标志
+   保证每 tile 只尝试一次)。搜索结果可命中任意下标, 该缺陷在 T-042 必然暴露。
+3. [编码] BeginRename/CommitRename/EnterFolder 日志与名字传递用
+   wstring(begin,end) 逐字节宽化/窄化, 非 ASCII 文件夹名会乱码; 改用
+   core::Utf8ToWide/WideToUtf8。重命名编辑器预填同样走 Utf8ToWide。
+4. [输入语义] 点击启动从"按下即启动"改为"抬起时启动"(按住移动超过阈值即为拖拽),
+   否则拖拽不可能成立; 探针通道的 ClickAt 保持一次调用完成 press+release,
+   T-041 的 click 探针语义不变。Esc 回退链: 重命名 -> 文件夹 -> 关闭。
+
+四、探针侧(非产品)的三个错误, 记录防止重犯
+------------------------------------------
+1. VK_F2 算错: 发了 117 (VK_F6), 实际 VK_F2=0x71=113; 靠 KeyPressed 入口的
+   key vk= 诊断行定位(该诊断行因此保留)。
+2. 命令通道去重: 连续两条相同命令第二条被丢弃; "key 27" 连发中间必须隔一条
+   不同命令, 重命名清空用新增的 clear 命令。
+3. 断言口径: 搜索视图只剩 1 个 cell 时, 全屏 step-8 差分被稀释到 0.002,
+   必须 crop 到该 cell 区域比较(实测 cell0 区域 23.6% 像素变化)。
+
+五、已知边界(未验证/限制)
+------------------------
+- 懒提取: 首次翻到未预热页可能一次性格顿(冷缓存约 25ms/图标, 一页约 900ms),
+  attempted 标志保证仅一次; 异步填充留作后续。
+- 重命名编辑器无选区模型: caret 固定在末尾, 修改靠 Backspace/clear, 无选区替换。
+- 搜索为前缀语义(C-18 冻结), 子串匹配仅作为 MatchMode 内部能力暴露。
+- 混合 DPI 双屏、arm64、MSIX: 未验证(环境无此硬件/工具链, 与 T-041 交接一致)。
+- 芯片条最多画满屏宽(>~10 组截断), 无滚动; C-18 上限 64 组, 超出部分不可见。

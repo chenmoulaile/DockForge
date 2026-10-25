@@ -12,7 +12,7 @@
 | M0 | 骨架与验证 | 构建链路、窗口、渲染、配置、图标、布局数学全部跑通 | DONE（T-006a 帧尾延迟仍 TODO P1） |
 | M1 | Dock 核心 | 可用的 Dock 栏（放大、启动、指示、拖拽、缩略图） | DONE（T-009..T-016 全部 DONE） |
 | M2 | Finder Bar | 顶部栏 | TODO |
-| M3 | Launchpad | 全屏网格启动器 | IN_PROGRESS (T-040/T-041 完成, T-042 TODO) |
+| M3 | Launchpad | 全屏网格启动器 | DONE (T-040/T-041/T-042 全部完成) |
 | M4 | 配置与主题 | 热重载 + 主题包 | TODO |
 | M5 | 系统集成 | 自启、隐藏任务栏、转储、日志轮转 | TODO |
 | M6 | Stage Manager | 窗口分组与切换 | TODO |
@@ -350,18 +350,19 @@
 
 
 ### T-042 · Launchpad 搜索与文件夹分组
-- 状态: TODO
+- 状态: DONE
 - 优先级: P1
 - 依赖: T-041
 - 预估: 1 会话
 - 契约: C-18
 - DoD:
-  - [ ] 顶部搜索框，实时过滤，不区分大小写（`CompareStringEx` `NORM_IGNORECASE`）
-  - [ ] 无结果时显示空状态，不崩溃
-  - [ ] 拖图标到另一图标上创建文件夹，持久化到 `launchpad.folders`
-  - [ ] 文件夹点击展开为内嵌网格，支持重命名
-  - [ ] schema 完全符合 C-18（`id` 唯一、空 `items` 丢弃、坏身份跳过不整组失效）
-- 证据: `evidence/T-042/`
+  - [x] 顶部搜索框，实时过滤，不区分大小写（`CompareStringEx` `NORM_IGNORECASE`）——实测 `search '7' -> 1 item(s)`
+  - [x] 无结果时显示空状态，不崩溃——实测 0-item 后进程存活，cell0 区域差分 15.5%
+  - [x] 拖图标到另一图标上创建文件夹，持久化到 `launchpad.folders`——press/hover/release 手势（阈值 14 DIP），实测 `folder created ... saved=1`，重启后仍在
+  - [x] 文件夹点击展开为内嵌网格，支持重命名——chip 点击进入；F2 重命名（预填旧名，Enter 提交/Esc 取消），重命名保持 id 稳定
+  - [x] schema 完全符合 C-18（`id` 唯一、空 `items` 丢弃、坏身份跳过不整组失效）——单测覆盖 + 隔离 config 回读核对
+- 证据: `evidence/T-042/`（verify.txt：构建 0 警告、单测 3315 断言全绿、探针 verdict=PASS、8 张截图）
+- 备注: 顺带修复 T-041 遗留的第 3 页起图标全空（tiles 截断 70，现改为懒提取）；点击启动改为抬起时触发以给拖拽让位，探针 ClickAt 语义不变
 
 ## M4 · 配置与主题（P1）
 

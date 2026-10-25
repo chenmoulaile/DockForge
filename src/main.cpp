@@ -744,9 +744,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     // ignored - otherwise "open" would re-fire every poll and the open animation would
     // restart forever.
     //
-    // Commands: `open`, `close`, `page <n>`, `click <x> <y>`, `hover <x> <y>`, `leave`.
-    // Coordinates are DIP on display 0. Only the *source* of the input is replaced: the
-    // real ClickAt/PointerMoved/KeyPressed paths run, so a PASS still proves the chain.
+    // Commands: `open`, `close`, `page <n>`, `click <x> <y>`, `hover <x> <y>`, `leave`,
+    // plus the T-042 set: `type <utf8>`, `backspace`, `key <vk>`, `press <x> <y>`,
+    // `release <x> <y>`. Coordinates are DIP on display 0. Only the *source* of the
+    // input is replaced: the real PressAt/ReleaseAt/Character/KeyPressed paths run, so
+    // a PASS still proves the chain.
     std::wstring launchpad_cmd_file;
     if (launchpad_ready) {
         wchar_t cmd_buffer[MAX_PATH]{};
@@ -793,16 +795,36 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
             launchpad.Close();
         } else if (command == "leave") {
             launchpad.PointerLeft(0);
+        } else if (command == "backspace") {
+            launchpad.Backspace();
+        } else if (command == "clear") {
+            launchpad.ClearField();
+        } else if (command.rfind("key ", 0) == 0) {
+            launchpad.KeyPressed(static_cast<unsigned int>(atoi(command.c_str() + 4)));
+        } else if (command.rfind("type ", 0) == 0) {
+            // The probe file is UTF-8; the field wants wide characters, one call per
+            // code unit - the same path a physical keyboard takes through WM_CHAR.
+            const std::wstring text = core::Utf8ToWide(std::string(command.c_str() + 5));
+            for (wchar_t ch : text) launchpad.Character(ch);
         } else if (command.rfind("page ", 0) == 0) {
             launchpad.KeyPressed(atoi(command.c_str() + 5) > 0 ? VK_RIGHT : VK_LEFT);
-        } else if (command.rfind("click ", 0) == 0 || command.rfind("hover ", 0) == 0) {
+        } else if (command.rfind("click ", 0) == 0 || command.rfind("hover ", 0) == 0 ||
+                   command.rfind("press ", 0) == 0 || command.rfind("release ", 0) == 0) {
+            // press/release take their coordinates after the keyword; click/hover
+            // after "click "/"hover " (6 chars). Find the space instead of assuming.
+            const std::size_t space = command.find(' ');
             float x = 0.0f;
             float y = 0.0f;
-            if (sscanf_s(command.c_str() + 6, "%f %f", &x, &y) == 2) {
+            if (space != std::string::npos &&
+                sscanf_s(command.c_str() + space + 1, "%f %f", &x, &y) == 2) {
                 if (command[0] == 'c') {
                     launchpad.ClickAt(0, x, y);
-                } else {
+                } else if (command[0] == 'h') {
                     launchpad.PointerMoved(0, x, y);
+                } else if (command[0] == 'p') {
+                    launchpad.PressAt(0, x, y);
+                } else {
+                    launchpad.ReleaseAt(0, x, y);
                 }
             }
         }

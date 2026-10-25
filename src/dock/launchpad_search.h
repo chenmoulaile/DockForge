@@ -45,6 +45,7 @@ inline constexpr float kLaunchpadFolderChipWidthDip = 168.0f;
 inline constexpr float kLaunchpadFolderStripTopDip = kLaunchpadTopBandDip;
 // How many folder names the strip can hold before it runs out of width. Used by
 // the settings UI to warn before the user creates a folder they cannot see.
+// Defined below, next to the layout function it shares the walk with.
 int LaunchpadFolderChipLimit(float width_dip);
 
 // The caret blink in the search field, milliseconds.
@@ -78,10 +79,6 @@ render::RectF LaunchpadFolderRenameCaretRect(const std::wstring& text, int caret
 // right edge, and the rest are simply not drawn. Scrolling a chip strip is a
 // future feature; silently dropping chips past the edge is not a crash.
 void LaunchpadFolderChipRects(float width_dip, int count, std::vector<render::RectF>& rects);
-
-// How many chips fit before the right edge. The same walk the rect builder does,
-// returned as a count so a caller can warn the user without comparing vectors.
-int LaunchpadFolderChipLimit(float width_dip);
 
 // Which chip the point is over, or -1. Walks the rects so the last (possibly
 // clipped) chip is handled the same as the others.

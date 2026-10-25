@@ -215,3 +215,25 @@
 **诚实边界**：混合 DPI 双屏与 per-display 悬停受单屏硬件限制，未实机验证，移交 T-084；"模糊淡入淡出"以 scrim alpha 实现（ADR-0021 固定 solid 材质，全屏抓取 78ms/帧不可能每帧做）。
 
 - 下轮开始于：T-042 Launchpad 搜索与文件夹分组
+
+## 2026-10-25T09:30:00+08:00 | T-042 | DONE
+
+**产物**：`src/dock/launchpad_search.{h,cpp}`（搜索框/chip 条纯几何 + caret）、`src/dock/launchpad_folders.{h,cpp}`（文件夹创作：创建/重命名/增删/持久化，全部经 ClampConfig）、`tests/launchpad_search_test.cpp`（12 例）、`tools/launchpad_t042_probe.ps1`；overlay 窗口新增 `pressed/released/character` 回调与 WM_LBUTTONUP 转发；main.cpp 探针通道新增 `type/backspace/clear/key/press/release`。
+
+**实测数据**（2880x1920@192 DPI，配置隔离在 %TEMP%，未触碰真实 config）：
+- 搜索：`search '7' -> 1 item(s)`，全屏差分 0.1419；`search '7zzzzprobe' -> 0 item(s)` 空状态后进程存活。
+- 拖拽建夹：press cell0 -> hover cell1 -> release -> `folder created id=... items=2 saved=1`；chip 点击 -> `folder opened name=New Folder items=2`。
+- 重命名：F2 -> clear -> type Play -> Enter -> `folder renamed saved=1`；Esc 取消保留旧名；Esc 逐级回退（重命名->文件夹->关闭）。
+- 持久化：杀进程重启后 chip 点击 `folder opened name=Play items=2`，隔离 config 回读 `Play`/2 items。
+- 探针 verdict=PASS；单测 `All tests passed (3315 assertions in 260 test cases)`；构建 0 警告 0 错误。
+
+**修掉的真实缺陷**：
+1. 承接的 WIP 未编译：缺三个 Paint 方法声明、`open_chip_index_` 引用不存在的成员、chip 开/编辑状态无法从 id 推导——改为 PaintInput 传 strip 下标（`open_chip`/`renaming_chip`），控制器 `ChipIndexOf` 解析。
+2. T-041 遗留：第 3 页起图标全空（`BuildLaunchpadTiles` 按 70 截断后 `PaintCells` 仍按 `page*per_page` 直索引）。改为 tiles 预填全部条目、前 70 预提取、其余首绘懒提取（`attempted` 保证每 tile 只试一次）。
+3. 逐字节 `wstring(begin,end)` 宽化/窄化会让非 ASCII 文件夹名乱码，统一改 `core::Utf8ToWide/WideToUtf8`。
+4. 点击启动从按下时改为抬起时（按下移动超 14 DIP 即拖拽），否则拖拽不可能成立；探针 `ClickAt` 保持一次调用=完整手势，T-041 click 探针不变。Esc 回退链：重命名->文件夹->关闭。
+5. 探针侧三错记录在案：VK_F2=113 非 117（靠 KeyPressed 入口 `key vk=` 诊断行定位，该行保留）、命令通道去重吃掉连续同名命令、单 cell 场景全屏差分被稀释必须 crop 比较。
+
+**诚实边界**：未预热页首次翻页可能一次性格顿（冷 ~25ms/图标，一页约 900ms，仅一次）；重命名编辑器无选区模型（caret 固定末尾）；chip 条超屏宽截断无滚动；混合 DPI 双屏未验证（移交 T-084，与 T-041 一致）。
+
+- 下轮开始于：T-050 设置窗口骨架（M4）

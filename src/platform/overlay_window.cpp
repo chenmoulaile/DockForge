@@ -158,23 +158,22 @@ LRESULT OverlayWindow::WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam
             if (callbacks_.pointer_left) callbacks_.pointer_left();
             return 0;
 
-        case WM_LBUTTONDOWN: {
-            // Double-click detection is done by the caller through the class style
-            // (CS_DBLCLKS) rather than by timing clicks here: the shell already
-            // measures it correctly.
-            const bool double_click = false;
-            if (callbacks_.clicked) {
-                callbacks_.clicked(static_cast<float>(GET_X_LPARAM(lparam)) / scale,
-                                   static_cast<float>(GET_Y_LPARAM(lparam)) / scale,
-                                   double_click);
+        case WM_LBUTTONDOWN:
+        case WM_LBUTTONDBLCLK: {
+            // Both edges of a double-click arrive as their own button-down, so the
+            // second one is just another press to the owner. The press/release split
+            // is what makes drag-to-create expressible (T-042).
+            if (callbacks_.pressed) {
+                callbacks_.pressed(static_cast<float>(GET_X_LPARAM(lparam)) / scale,
+                                   static_cast<float>(GET_Y_LPARAM(lparam)) / scale);
             }
             return 0;
         }
 
-        case WM_LBUTTONDBLCLK: {
-            if (callbacks_.clicked) {
-                callbacks_.clicked(static_cast<float>(GET_X_LPARAM(lparam)) / scale,
-                                   static_cast<float>(GET_Y_LPARAM(lparam)) / scale, true);
+        case WM_LBUTTONUP: {
+            if (callbacks_.released) {
+                callbacks_.released(static_cast<float>(GET_X_LPARAM(lparam)) / scale,
+                                    static_cast<float>(GET_Y_LPARAM(lparam)) / scale);
             }
             return 0;
         }

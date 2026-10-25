@@ -1,6 +1,7 @@
 #include "dock/launchpad_view.h"
 
 #include "core/log.h"
+#include "dock/launchpad_search.h"
 #include "shell/app_resolver.h"
 
 #include <algorithm>
@@ -30,6 +31,17 @@ constexpr render::ColorF kSelectionColor{0.92f, 0.94f, 0.98f, 0.14f};
 constexpr render::ColorF kPlaceholderRingColor{0.62f, 0.66f, 0.74f, 0.35f};
 constexpr render::ColorF kDotColorActive{0.92f, 0.94f, 0.98f, 0.90f};
 constexpr render::ColorF kDotColorIdle{0.92f, 0.94f, 0.98f, 0.32f};
+
+// T-042 search field and folder strip. The field plate is the grid plate lifted a
+// step so it reads as an input, not as another tile; the hint is the label colour
+// dropped to about half strength. The active chip is the selection colour at full
+// strength - the same "this one" signal the cells use.
+constexpr render::ColorF kSearchPlateColor{0.16f, 0.17f, 0.21f, 0.85f};
+constexpr render::ColorF kSearchHintColor{0.70f, 0.72f, 0.78f, 0.55f};
+constexpr render::ColorF kSearchCaretColor{0.92f, 0.94f, 0.98f, 0.90f};
+constexpr render::ColorF kFolderChipColor{0.16f, 0.17f, 0.21f, 0.72f};
+constexpr render::ColorF kFolderChipActiveColor{0.30f, 0.34f, 0.44f, 0.85f};
+constexpr render::ColorF kEmptyStateColor{0.85f, 0.87f, 0.92f, 0.75f};
 
 constexpr float kLabelSizeDip = 11.0f;
 constexpr float kGridPlateRadiusDip = 24.0f;
@@ -155,7 +167,15 @@ void LaunchpadPainter::PaintCells(render::IRenderBackend& backend,
     const int base = input.page * input.grid.per_page;
 
     for (int i = 0; i < cells; ++i) {
-        const int item_index = base + i;
+        // A query or an open folder projects the index: `visible` holds the tile
+        // indices this page shows, and the flat grid is just the identity projection.
+        // Painting page*per_page straight out of `tiles` would launch the wrong app
+        // the moment a search reordered the grid (T-042).
+        int item_index = base + i;
+        if (input.visible != nullptr) {
+            if (base + i < 0 || base + i >= static_cast<int>(input.visible->size())) continue;
+            item_index = (*input.visible)[static_cast<std::size_t>(base + i)];
+        }
         if (item_index < 0 || item_index >= static_cast<int>(input.tiles->size())) continue;
         const LaunchpadTile& tile = (*input.tiles)[static_cast<std::size_t>(item_index)];
 
@@ -268,21 +288,25 @@ void LaunchpadPainter::PaintFolderStrip(render::IRenderBackend& backend,
     if (input.width_dip <= 0.0f) return;
 
     const float fade = LaunchpadAnimationFade(input.progress);
-    // The controller already clipped the list to what fits, so the count and the
-    // rects are guaranteed to agree with what ClickAt hit-tests.
+    // The chip layout clips at the right edge on its own, so the drawn count and what
+    // ClickAt hit-tests agree by construction: both walk the same rect builder.
     std::vector<render::RectF> chips;
     dock::LaunchpadFolderChipRects(input.width_dip,
                                    static_cast<int>(input.folder_names->size()), chips);
 
     for (std::size_t i = 0; i < chips.size() && i < input.folder_names->size(); ++i) {
         const render::RectF& chip = chips[i];
-        const std::wstring& name = (*input.folder_names)[i];
-        const bool open =
-            input.open_folder != nullptr && !input.open_folder->empty() &&
-            i < input.folder_names->size() &&
-            name == input.folder_names->at(i) && i == open_chip_index_;
+        // The chip being renamed draws the pending text instead of its label, so the
+        // user sees exactly what Enter will commit.
+        const bool renaming =
+            input.renaming_chip >= 0 &&
+            i == static_cast<std::size_t>(input.renaming_chip) && input.rename_text != nullptr;
+        const std::wstring& name =
+            renaming ? *input.rename_text : (*input.folder_names)[i];
 
-        render::ColorF plate = open ? kFolderChipActiveColor : kFolderChipColor;
+        render::ColorF plate =
+            (static_cast<int>(i) == input.open_chip) ? kFolderChipActiveColor
+                                                     : kFolderChipColor;
         plate.a *= fade;
         backend.FillRoundedRect(chip, dock::kLaunchpadFolderChipRadiusDip, plate);
 
@@ -291,13 +315,12 @@ void LaunchpadPainter::PaintFolderStrip(render::IRenderBackend& backend,
         backend.DrawLabel(name.c_str(), chip, dock::kLaunchpadFolderChipFontDip, label,
                           render::TextAlign::Center);
 
-        // The rename editor replaces the chip's label with the pending text and a
-        // caret, so the user sees what will be committed.
-        if (input.renaming_folder != nullptr && input.rename_text != nullptr &&
-            i == open_chip_index_) {
+        // The caret rides at the end of the pending name, gated by the same blink the
+        // search field uses.
+        if (renaming && input.rename_caret_visible) {
             const render::RectF caret = dock::LaunchpadFolderRenameCaretRect(
                 *input.rename_text, static_cast<int>(input.rename_text->size()), chip);
-            if (caret.Width() > 0.0f && caret.Height() > 0.0f && input.rename_caret_visible) {
+            if (caret.Width() > 0.0f && caret.Height() > 0.0f) {
                 render::ColorF color = kSearchCaretColor;
                 color.a *= fade;
                 backend.FillRoundedRect(caret, caret.Width() * 0.5f, color);
@@ -308,10 +331,15 @@ void LaunchpadPainter::PaintFolderStrip(render::IRenderBackend& backend,
 
 void LaunchpadPainter::PaintEmptyState(render::IRenderBackend& backend,
                                        const LaunchpadPaintInput& input) {
-    // Only when a query is active and it matched nothing. An empty Launchpad (no apps
-    // installed at all) is a different failure and is reported by the controller.
-    if (input.query == nullptr || input.query->empty()) return;
-    if (input.items_on_page > 0) return;
+    // Two states leave the grid empty and both must say so rather than draw a bare
+    // plate: a query that matched nothing, and an open folder whose items all failed
+    // to resolve this session (C-18 keeps them in the config; the view reports them
+    // as missing). An empty Launchpad with no apps installed at all is a different
+    // failure and is reported by the controller.
+    const bool search_empty = input.query != nullptr && !input.query->empty() &&
+                              input.items_on_page <= 0;
+    const bool folder_empty = input.open_chip >= 0 && input.items_on_page <= 0;
+    if (!search_empty && !folder_empty) return;
 
     const float fade = LaunchpadAnimationFade(input.progress);
     render::ColorF label = kEmptyStateColor;
@@ -319,8 +347,8 @@ void LaunchpadPainter::PaintEmptyState(render::IRenderBackend& backend,
     const render::RectF box{input.width_dip * 0.2f, input.height_dip * 0.5f,
                             input.width_dip * 0.8f, input.height_dip * 0.5f +
                                                         dock::kLaunchpadSearchFontDip * 2.0f};
-    backend.DrawLabel(L"No results", box, dock::kLaunchpadSearchFontDip, label,
-                      render::TextAlign::Center);
+    backend.DrawLabel(search_empty ? L"No results" : L"Empty folder", box,
+                      dock::kLaunchpadSearchFontDip, label, render::TextAlign::Center);
 }
 
 int LaunchpadPainter::HitTest(const LaunchpadGrid& grid, int items_on_page, float x_dip,

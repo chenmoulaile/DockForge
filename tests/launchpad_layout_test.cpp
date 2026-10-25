@@ -261,3 +261,23 @@ TEST_CASE("Two displays can resolve different grids from one config", "[launchpa
     CHECK(LaunchpadCellRect(wide, wide.columns - 1).right <= 1440.0f);
     CHECK(LaunchpadCellRect(narrow, narrow.columns - 1).right <= 1280.0f);
 }
+
+TEST_CASE("The folder strip band pushes the grid down without changing the columns",
+          "[launchpad-layout][t042]") {
+    // The strip is a band added to the top, so the columns formula (which only reads
+    // the width) must be untouched. The grid is vertically centred in the remaining
+    // space, so origin_y does not move by the full band - the invariant that matters
+    // is that the first row starts below the strip and never under it.
+    const LaunchpadGrid flat = ComputeLaunchpadGrid(MakeInput(1440.0f, 900.0f));
+    LaunchpadGridInput input = MakeInput(1440.0f, 900.0f);
+    input.show_folder_strip = true;
+    const LaunchpadGrid strip = ComputeLaunchpadGrid(input);
+
+    CHECK(strip.columns == flat.columns);
+    CHECK(strip.rows == flat.rows);
+    CHECK(strip.origin_y_dip > flat.origin_y_dip);
+    CHECK(strip.origin_y_dip >= LaunchpadTopBandDip(true));
+    // And with no strip the band is the plain top band, so existing layouts do not move.
+    CHECK(LaunchpadTopBandDip(false) == Catch::Approx(56.0f));
+    CHECK(LaunchpadTopBandDip(true) == Catch::Approx(90.0f));
+}
