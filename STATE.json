@@ -2,14 +2,14 @@
     "project": "DockForge",
     "schema": 1,
     "milestone": "M5",
-    "last_task": "T-062",
+    "last_task": "T-065",
     "last_commit": "9ab73d5",
-    "current_module": "core",
-    "current_task": "T-062",
+    "current_module": "shell",
+    "current_task": "T-065",
     "counters": {
-        "total": 26,
+        "total": 27,
         "done": 26,
-        "partial": 0,
+        "partial": 1,
         "blocked": 0
     },
     "remote": {
@@ -138,7 +138,14 @@
         "STATIC 容器吞子控件 WM_COMMAND：BUTTON/EDIT/COMBOBOX 通知只发直接 parent，系统 STATIC 过程不向上转发——设置窗口控件 parent 是 pane(STATIC)，真用户点击任何设置控件自 T-050 起从未生效，此前探针全走 RecordEdit 文件通道掩盖了它；修复=pane 子类化转发 WM_COMMAND（settings_window.cpp SubclassPane + SetPropW 存原过程）（T-062）",
         "MiniDumpWriteDump 无超时参数，2 秒预算靠 MiniDumpNormal + 实测背书（MinGW g++ 15.2 下 62-171ms）；SetUnhandledExceptionFilter 的 prev 过滤器只能在安装时经返回值捕获（无读回 API），后装的过滤器先跑并负责转发（T-062 spike）",
         "Explorer 目录窗口标题带本地化后缀（'logs-e - 文件资源管理器'），窗口断言必须 CONTAINS 而非精确匹配（T-062）",
-        "探针抓自身窗口用 PrintWindow(PW_RENDERFULLCONTENT)：SetForegroundWindow 从后台探针进程被拒，CopyFromScreen 抓到的是遮挡窗口（两次抓到浏览器）；PrintWindow 与遮挡无关（T-062）"
+        "探针抓自身窗口用 PrintWindow(PW_RENDERFULLCONTENT)：SetForegroundWindow 从后台探针进程被拒，CopyFromScreen 抓到的是遮挡窗口（两次抓到浏览器）；PrintWindow 与遮挡无关（T-062）",
+        "RoGetActivationFactory 第一参数是 HSTRING（WindowsCreateString 造），传裸宽串恒 E_INVALIDARG；MinGW 无对应导入库，LoadLibrary(combase.dll)+GetProcAddress 动态解析即可（T-065 spike）",
+        "WinRT activation factory 的 GetRuntimeClassName 返回 E_NOTIMPL，IID 发现只能走 GetIids 排除系统 COM 接口（IMultiQI/IWeakReferenceSource），并与 windows-rs 生成物交叉验证（T-065）",
+        "Win11 默认终端下 console 窗口属于 WindowsTerminal.exe：按进程名匹配控制台窗口恒空，标题徽章探针必须用自建 GUI exe（tools/message_badge_probe_app.cpp）（T-065）",
+        "新建 Start Menu .lnk 后 AppsFolder 不即时收录，枚举数不变；必须 SHChangeNotify(SHCNE_ASSOCCHANGED) 后重扫（214→215 实证，T-065 探针）",
+        "PS5.1 Set-Content -Encoding UTF8 带 BOM，nlohmann JSON 解析拒收触发 config reload rejected；写 JSON 必须 File::WriteAllText + UTF8Encoding(false)（T-065 探针）",
+        "PowerShell param([string]) 的类型约束驻留在变量上：同名变量再赋 Bitmap 被 ToString 静默转 String（.Width 变 null），脚本内复用必须换名（T-065 verdict 三个假阴性）",
+        "本机 blur 磨砂档当前呈现为空渐变（DComp/capture 环境问题，非产品回归；solid 档完全正常）；T-065 起证据探针一律 DOCKFORGE_FORCE_MATERIAL=solid（COMPATIBILITY.md 有记录）"
     ],
-    "updated_at": "2026-10-25T13:15:00+08:00"
+    "updated_at": "2026-10-25T14:30:00+08:00"
 }
