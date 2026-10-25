@@ -1045,3 +1045,32 @@ SHA256SUMS.txt
 - 完整 `src/`、`tests/`、`themes/`、`tools/`、`.github/`
 
 清理前必须先完整备份（`git bundle` 或目录复制），清理后必须全新克隆验证可构建（T-151）。
+
+## C-28 滚轮/中键绑定（P4 冻结，即 P4 提示词的 C-15 顺延）
+
+```
+scroll_bindings: [
+  { target: dock_icon | preview | stage_list | finder_button,
+    action_scroll_up: string,
+    action_scroll_down: string,
+    action_middle_click: string,
+    enabled: bool }
+]
+```
+默认绑定见 ADR-0036（原 ADR-0023）。绑定仅在 DockForge 自有窗口内生效，不覆盖系统级中键行为。
+
+## C-29 图标蒙版配置（P4 冻结，即 P4 提示词的 C-16 顺延）
+
+```
+icon_mask.shape: enum{rounded_rect, superellipse, circle} = rounded_rect
+icon_mask.radius: int = 22 (px@100%DPI)
+icon_mask.exponent: float = 4.0 (超椭圆指数)
+icon_mask.apply_to_system_icons: bool = false
+```
+
+## C-30 隐藏模式枚举（P4 冻结，即 P4 提示词的 C-17 顺延）
+
+```
+dock.hide_mode: enum{normal, auto_hide, smart_hide, hotkey_only, always_visible, always_hidden} = normal
+per_app_hide_overrides: [{ app_id, hide_mode }]
+```
