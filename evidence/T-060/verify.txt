@@ -1,0 +1,45 @@
+== T-060 autostart probe 2026-10-25T11:55:19.5127694+08:00 ==
+exe=build\bin\DockForge.exe probe=build\bin\autostart_probe.exe tempconfig=C:\Users\chenk\AppData\Local\Temp\dockforge-t060-318171\config.json
+--- Part A: system chain (autostart_probe.exe) ---
+[A1] default state: task must be absent before anything runs
+A1 ok: task absent (schtasks /query rc!=0)
+[A2] autostart_probe.exe on -> register logon-trigger task
+A2 output: RESULT ok task registered (logon trigger)
+[A3] schtasks /query cross-check (OS side)
+任务名:                             \DockForge
+下次运行时间:                       N/A
+登录状态:                           只使用交互方式
+上次运行时间:                       1999/11/30 0:00:00
+要运行的任务:                       D:\MacDock\build\bin\autostart_probe.exe
+计划任务状态:                       已启用
+[A4] export the real task definition XML (audit)
+A4 exports: D:\MacDock\evidence\T-060\autostart-task.xml ; D:\MacDock\tools\autostart\DockForge.xml (1216 chars)
+A4 ok: LogonTrigger present
+A4 ok: InteractiveToken logon
+A4 ok: command = caller exe
+A4 ok: not a registry Run key
+[A5] autostart_probe.exe off -> delete the task
+A5 output: RESULT ok task deleted
+A5 ok: task gone (schtasks /query rc!=0)
+[A6] idempotent second off (nothing to delete)
+A6 output: RESULT ok already off (task absent)
+A6 ok: off is idempotent
+--- Part B: settings switch -> real task (probe channel) ---
+[B1] fresh profile, default config: no task may appear (默认关闭)
+B1 ok: no task after startup with behavior.autostart=false
+[B2] set behavior.autostart 1 (RecordEdit -> debounce -> SaveConfig -> publish)
+B2 log: 2026-10-25T11:55:23.479+08:00 INFO [core] autostart switch -> 1: ok (task registered (logon trigger))
+B2 ok: task \DockForge registered by the switch
+[B2b] export while the app's own task is live: command must be DockForge.exe
+B2b ok: command = DockForge.exe
+B2b ok: LogonTrigger present
+B2b ok: InteractiveToken logon
+B2b exports: D:\MacDock\evidence\T-060\autostart-task-settings.xml ; D:\MacDock\tools\autostart\DockForge.xml (1210 chars)
+[B3] the switch wrote the flag to disk (config.json)
+B3 config.json match autostart:true = True (439 bytes)
+[B4] set behavior.autostart 0 -> delete, no residue
+B4 log: 2026-10-25T11:55:24.827+08:00 INFO [core] autostart switch -> 0: ok (task deleted)
+B4 ok: task deleted by the switch (no residue)
+--- cleanup ---
+cleanup ok: no scheduled task left
+== verdict=PASS ==

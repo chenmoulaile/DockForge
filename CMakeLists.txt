@@ -43,7 +43,7 @@ target_link_libraries(dockforge_lib PUBLIC thirdparty_nlohmann)
 
 target_link_libraries(dockforge_lib PUBLIC
   user32 gdi32 shell32 shlwapi ole32 oleaut32 uuid dwmapi
-  d2d1 dwrite dcomp psapi advapi32 d3d11 dxgi shcore)
+  d2d1 dwrite dcomp psapi advapi32 d3d11 dxgi shcore taskschd)
 
 # ---------------------------------------------------------------- executable
 add_executable(DockForge ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp)
@@ -83,5 +83,13 @@ if(DOCKFORGE_BUILD_BENCH)
   target_link_libraries(layout_bench PRIVATE dockforge_lib)
   if(MINGW)
     target_link_options(layout_bench PRIVATE -static-libgcc -static-libstdc++)
+  endif()
+
+  # T-060 system probe: drives the real Task Scheduler through the production
+  # autostart module so tools/autostart_probe.ps1 can cross-check with schtasks.
+  add_executable(autostart_probe ${CMAKE_CURRENT_SOURCE_DIR}/tools/autostart_probe.cpp)
+  target_link_libraries(autostart_probe PRIVATE dockforge_lib)
+  if(MINGW)
+    target_link_options(autostart_probe PRIVATE -static-libgcc -static-libstdc++)
   endif()
 endif()

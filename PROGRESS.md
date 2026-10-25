@@ -340,3 +340,36 @@ Open 用新值；dock tiles 的增删重建属 T-052/Dock 重构。
   只够完成 M4 全部三个任务。诚实记录，不虚报。
 - GitHub：gh 仍未登录（B-001 已更新精确解锁步骤），公开仓库创建需人类先 `gh auth login`。
 - 下轮开始于：T-060 开机自启（M5）→ M5 其余 → P1.5 队列
+
+## 2026-10-25T11:58:00+08:00 | T-060 | DONE
+
+**产物**：`src/core/autostart.{h,cpp}`（COM ITaskService 封装：决策层 ApplyAutostart 可注入
+backend + TaskSchedulerAutostart 实体、Bstr/ComScope RAII、注册后 get_Xml 审计副本写
+%APPDATA%\DockForge\autostart\）、main.cpp 接线（启动自愈 + ConfigChanged 开关订阅）、
+tests/autostart_test.cpp（fake backend 决策矩阵 8 例）、tools/autostart_probe.{cpp,ps1}
+（系统探针 exe + 日志驱动 PS1）、tools/autostart/（审计模板 + 真实导出 XML）、
+spikes/t060_autostart/（com_spike.cpp + findings.md）。
+
+**spike 结论（禁假设实测）**：`schtasks /create /sc onlogon` 非提升三次全拒
+（`错误: 拒绝访问。`，含 /rl limited、/ru 变体；daily 控制组可用，证明拒绝特定于
+onlogon）；COM `ITaskService` 全链路 S_OK（MinGW taskschd.h/libtaskschd.a 可用，
+RegisterTaskDefinition 在 ITaskFolder 上）；`schtasks /create /xml`（COM 导出 XML）
+也可注册。决策取纯 COM。工具链提示推荐的 schtasks 封装恰是不可用路径。
+
+**实测**：gate -Action all 退出 0；单测 3443 断言 / 292 用例全绿；探针 verdict=PASS——
+A 链（probe exe）：on→schtasks /query /v /xml 交叉确认（任务名 \DockForge、登录状态
+只使用交互方式）→XML 校验 LogonTrigger/InteractiveToken/caller exe→off→幂等 off；
+B 链（设置窗口）：默认关闭不建任务 → set behavior.autostart 1 → 日志
+`autostart switch -> 1: ok` → 任务存在且 Command=DockForge.exe → config.json 写盘
+autostart:true（439 字节）→ set 0 → 日志 `task deleted` → schtasks 确认无残留。
+
+**顺带发现**：PowerShell `function f([string[]]$Args)` 参数名撞自动变量，绑定恒为空
+（实测 count=0），导致 /tn 丢失、schtasks 退化成整库查询 rc=0、Task-Exists 恒真——
+探针第一版 9 个 FAIL 全部源于此，产品代码零缺陷；改名 $SchTasksArgs 修复。
+
+**诚实边界**：审计 XML 落库靠探针运行（tools/autostart/DockForge.xml）；运行时审计
+副本写 %APPDATA%\DockForge\autostart\DockForge.xml（安装后仓库目录不可写的工程取舍）。
+登录触发任务自愈语义：启动时 config=true 才 re-register（路径随二进制迁移保持新鲜），
+config=false 不动任务——不主动清除用户手工创建的同名任务之外的任何东西。
+
+- 下轮开始于：T-061 任务栏显隐（M5）

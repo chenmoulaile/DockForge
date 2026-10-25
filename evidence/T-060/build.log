@@ -1,0 +1,9 @@
+[ 58%] Built target dockforge_lib
+[ 61%] Built target layout_bench
+[ 64%] Built target DockForge
+[ 67%] Built target autostart_probe
+[100%] Built target dockforge_tests
+Randomness seeded to: 3901630986
+===============================================================================
+All tests passed (3443 assertions in 292 test cases)
+

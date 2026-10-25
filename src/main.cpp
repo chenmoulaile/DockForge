@@ -5,6 +5,7 @@
 // T-006 shell app resolution + icon cache, T-007 display enumeration + placement,
 // T-009 real dock tile row (dock/dock_view.*).
 #include "core/app_loop.h"
+#include "core/autostart.h"
 #include "core/config.h"
 #include "core/config_reload.h"
 #include "core/theme.h"
@@ -338,6 +339,22 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
             static_cast<double>(config.dock.magnification),
             core::ToString(config.dock.hover_falloff),
             core::ToString(config.appearance.material), config.appearance.corner_radius);
+
+    // Autostart (T-060): the scheduler task is the app's own responsibility -
+    // the config flag alone does not survive a user deleting the task through
+    // Task Scheduler's GUI. When enabled, re-ensure on every start (a no-op
+    // while the task matches, a re-register after a move or manual deletion).
+    // The default is off, and off touches nothing - a fresh profile must not
+    // create any scheduled task (T-060 DoD).
+    bool last_autostart = config.behavior.autostart;
+    if (last_autostart) {
+        std::string detail;
+        if (core::ApplyAutostartSystem(true, &detail)) {
+            DF_INFO("core", "autostart ensured: %s", detail.c_str());
+        } else {
+            DF_WARN("core", "autostart self-heal failed: %s", detail.c_str());
+        }
+    }
 
     // ---- shell app list + icon cache (T-006) ----------------------------
     // Resolved before the window exists so the first painted frame already has its
@@ -770,6 +787,20 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     bus.Subscribe<core::ConfigChanged>([](const core::ConfigChanged& event) {
         DF_INFO("settings", "config published icon_size=%d launchpad_columns=%d",
                 event.config.dock.icon_size, event.config.launchpad.columns);
+    });
+
+    // Autostart switch (T-060): the settings checkbox lands in config.json
+    // through the normal flush, then this subscription makes it actually
+    // effective - register the scheduler task when turned on, delete it when
+    // turned off (no residue; an already-absent task counts as removed). Only a
+    // *change* acts: hot reloads republish the same snapshot untouched.
+    bus.Subscribe<core::ConfigChanged>([&](const core::ConfigChanged& event) {
+        if (event.config.behavior.autostart == last_autostart) return;
+        last_autostart = event.config.behavior.autostart;
+        std::string detail;
+        const bool ok = core::ApplyAutostartSystem(last_autostart, &detail);
+        DF_INFO("core", "autostart switch -> %d: %s (%s)", last_autostart ? 1 : 0,
+                ok ? "ok" : "FAILED", detail.c_str());
     });
 
     // The Launchpad's open gesture. A registered hotkey, not a low-level keyboard hook:

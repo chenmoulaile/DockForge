@@ -412,17 +412,18 @@
 ## M5 · 系统集成（P1）
 
 ### T-060 · 开机自启（任务计划程序）
-- 状态: TODO
+- 状态: DONE
 - 优先级: P1
 - 依赖: T-050
 - 预估: 1 会话
 - DoD:
-  - [ ] 用任务计划程序创建登录触发任务（非注册表 Run）
-  - [ ] 设置窗口开关，默认关闭
-  - [ ] 关闭时删除任务，不残留
-  - [ ] 任务 XML 写入 `tools/autostart/` 供审计
-  - [ ] spike 先确认 `schtasks` 与 COM `ITaskService` 两条路径哪条可用（禁假设）
-- 证据: `evidence/T-060/`
+  - [x] 用任务计划程序创建登录触发任务（非注册表 Run）——COM `ITaskService`/`ITaskFolder::RegisterTaskDefinition`，`LogonTrigger`+`TASK_LOGON_INTERACTIVE_TOKEN` 限定当前用户；导出 XML 实证含 `<LogonTrigger>`/`InteractiveToken` 且走 task schema（非注册表键）
+  - [x] 设置窗口开关，默认关闭——T-050 复选框经 `RecordEdit→防抖→SaveConfig→ConfigChanged` 链接到 `core::ApplyAutostartSystem`；默认 `behavior.autostart=false` 时启动不创建任何任务（探针 B1 实证）
+  - [x] 关闭时删除任务，不残留——探针 A5/A6/B4：开关 off 删除任务，重复 off 幂等，收尾无残留
+  - [x] 任务 XML 写入 `tools/autostart/` 供审计——`DockForge.task.xml`（审计模板+复现命令注释）与 `DockForge.xml`（探针从 Task Scheduler 实际导出的注册定义，Command=DockForge.exe）
+  - [x] spike 先确认 `schtasks` 与 COM `ITaskService` 两条路径哪条可用（禁假设）——`spikes/t060_autostart/findings.md`：`schtasks /create /sc onlogon` 非提升下三次全部 Access denied（含 /rl limited、/ru 变体），COM ITaskService 全链路 S_OK，`schtasks /create /xml`（COM 导出的 XML）也可注册；决策取纯 COM
+- 证据: `evidence/T-060/`（verify.txt verdict=PASS、build.log、test.log 3443 断言全绿、autostart-task.xml / autostart-task-settings.xml 两份真实导出、探针 tools/autostart_probe.ps1）
+- 备注: spike 反转了工具链提示的推荐——schtasks 参数路径恰好是被拒路径；探针第一版 FAIL(9) 全部为脚本自身缺陷（PowerShell `$Args` 撞自动变量绑定成空 → `/tn` 丢失 → 整库查询 rc=0），改名 `$SchTasksArgs` 后 verdict=PASS，产品代码无需改动
 
 ### T-061 · 任务栏显隐（默认关闭 + 紧急恢复）
 - 状态: TODO

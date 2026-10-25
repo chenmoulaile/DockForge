@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-16"?>
+<!--
+  T-060 audit copy of the DockForge autostart scheduled task definition.
+
+  This is the exact definition the app registers (COM ITaskService,
+  ITaskFolder::RegisterTaskDefinition, TASK_LOGON_INTERACTIVE_TOKEN), with one
+  placeholder: <Command> holds the build machine's path in this audit copy; the
+  running app substitutes its own GetModuleFileNameW() path. The authoritative
+  source is what Task Scheduler itself exports - re-derive it any time with:
+
+    schtasks /query /tn "DockForge" /xml
+
+  (evidence/T-060/autostart-task.xml is such an export from the T-060 probe run).
+  Registration does not go through this file: spike spikes/t060_autostart proved
+  `schtasks /create /sc onlogon` is denied non-elevated, while the COM path (and
+  the equivalent /create /xml route) succeeds.
+-->
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Author>DockForge</Author>
+    <URI>\DockForge</URI>
+  </RegistrationInfo>
+  <Principals>
+    <Principal id="Author">
+      <UserId>S-1-5-21-0-0-0-0-1001</UserId>
+      <LogonType>InteractiveToken</LogonType>
+    </Principal>
+  </Principals>
+  <Settings>
+    <DisallowStartIfOnBatteries>true</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>true</StopIfGoingOnBatteries>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <IdleSettings>
+      <Duration>PT10M</Duration>
+      <WaitTimeout>PT1H</WaitTimeout>
+      <StopOnIdleEnd>true</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+  </Settings>
+  <Triggers>
+    <!-- Logon trigger, not the registry Run key (T-060 DoD). UserId is filled
+         with the registering user at run time; empty in the audit copy means
+         "whoever registers the task". -->
+    <LogonTrigger>
+      <UserId></UserId>
+    </LogonTrigger>
+  </Triggers>
+  <Actions Context="Author">
+    <Exec>
+      <Command>C:\path\to\DockForge.exe</Command>
+    </Exec>
+  </Actions>
+</Task>
