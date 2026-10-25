@@ -43,3 +43,19 @@
 - **重试次数**：1
 - **影响**：T-080 状态记 `BLOCKED`。已新增前置任务 T-079（UIA 提供者）承担该工作。
 - **所需帮助**：无。T-079 属可自决的本地实现，不需人类介入。
+
+## B-006 · UserNotificationListener 对消息计数场景覆盖不成立（T-065 DoD #1）
+- **状态**：OPEN → 已按 DoD 降级条款处置（不阻塞 T-065 主体交付）
+- **现象**：`UserNotificationListener`（WinRT）在非打包进程 API 完全可用
+  （`spikes/T-065_notification_probe/`：.NET 投影实测 access=Allowed、51 条
+  通知可枚举；MinGW 直连 spike 同步路径闭环），但通知中心里**微信 / QQ 均为
+  0 条**——聊天应用的未读消息不进通知中心持久层，只有未处理 toast 的短暂
+  窗口期可见。作为"未读消息计数"来源对目标应用没有覆盖。
+- **已尝试**：双探针（.NET 投影 + MinGW RoGetActivationFactory 直连）；
+  RequestAccessAsync/GetAccessStatus/GetNotificationsAsync 全链路；枚举结果
+  按 AppId 聚合比对 weixin|wechat|qq|tencent。
+- **重试次数**：1（spike 一次性定性）
+- **影响**：T-065 按 ADR-0022 走逐应用适配器（C-25）：窗口标题未读数适配器
+  （微信/QQ 主窗口标题 `(N) …`，应用自身可观测面，不 hook、不读聊天内容）。
+  `UserNotificationListener` 完整链路留给 T-076（通知中心），那里是正确数据源。
+- **所需帮助**：无。

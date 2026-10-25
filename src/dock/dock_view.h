@@ -46,6 +46,33 @@ inline constexpr float kIndicatorDotDip = 4.0f;
 inline constexpr float kIndicatorOpacityForeground = 0.95f;
 inline constexpr float kIndicatorOpacityRunning = 0.45f;
 
+// ---- message badge (T-065, C-22 message_badge) ------------------------------
+// The red dot is 28% of the icon's width and never smaller than 10 DIP (10px at
+// 100% DPI); the number is 22% and never smaller than 9pt (= 12 DIP). Both
+// minima are contract text, not taste - below them Windows' own toast badge
+// becomes unreadable next to a 32px icon.
+inline constexpr float kBadgeDiameterFactor = 0.28f;
+inline constexpr float kBadgeMinDiameterDip = 10.0f;
+inline constexpr float kBadgeFontFactor = 0.22f;
+inline constexpr float kBadgeMinFontDip = 12.0f;  // 9pt at 96 DPI
+
+// Fallback red when the system accent colour cannot be read. Close to the
+// macOS badge red so the fallback still reads as "unread", not as an error.
+inline constexpr render::ColorF kBadgeFallbackColor{0.91f, 0.27f, 0.24f, 1.0f};
+
+// "12" for 1..9, "9+" above, empty at 0 and below (C-22: nothing is drawn).
+std::wstring BadgeTextFor(int count);
+
+// Badge geometry for one painted slot, in window DIP (C-22: derived from the
+// same LayoutSummary the icon pass used - never a second coordinate source).
+// The dot is centred on the slot's top-right corner, pulled slightly inward so
+// the ring stays inside the window region at every DPI.
+struct BadgeGeometry {
+    render::RectF dot{};
+    float font_dip = 0.0f;
+};
+BadgeGeometry ComputeBadgeGeometry(const render::RectF& slot);
+
 // A tile's relationship to a live window, refreshed by the tracker (T-012).
 //
 // Three states rather than a bool because "running" and "frontmost" are answered by
@@ -74,6 +101,11 @@ struct DockTile {
     // tile rather than in a parallel array so the two cannot fall out of step when
     // the tile list changes length.
     TileRunState run_state = TileRunState::Idle;
+    // Unread-message badge (T-065, C-22 message_badge). Written from the
+    // MessageCounterHost's last reported counts by the main loop, read by the
+    // painter. 0 means "no badge"; the painter draws nothing for it, so a tile
+    // whose app has no adapter needs no special case.
+    int message_count = 0;
 };
 
 // FNV-1a over the UTF-16 source string. Only needs to be collision-resistant

@@ -34,6 +34,7 @@
 #include "shell/app_resolver.h"
 #include "shell/drop_resolver.h"
 #include "shell/icon_cache.h"
+#include "shell/message_counts.h"
 #include "shell/start_menu.h"
 #include "shell/thumbnail_host.h"
 #include "shell/window_actions.h"
@@ -113,6 +114,43 @@ std::optional<int> RunningPollFromEnvironment() {
     const int value = _wtoi(buffer);
     if (value >= 50 && value <= 5000) return value;
     return std::nullopt;
+}
+
+// Poll interval override for the message-count adapters (T-065).
+//
+// Verification hook, same pattern as DOCKFORGE_RUNNING_POLL_MS: the probe drives
+// an adapter's first poll inside a short test window instead of waiting out the
+// production 1000ms.
+std::optional<int> MessageCountPollFromEnvironment() {
+    wchar_t buffer[16]{};
+    const DWORD n = GetEnvironmentVariableW(L"DOCKFORGE_MESSAGE_POLL_MS", buffer,
+                                            ARRAYSIZE(buffer));
+    if (n == 0 || n >= ARRAYSIZE(buffer)) return std::nullopt;
+    const int value = _wtoi(buffer);
+    if (value >= 200 && value <= 10000) return value;
+    return std::nullopt;
+}
+
+// DOCKFORGE_BADGE_PROBE_TARGET=<lowercase process name> registers one extra
+// TitleBadgeAdapter for that process (T-065 verification hook, not a config
+// key). The probe launches a controllable window with a "(4) ..." title and
+// watches the badge appear on the matching tile and vanish when the process
+// exits - a full live pass of the C-25 chain without touching WeChat/QQ.
+std::optional<std::wstring> BadgeProbeTargetFromEnvironment() {
+    wchar_t buffer[128]{};
+    const DWORD n = GetEnvironmentVariableW(L"DOCKFORGE_BADGE_PROBE_TARGET", buffer,
+                                            ARRAYSIZE(buffer));
+    if (n == 0 || n >= ARRAYSIZE(buffer)) return std::nullopt;
+    return std::wstring(buffer);
+}
+
+// Copies the settings gate (C-01 integrations.message_counts.<id>.enabled) onto
+// the host. Called at startup and from every ConfigChanged, so the settings
+// window and a hot reload both take effect through one path.
+void ApplyMessageCountConfig(const core::Config& source, shell::MessageCounterHost& host) {
+    for (const auto& [id, enabled] : source.integrations.message_counts) {
+        host.SetEnabled(core::Utf8ToWide(id), enabled);
+    }
 }
 
 platform::DockEdge ToDockEdge(core::DockPosition position) {    switch (position) {
@@ -487,6 +525,47 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     // for one frame while the first poll is still pending.
     running_tracker.Update(0.0);
     running_tracker.ApplyToTiles(tiles);
+
+    // Message counters (T-065, C-25): one adapter per target application, first
+    // registration wins, every failure degrades to count 0. The spike
+    // (spikes/T-065_notification_probe/) measured that UserNotificationListener
+    // holds no unread state for chat apps, so the first two targets read the
+    // apps' own window titles - no hooks, no chat content (ADR-0022).
+    shell::MessageCounterHost message_counters;
+    if (const auto interval = MessageCountPollFromEnvironment()) {
+        message_counters.SetPollIntervalMs(*interval);
+        DF_INFO("app", "message-count poll overridden to %dms (verification hook)", *interval);
+    }
+    message_counters.Register(std::make_unique<shell::TitleBadgeAdapter>(
+        L"weixin.exe", std::vector<std::wstring>{L"weixin.exe", L"wechat.exe"}));
+    message_counters.Register(std::make_unique<shell::TitleBadgeAdapter>(
+        L"qq.exe", std::vector<std::wstring>{L"qq.exe"}));
+    if (const auto probe_target = BadgeProbeTargetFromEnvironment()) {
+        message_counters.Register(std::make_unique<shell::TitleBadgeAdapter>(
+            *probe_target, std::vector<std::wstring>{*probe_target}));
+        DF_INFO("app", "badge probe adapter registered for '%s'",
+                core::WideToUtf8(*probe_target).c_str());
+    }
+    ApplyMessageCountConfig(config, message_counters);
+    message_counters.InitializeAll();
+    // Every change lands in the log: a probe that watches the badge has to be
+    // able to tell "adapter polled and answered 0" from "adapter never polled".
+    message_counters.set_count_changed(
+        [](const std::wstring& target_app_id, int count) {
+            DF_INFO("dock", "message count '%s' -> %d",
+                    core::WideToUtf8(target_app_id).c_str(), count);
+        });
+    DF_INFO("app", "message-count adapters: %zu registered, poll %dms",
+            message_counters.AdapterCount(), message_counters.poll_interval_ms());
+    // Copies the last known counts onto the tiles. Cheap (a map lookup per tile);
+    // called after every change and whenever tiles change length.
+    auto apply_message_counts = [&]() {
+        for (dock::DockTile& tile : tiles) {
+            tile.message_count = message_counters.CountForEntry(tile.app);
+        }
+    };
+    message_counters.Update();
+    apply_message_counts();
 
     platform::WindowDesc desc;
     desc.title = L"DockForge";
@@ -1259,6 +1338,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
             DF_WARN("core", "theme '%s' unavailable; base values in effect",
                     event.config.appearance.theme.c_str());
         }
+        // T-065: the settings switches and a hot reload both land here. Turning
+        // an adapter off reports 0 once (SetEnabled), turning it on re-initializes
+        // on the next Update; the repaint follows from the count change.
+        ApplyMessageCountConfig(event.config, message_counters);
+        apply_message_counts();
         apply_region();
     });
 
@@ -1314,6 +1398,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         // curated: CommitOrder writes the whole visible order, so the arrangement the
         // user is looking at is the one that survives the restart.
         dock::CommitOrder(config, tiles, std::string());
+        // A brand-new tile starts at count 0; seed it from the host so a live
+        // badge does not blink off for one poll interval.
+        apply_message_counts();
         DF_INFO("dock", "drop: added %s at tile[%d] (%zu tiles)", identity.c_str(), at,
                 tiles.size());
         return true;
@@ -1486,6 +1573,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         // reads the foreground window every frame, so it returns true exactly when
         // the dots would look different. A false return costs one GetForegroundWindow
         // and keeps the dock asleep.
+        // Message badges (T-065): the host throttles each adapter to its poll
+        // interval, so Update() returns true only when some count actually moved
+        // (including to 0 when a target exits or the switch turns off). A false
+        // return costs one throttle check and keeps the dock asleep.
+        if (message_counters.Update()) {
+            apply_message_counts();
+            dirty = true;
+        }
         if (running_tracker.Update(delta_ms)) {
             running_tracker.ApplyToTiles(tiles);
             dirty = true;

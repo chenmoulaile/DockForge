@@ -28,6 +28,10 @@ const std::unordered_set<std::string> kAppearanceKeys = {"material", "corner_rad
 const std::unordered_set<std::string> kBehaviorKeys = {"autostart", "hide_taskbar"};
 const std::unordered_set<std::string> kLaunchpadKeys = {"extra_paths", "columns", "icon_size",
                                                        "page_size", "folders"};
+// T-065: the whole message_counts object is parsed into the typed map (every
+// adapter id, known or not, round-trips through IntegrationsConfig), so the
+// section owns everything under it.
+const std::unordered_set<std::string> kIntegrationsKeys = {"message_counts"};
 
 // Upper bound on the persisted tile list.
 //
@@ -292,20 +296,21 @@ json StripUnknownKeys(const json& source) {
     json result = json::object();
     if (!source.is_object()) return result;
 
-    for (const char* section : {"dock", "appearance", "behavior", "launchpad"}) {
+        for (const char* section : {"dock", "appearance", "behavior", "launchpad", "integrations"}) {
         if (!source.contains(section) || !source[section].is_object()) continue;
         json section_out = json::object();
         const std::string name = section;
-        const auto& owned = name == "dock"          ? kDockKeys
-                            : name == "appearance"  ? kAppearanceKeys
-                            : name == "behavior"    ? kBehaviorKeys
-                                                    : kLaunchpadKeys;
+        const auto& owned = name == "dock"           ? kDockKeys
+                            : name == "appearance"   ? kAppearanceKeys
+                            : name == "behavior"     ? kBehaviorKeys
+                            : name == "integrations" ? kIntegrationsKeys
+                                                     : kLaunchpadKeys;
         PreserveUnknown(source[section], section_out, owned);
         if (!section_out.empty()) result[section] = section_out;
     }
     // Top-level unknown keys.
-    static const std::unordered_set<std::string> kTopKeys = {"dock", "appearance", "behavior",
-                                                             "launchpad"};
+    static const std::unordered_set<std::string> kTopKeys = {
+        "dock", "appearance", "behavior", "launchpad", "integrations"};
     PreserveUnknown(source, result, kTopKeys);
     return result;
 }
@@ -578,6 +583,30 @@ bool ParseConfig(const std::string& json_text, Config& out, std::string* error) 
         bad_value |= ReadNumber(node, "page_size", parsed.launchpad.page_size);
         bad_value |= ReadFolders(node, "folders", parsed.launchpad.folders);
     }
+    // T-065: integrations.message_counts.<adapter_id>.enabled. Every id is kept
+    // verbatim - the config must survive a downgrade without losing data, and a
+    // future adapter version must find its switch still where the user left it.
+    if (document.contains("integrations") && document["integrations"].is_object()) {
+        const auto& section = document["integrations"];
+        if (section.contains("message_counts")) {
+            const auto& mc = section["message_counts"];
+            if (mc.is_object()) {
+                for (auto it = mc.begin(); it != mc.end(); ++it) {
+                    if (it.value().is_boolean()) {
+                        parsed.integrations.message_counts[it.key()] = it.value().get<bool>();
+                    } else {
+                        DF_WARN("core", "config integrations.message_counts.%s is not a boolean, "
+                                        "keeping default",
+                                it.key().c_str());
+                        bad_value = true;
+                    }
+                }
+            } else if (!mc.is_null()) {
+                DF_WARN("core", "config integrations.message_counts is not an object, keeping default");
+                bad_value = true;
+            }
+        }
+    }
     parsed.unknown_keys_json = StripUnknownKeys(document).dump();
 
     // Snapshot the raw parsed values so we can tell whether clamping actually
@@ -647,6 +676,16 @@ std::string SerializeConfig(const Config& config) {
     }
     if (!config.launchpad.folders.empty()) {
         WriteFolders(document["launchpad"], "folders", config.launchpad.folders);
+    }
+    // T-065: per-adapter switches. Written only when the user (or a probe) has
+    // actually flipped one - a default file stays quiet about features that are
+    // still at their defaults.
+    if (!config.integrations.message_counts.empty()) {
+        json mc = json::object();
+        for (const auto& [id, enabled] : config.integrations.message_counts) {
+            mc[id] = enabled;
+        }
+        document["integrations"] = {{"message_counts", mc}};
     }
 
     // Re-attach unknown keys captured at load time.

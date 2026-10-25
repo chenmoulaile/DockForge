@@ -100,4 +100,16 @@ if(DOCKFORGE_BUILD_BENCH)
   if(MINGW)
     target_link_options(log_probe PRIVATE -static-libgcc -static-libstdc++)
   endif()
+
+  # T-065 badge probe target: a GUI window titled "(4) badge probe" owned by
+  # this process, so the title-badge adapter's process-name match sees it (a
+  # console would be owned by WindowsTerminal and invisible to the adapter).
+  # tools/message_counts_probe.ps1 puts a Start-Menu shortcut next to it, which
+  # turns the exe into a real dock tile and closes the full badge chain.
+  add_executable(message_badge_probe_app
+                 ${CMAKE_CURRENT_SOURCE_DIR}/tools/message_badge_probe_app.cpp)
+  if(MINGW)
+    target_link_options(message_badge_probe_app PRIVATE -municode -mwindows
+                        -static-libgcc -static-libstdc++)
+  endif()
 endif()

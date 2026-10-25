@@ -87,6 +87,14 @@ constexpr ControlRow kAppearanceRows[] = {
 constexpr ControlRow kBehaviorRows[] = {
     {"behavior.autostart", L"Start with Windows", ControlRow::Kind::Check, nullptr, 0},
     {"behavior.hide_taskbar", L"Hide the taskbar", ControlRow::Kind::Check, nullptr, 0},
+    // T-065 (C-25): one independent switch per message-count adapter. The two
+    // adapters ship enabled (a badge that is off until hunted down in settings
+    // would never get validated); the switch lives in
+    // integrations.message_counts.<adapter_id>.enabled.
+    {"integrations.message_counts.weixin.exe.enabled", L"Unread badge: WeChat",
+     ControlRow::Kind::Check, nullptr, 0},
+    {"integrations.message_counts.qq.exe.enabled", L"Unread badge: QQ",
+     ControlRow::Kind::Check, nullptr, 0},
 };
 
 constexpr ControlRow kAboutRows[] = {

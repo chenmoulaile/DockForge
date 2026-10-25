@@ -427,3 +427,36 @@ config=false 不动任务——不主动清除用户手工创建的同名任务�
   真实时间容量，经 env 覆盖实测同一代码分支；Part D 崩溃写入真实 %LOCALAPPDATA%
   （T-061 既有行为）。
 - 下轮开始于：T-070 Stage Manager 分组模型（M6）
+
+## 2026-10-25T14:25:00+08:00 | T-065 | PARTIAL
+
+- DoD 8 项完成 7 项；spike 先行实测定方向：`UserNotificationListener` 双探针
+  （.NET 投影 + MinGW 直连）证明 API 可用（access=Allowed、51 条通知可枚举、
+  IID 经 GetIids 与 windows-rs 双源交叉）但**微信/QQ 未读不进通知中心持久层**
+  （51 条里 0 条来自目标应用）——记 BLOCKERS.md B-006，按 ADR-0022 走逐应用
+  适配器（C-25），窗口标题未读数是应用自身可观测面（不 hook、不读聊天内容）。
+- 交付：`src/shell/message_counts.{h,cpp}`（IMessageCounterAdapter + MessageCounterHost
+  首条注册生效/失败一次 WARN 不重试/异常不外泄/1s 节流可注入时钟 + TitleBadgeAdapter
+  多候选进程名匹配）；`TitleBadgeAdapter` 解析标题全部 "(N)" 组取最大、>999 钳制；
+  `src/core/config.{h,cpp}` 增 `integrations.message_counts.<id>.enabled`（未知 id
+  roundtrip 保留）；settings_model/window 增两个复选框（Behavior 页）；DockTile
+  增 message_count；DockPainter 按 C-22 画 message_badge（28% 直径 min 10 DIP、
+  数字 22% min 9pt、>9 画 9+、系统强调色注册表读取失败回退红、slot 同源几何、
+  不参与命中测试）；main.cpp 装配 + CountChanged 日志 + `DOCKFORGE_MESSAGE_POLL_MS`/
+  `DOCKFORGE_BADGE_PROBE_TARGET` 验证钩子。
+- 实测：gate -Action all 退出 0（3829 断言/328 用例，新增 9 用例 74 断言全绿）；
+  实机探针 tools/message_counts_probe.ps1 四段全 PASS——A 3 适配器注册且 probe tile
+  经真实 .lnk 进 AppsFolder 被 pin、B 标题 "(4) badge probe" → 日志 count→4 → 红点
+  可见（像素差 589）、C 进程退出 → 日志 count→0 → 红点消失、D config 热重载关开关
+  → 持久化 + 禁用后静默（不再产生 count 事件）；截图 badge_on/off/reenabled/disabled。
+- 探针迭代（4 个假阴性根因，全部非产品缺陷）：① Win11 默认终端下 console 窗口属
+  WindowsTerminal.exe，powershell.exe 进程名匹配恒 0 → 改自建 GUI probe app
+  （CMake message_badge_probe_app）；② 新 .lnk 未进 AppsFolder 视图 → 必
+  SHChangeNotify(SHCNE_ASSOCCHANGED)（214→215 实证）；③ PS5.1 Set-Content -Encoding
+  UTF8 带 BOM，nlohmann 拒收 → 热重载 rejected，改 File::WriteAllText+UTF8Encoding(false)；
+  ④ verdict 脚本 param([string]$On) 类型约束驻留变量，同名 $on 赋 Bitmap 被
+  ToString 静默转 String → 改名 $img*。
+- 诚实边界：微信/QQ 本会话均未运行，真机未读数未长测（已验证等价 probe 链路与
+  "未运行静默降级"路径）；本机 blur 磨砂当前呈现空渐变（既有环境问题，探针取证
+  用 FORCE_MATERIAL=solid，已记 COMPATIBILITY.md）；强调色进程内缓存，改主题需重启。
+- 下轮开始于：T-066 Dock 文件夹穿透浏览器（M6/P1.5）

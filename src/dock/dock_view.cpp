@@ -21,6 +21,32 @@ std::uint64_t Fnv1a16(const std::wstring& text) {
     return hash;
 }
 
+// System accent colour for the badge (C-22: "颜色: 跟随系统强调色").
+//
+// Read once and cached: the accent colour changes only when the user revisits
+// personalisation settings, and a registry read on the paint path would sit in
+// a hot loop. A DockForge restart picks up a changed accent - acceptable for a
+// colour that does not carry state.
+const render::ColorF& BadgeAccentColor() {
+    static const render::ColorF color = [] {
+        DWORD abgr = 0;
+        DWORD size = sizeof(abgr);
+        if (RegGetValueW(HKEY_CURRENT_USER,
+                         L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer",
+                         L"AccentColor", RRF_RT_REG_DWORD, nullptr, &abgr, &size) ==
+                ERROR_SUCCESS &&
+            size == sizeof(abgr)) {
+            // Stored as 0xAABBGGRR.
+            const float r = static_cast<float>(abgr & 0xFF) / 255.0f;
+            const float g = static_cast<float>((abgr >> 8) & 0xFF) / 255.0f;
+            const float b = static_cast<float>((abgr >> 16) & 0xFF) / 255.0f;
+            return render::ColorF{r, g, b, 1.0f};
+        }
+        return kBadgeFallbackColor;
+    }();
+    return color;
+}
+
 // Widest the icon row can get for any pointer position, in DIP.
 //
 // The window is sized once from this so magnification never resizes it. Resizing
@@ -50,6 +76,29 @@ float MaxRowWidthDip(int tile_count, const LayoutParams& params, float scale,
 }  // namespace
 
 std::uint64_t IconKeyFor(const std::wstring& source) { return Fnv1a16(source); }
+
+// ---- message badge (T-065, C-22) -------------------------------------------
+
+std::wstring BadgeTextFor(int count) {
+    if (count <= 0) return {};
+    if (count <= 9) return std::to_wstring(count);
+    return L"9+";
+}
+
+BadgeGeometry ComputeBadgeGeometry(const render::RectF& slot) {
+    BadgeGeometry badge;
+    const float width = slot.Width();
+    const float diameter = std::max(width * kBadgeDiameterFactor, kBadgeMinDiameterDip);
+    const float radius = diameter * 0.5f;
+    // Centre on the slot's top-right corner, pulled inward by 30% of the radius.
+    // Fully on the corner would let SetWindowRgn clip the dot's outer quadrant;
+    // fully inside would bury it under the icon's own highlight.
+    const float cx = slot.right - radius * 0.30f;
+    const float cy = slot.top + radius * 0.30f;
+    badge.dot = render::RectF{cx - radius, cy - radius, cx + radius, cy + radius};
+    badge.font_dip = std::max(width * kBadgeFontFactor, kBadgeMinFontDip);
+    return badge;
+}
 
 std::vector<DockTile> BuildTiles(const std::vector<shell::AppEntry>& apps,
                                  shell::IconCache& icons, int max_tiles, int icon_px) {
@@ -319,6 +368,23 @@ bool DockPainter::Paint(ID2D1DeviceContext& dc, render::IRenderBackend& backend,
                                      center_x_dip + dot_w * 0.5f, dot_y + dot * 0.5f};
             backend.FillRoundedRect(mark, dot_w * 0.5f,
                                     render::ColorF{0.92f, 0.94f, 0.98f, alpha});
+        }
+
+        // Unread-message badge (T-065, C-22 message_badge), top-right of the icon.
+        //
+        // Geometry comes from the same slot rect the icon pass used - the contract
+        // forbids a second coordinate source. Not hit-testable by design: a click
+        // always activates the app, never "clears" a badge. Suppressed while the
+        // tile is dragged (the ghost at the pointer carries the icon, an empty slot
+        // carrying a badge would read as a phantom app).
+        if (tile.message_count > 0 && i != drag_source) {
+            const BadgeGeometry badge = ComputeBadgeGeometry(slot);
+            backend.FillRoundedRect(badge.dot, badge.dot.Width() * 0.5f, BadgeAccentColor());
+            const std::wstring text = BadgeTextFor(tile.message_count);
+            if (!text.empty()) {
+                backend.DrawLabel(text.c_str(), badge.dot, badge.font_dip,
+                                  render::ColorF{1.0f, 1.0f, 1.0f, 1.0f}, render::TextAlign::Center);
+            }
         }
     }
 

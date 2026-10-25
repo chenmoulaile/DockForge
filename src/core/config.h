@@ -1,6 +1,7 @@
 // DockForge - typed configuration model (CONTRACTS.md C-01).
 #pragma once
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -78,11 +79,24 @@ struct LaunchpadConfig {
     std::vector<LaunchpadFolder> folders;
 };
 
+// Per-adapter switches for the message-count integration (T-065, C-25).
+//
+// Keyed by adapter id (lowercase AUMID or process name, e.g. "weixin.exe").
+// Default is ON for every known adapter: polling window titles is as invasive
+// as the running indicator the dock already pays for, and a badge that is off
+// until the user finds a hidden checkbox would never get its first real-world
+// validation. Unknown ids round-trip untouched so a downgrade cannot corrupt
+// the user's file (C-01 实现约束).
+struct IntegrationsConfig {
+    std::map<std::string, bool> message_counts;
+};
+
 struct Config {
     DockConfig dock;
     AppearanceConfig appearance;
     BehaviorConfig behavior;
     LaunchpadConfig launchpad;
+    IntegrationsConfig integrations;
 
     // Raw JSON as loaded from disk. Unknown keys live here so that a
     // save round-trip never silently drops user data (C-01 实现约束).

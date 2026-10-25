@@ -570,18 +570,19 @@
 
 ### T-065 · 消息计数适配框架（P1 · 高风险）
 
-- 状态: TODO
+- 状态: PARTIAL（剩余：UserNotificationListener 适配器按 ADR-0022 转投 T-076；腾讯系适配器待真机长测）
 - 依赖: T-040（索引稳定）、C-01 配置 schema
 - 上下文: `src/shell/`、`ADR-0022`
 - DoD:
-  - [ ] **Spike 先行**：`spikes/T-065_notification_probe/` 验证 `UserNotificationListener`（WinRT）对目标应用（微信 UWP / QQ Win32 / Discord 至少其一）的通知可见性；不可见则记 `BLOCKERS.md` 并评估窗口标题解析 / UIA 替代路径
-  - [ ] 适配器模式：`IMessageCounterAdapter` 接口，每目标应用一个实现，互不影响（C-25）
-  - [ ] 第一阶段只支持 1–2 个目标，不追求全覆盖
-  - [ ] 计数渲染到 Dock 图标右上角红点/数字叠加层，遵循 C-22
-  - [ ] 适配器失败或目标未运行时静默降级，不崩溃、不阻塞 Dock
-  - [ ] 设置窗口中可单独开关每个适配器
-  - [ ] 单测：适配器注册/注销、计数归零、目标进程退出
-- 证据: `evidence/T-065/`
+  - [x] **Spike 先行**：`spikes/T-065_notification_probe/` 验证 `UserNotificationListener`（WinRT）对目标应用（微信 UWP / QQ Win32 / Discord 至少其一）的通知可见性；不可见则记 `BLOCKERS.md` 并评估窗口标题解析 / UIA 替代路径 —— 双探针实测：API 可用（access=Allowed、51 条通知可枚举；MinGW 直连同路径闭环）但**微信/QQ 未读不进通知中心持久层**（B-006），按 ADR-0022 走窗口标题适配器
+  - [x] 适配器模式：`IMessageCounterAdapter` 接口，每目标应用一个实现，互不影响（C-25）—— `src/shell/message_counts.h`，`MessageCounterHost` 首条注册生效/失败一次 WARN 不重试/异常不外泄
+  - [x] 第一阶段只支持 1–2 个目标，不追求全覆盖 —— weixin.exe（含 wechat.exe 候选）+ qq.exe，进程名匹配，无 hook、无聊天内容
+  - [x] 计数渲染到 Dock 图标右上角红点/数字叠加层，遵循 C-22 —— 28% 直径（min 10 DIP）、数字 22%（min 9pt）、count>9 画 9+、跟随系统强调色（失败回退红）、几何同源 LayoutSummary、不参与命中测试
+  - [x] 适配器失败或目标未运行时静默降级，不崩溃、不阻塞 Dock —— 节流轮询（默认 1s，`DOCKFORGE_MESSAGE_POLL_MS` 钩子 200..10000），失败答 0，退出归零触发一次 CountChanged(0)
+  - [x] 设置窗口中可单独开关每个适配器 —— C-01 增 `integrations.message_counts.<id>.enabled`（默认开），Behavior 页两个复选框，热重载生效（探针 Part D 实测）
+  - [x] 单测：适配器注册/注销、计数归零、目标进程退出 —— `tests/message_counts_test.cpp` 9 用例（注册/注销、单 id、变更才通知、节流、退出归零、Init 失败跳过、开关、CountForEntry 双身份、真实扫描降级、config roundtrip）
+- 证据: `evidence/T-065/`（probe.log 全 PASS：注册/计数 4→0/热重载开关 + 像素判定 589/589/0；test.log；spike 双日志）
+- 剩余工作：① `UserNotificationListener` 适配器随 T-076 通知中心一并落地（那里才有消费方与授权 UI 的意义）；② 微信/QQ 真机未读数长测（本会话两应用均未运行，仅验证了"未运行静默降级"路径与等价 probe 链路）；③ 强调色读取改 DPI/主题变更监听（当前进程内缓存）
 
 ### T-066 · Dock 文件夹穿透浏览器（P1 · 中高风险）
 

@@ -53,3 +53,21 @@
   只能验证处理器与放置数学（ADR-0012），不得据此外推为"混合 DPI 实测通过"。
 - **DXGI Desktop Duplication 不可用**：`DuplicateOutput` 返回 `E_ACCESSDENIED`，本机有
   GameViewer / MuMu 两个虚拟显示适配器（见 `evidence/T-005/dupl_bench.txt`）。
+
+## 消息计数徽章（T-065）
+
+| 场景 | 状态 | 证据 |
+|---|---|---|
+| 标题徽章链路（窗口标题 → 适配器 → tile → 红点） | 通过 | `evidence/T-065/`（probe.log A/B/C/D 全 PASS，badge_on/off/reenabled/disabled 四张截图，像素判定 589/589/0） |
+| 目标进程退出 → CountChanged(0) → 徽章消失 | 通过 | 同上（Part C + 单测 `tests/message_counts_test.cpp`） |
+| 设置开关（热重载）单独禁用适配器 | 通过 | 同上（Part D：config 持久化 + 禁用后静默） |
+| `UserNotificationListener` 作消息计数来源 | 不适用（见 BLOCKERS.md B-006） | `spikes/T-065_notification_probe/README.md`：API 可用（access=Allowed、51 条通知可枚举），但微信/QQ 未读消息不进通知中心持久层 |
+
+## 已知渲染观察（本机）
+
+- **自绘磨砂（blur 档）在本机当前呈现为空渐变**（2026-10-25 观察，T-065 探针期间）：
+  dock 窗口存在、topmost、paint 循环正常，`DOCKFORGE_FORCE_MATERIAL=solid` 下 plate 与
+  图标渲染完全正常（`evidence/T-065/dbg_solid.png`），默认 mica→blur 降级后板面内容缺失
+  （`dbg_badge_on.png` 背景板仍带内容但 `dbg_badge_off2.png` 板面曾整板为渐变；DComp 呈现
+  或 backdrop capture 链与本机 GPU 状态相关，仓库根有 fix-gpu.ps1 先例）。徽章/适配器
+  逻辑不依赖该路径。证据探针一律用 `DOCKFORGE_FORCE_MATERIAL=solid` 取证。

@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 namespace dockforge::settings {
 namespace {
@@ -37,6 +38,11 @@ constexpr FieldSpec kFields[] = {
     {"appearance.corner_radius", FieldSpec::Kind::Int},
     {"behavior.autostart", FieldSpec::Kind::Bool},
     {"behavior.hide_taskbar", FieldSpec::Kind::Bool},
+    // T-065 (C-25): one switch per shipped adapter. The adapter id sits verbatim
+    // in the field name, matching the C-01 template
+    // integrations.message_counts.<adapter_id>.enabled.
+    {"integrations.message_counts.weixin.exe.enabled", FieldSpec::Kind::Bool},
+    {"integrations.message_counts.qq.exe.enabled", FieldSpec::Kind::Bool},
 };
 
 const FieldSpec* FindField(const std::string& field) {
@@ -109,6 +115,15 @@ std::string SettingsModel::CurrentValueText(const core::Config& config,
         case FieldSpec::Kind::Bool:
             if (field == "behavior.autostart") return config.behavior.autostart ? "1" : "0";
             if (field == "behavior.hide_taskbar") return config.behavior.hide_taskbar ? "1" : "0";
+            // T-065: adapter switches default to ON when the id is absent.
+            if (field == "integrations.message_counts.weixin.exe.enabled") {
+                const auto it = config.integrations.message_counts.find("weixin.exe");
+                return it == config.integrations.message_counts.end() || it->second ? "1" : "0";
+            }
+            if (field == "integrations.message_counts.qq.exe.enabled") {
+                const auto it = config.integrations.message_counts.find("qq.exe");
+                return it == config.integrations.message_counts.end() || it->second ? "1" : "0";
+            }
             break;
         case FieldSpec::Kind::Position:
             return core::ToString(config.dock.position);
@@ -202,6 +217,22 @@ int SettingsModel::Apply(core::Config& config, std::vector<std::string>* changed
                 } else if (edit.field == "behavior.hide_taskbar") {
                     moved = value != config.behavior.hide_taskbar;
                     config.behavior.hide_taskbar = value;
+                } else if (edit.field.rfind("integrations.message_counts.", 0) == 0 &&
+                           edit.field.size() > strlen("integrations.message_counts.") &&
+                           edit.field.substr(edit.field.size() - strlen(".enabled")) ==
+                               ".enabled") {
+                    // Adapter id = the middle of the dotted name. Written even when
+                    // unchanged: an explicit user choice must not vanish from the
+                    // file just because it equals the default.
+                    const std::size_t prefix = strlen("integrations.message_counts.");
+                    const std::size_t suffix = strlen(".enabled");
+                    const std::string id =
+                        edit.field.substr(prefix, edit.field.size() - prefix - suffix);
+                    const auto it = config.integrations.message_counts.find(id);
+                    const bool current =
+                        it == config.integrations.message_counts.end() ? true : it->second;
+                    moved = value != current;
+                    config.integrations.message_counts[id] = value;
                 }
                 break;
             }
