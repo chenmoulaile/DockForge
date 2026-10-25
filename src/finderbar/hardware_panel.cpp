@@ -342,19 +342,32 @@ HardwareControlError HardwarePanel::MediaCommand(const std::string& action) {
         return (last_error_ = HardwareControlError::Failed(
                     L"媒体控制", L"发送媒体命令失败", E_FAIL));
     }
-    // The answer arrives asynchronously; drain what is already here so a
-    // rejection shows in the strip immediately, the rest lands on the tick.
-    for (const auto& line : sidecar_->DrainLines()) {
-        SidecarState parsed;
-        bool is_push = false;
-        std::string push_kind;
-        std::wstring error;
-        if (ParseSidecarLine(line, &parsed, &is_push, &push_kind, &error) && !is_push &&
-            parsed.valid) {
-            OnSidecarState(parsed);
-        } else if (!error.empty()) {
-            last_error_ = HardwareControlError::Failed(L"媒体控制", error, E_FAIL);
+    // The sidecar answers asynchronously; wait (bounded) for a non-push line
+    // so a rejection lands in the error strip instead of racing past it. A
+    // poll answer arriving meanwhile refreshes the rows for free.
+    const DWORD start = GetTickCount();
+    bool answered = false;
+    std::wstring error;
+    while (GetTickCount() - start < 3000 && !answered) {
+        for (const auto& line : sidecar_->DrainLines()) {
+            SidecarState parsed;
+            bool is_push = false;
+            std::string push_kind;
+            std::wstring err;
+            if (!ParseSidecarLine(line, &parsed, &is_push, &push_kind, &err)) continue;
+            if (is_push) continue;
+            answered = true;
+            error = err;
+            if (parsed.valid) OnSidecarState(parsed);
         }
+        if (!answered) Sleep(30);
+    }
+    if (!error.empty()) {
+        last_error_ = HardwareControlError::Failed(L"媒体控制", error, E_FAIL);
+        DF_WARN("hwpanel", "media '%s' rejected: %s", action.c_str(),
+                core::WideToUtf8(error).c_str());
+    } else {
+        last_error_ = HardwareControlError::None();
     }
     if (visible()) RepaintNow();
     return last_error_;
@@ -499,6 +512,18 @@ LRESULT HardwarePanel::WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam
     switch (msg) {
         case WM_ERASEBKGND:
             return 1;  // WM_PAINT owns every pixel (double buffered)
+
+        case WM_APP + 0x31: {
+            // Volume notification posted by the audio thread (see
+            // AudioHardware::SetEventSink - the callback itself must not
+            // touch COM, the bus or GDI). Main thread from here on.
+            if (!audio_) return 0;
+            const bool capture = (wparam & 1u) != 0;
+            const bool muted = (wparam & 2u) != 0;
+            const float level = static_cast<float>(lparam) / 10000.0f;
+            audio_->DispatchQueuedVolume(capture, level, muted);
+            return 0;
+        }
 
         case WM_ACTIVATE:
             // FolderPanel's dismissal rule: a loss of activation AFTER the
@@ -797,10 +822,14 @@ void HardwarePanel::Paint(HDC dc) {
         SelectObject(mem, old_font);
     }
 
+    // THE step that makes the double buffer visible: everything above drew
+    // into `bmp` through `mem`; without this BitBlt the panel shows whatever
+    // the screen already had (found by the T-068 probe: shots held the window
+    // rect but Sublime's pixels).
+    BitBlt(dc, 0, 0, w, rc.bottom, mem, 0, 0, SRCCOPY);
     SelectObject(mem, old_bmp);
     DeleteObject(bmp);
     DeleteDC(mem);
-    (void)old_brush;
 }
 
 }  // namespace dockforge::finderbar

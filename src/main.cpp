@@ -1400,7 +1400,16 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     bool hw_panel_ready = false;
     if (hw_panel_enabled) {
         if (finderbar::HardwarePanel::RegisterWindowClass(instance)) {
+            // COM on the OLE-STA main thread (already initialized above); the
+            // endpoint change callbacks arrive here while the loop pumps.
+            if (!hw_audio.Initialize()) {
+                DF_WARN("finderbar", "Core Audio init failed; audio controls unavailable");
+            }
             if (hw_panel.Create(instance)) {
+                // Route the audio thread's notifications into the panel's
+                // WndProc (see AudioHardware::SetEventSink for why the
+                // callback itself cannot do the work).
+                hw_audio.SetEventSink(hw_panel.Handle());
                 hw_panel_ready = true;
                 if (ReadEnvFlag(L"DOCKFORGE_HW_PANEL_SHOW", false)) {
                     hw_sidecar.Start();
@@ -1472,13 +1481,26 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         CloseHandle(h);
         if (!read_ok || got == 0) return;
         raw[got] = '\0';
-        std::string command(raw);
+        std::string content(raw);
+        while (!content.empty() &&
+               (content.back() == '\n' || content.back() == '\r' ||
+                content.back() == ' ')) {
+            content.pop_back();
+        }
+        // Dedup on the FULL file content: the probe appends a unique token
+        // line after the command so repeated identical commands (e.g. `state`
+        // five times) are all delivered; only a byte-identical rewrite of the
+        // whole file is a true repeat.
+        if (content.empty() || content == hw_last_command) return;
+        hw_last_command = content;
+        std::string command = content;
+        const std::size_t nl = command.find('\n');
+        if (nl != std::string::npos) command.resize(nl);
         while (!command.empty() &&
-               (command.back() == '\n' || command.back() == '\r' || command.back() == ' ')) {
+               (command.back() == '\r' || command.back() == ' ')) {
             command.pop_back();
         }
-        if (command.empty() || command == hw_last_command) return;
-        hw_last_command = command;
+        if (command.empty()) return;
         DF_INFO("finderbar", "probe command=%s", command.c_str());
         auto report = [&](const finderbar::HardwareControlError& err) {
             if (!err.ok()) {

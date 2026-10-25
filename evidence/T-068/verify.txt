@@ -1,0 +1,81 @@
+# T-068 verify.txt · 证据汇总与诚实边界
+
+日期：2026-10-25。全部结论来自本会话实际执行的命令与产物，未跑的检查逐条列出。
+
+## 交付物
+
+- `src/finderbar/hardware_types.h` —— C-23 四事件结构 + RadioKind 值 + 错误上报形状
+- `src/finderbar/audio_hardware.{h,cpp}` —— Core Audio 直连：端点（主音量/麦克风）
+  读写 + 事件回调；会话枚举 + 每会话音量/静音（IAudioSessionManager2 →
+  IAudioSessionEnumerator + ISimpleAudioVolume）
+- `src/finderbar/system_stats.{h,cpp}` —— GetSystemTimes + GlobalMemoryStatusEx，
+  纯函数 CPU% 数学（idle 计入 kernel 的规则单测锁定）
+- `src/finderbar/media_sidecar.{h,cpp}` —— .NET sidecar 进程桥（管道行协议）
+- `src/finderbar/hardware_panel.{h,cpp}` —— GDI 顶部弹出面板（自有窗口类，
+  folder_panel 模式：Esc/失活关闭、双缓冲、失焦后不再误关）
+- `tools/hw_sidecar.cs` —— .NET sidecar（GSMTC + Radios；事件推送节流 250ms）
+- `tools/hw_panel_probe.ps1` —— 实机探针（A..G）
+- `tests/hardware_test.cpp` —— 13 个单测用例
+- CMake：`hw_sidecar` 目标（csc 构建；csc 缺失时降级为 STATUS 消息，面板报
+  媒体/无线电不可用，不破坏构建）
+
+## 关键技术结论（spike 实测）
+
+1. Core Audio 直连全绿（spike_audio.log）：7 会话枚举、端点+会话读写 S_OK、
+   变更回调实测到达。
+2. WinRT async 在 MinGW 进程永不完成（spike_winrt_mingw.log）：GSMTC/Radios
+   两路 IAsyncOperation 各等 15s 不完成、handler 不触发 → BLOCKERS.md B-007，
+   降级 .NET sidecar（spike_winrt_dotnet.log：.NET 投影下全链路可用）。
+3. sidecar 行协议端到端（spike_sidecar_manual.log）：ready + poll 返回
+   Chrome 媒体会话（title/artist/pos/dur）+ 蓝牙/WLAN 无线电状态。
+4. 音频线程回调陷阱（probe 迭代发现）：IAudioEndpointVolumeCallback::OnNotify
+   在 audio 服务线程到达，回调内做 COM/bus/GDI 会间歇性死锁该线程 →
+   回调只 PostMessage，主线程 WndProc 走完整 C-23 链（修复后 B 部分稳定 PASS）。
+
+## 实测检查（全部本会话真实运行）
+
+| 检查 | 命令 | 结果 |
+|---|---|---|
+| 构建+单测 | `powershell -NoProfile -ExecutionPolicy Bypass -File tools/gate.ps1 -Action all` | 371 用例 4024 断言全过（含 hardware_test 13 用例） |
+| 实机探针 | `powershell ... tools/hw_panel_probe.ps1` | A..G 全 PASS（probe.txt），F 按设计跳过 |
+| 面板截图 | 探针内 Save-PanelShot | panel_open.png / panel_after.png，视觉模型读出全部区块（媒体⏮▶⏭、主音量 90%、麦克风 100%、WLAN/蓝牙 On、CPU 17%、内存 97% 15.1GB、红色错误条） |
+| 空闲 CPU（面板开） | `tools/idle_stats.ps1 -Seconds 40` | 稳态 20s 段 0.23–0.26% < 0.3%（idle_cpu.txt；全窗 0.36% 含启动 warmup） |
+| 空闲 CPU（基线，面板关） | `tools/idle_stats.ps1 -Seconds 30` | 0.23%（idle_cpu_baseline.txt）→ 面板稳态增量 ≈0.03–0.1 个百分点 |
+| 句柄 | 同上两份 | 414–473 区间稳定，无增长趋势 |
+
+## DoD 勾选对照（TASKS.md 同步）
+
+- [x] 分程序音量 —— probe C：`session 0 50` → 状态文件 session[0].level=0.5
+- [x] 全局音量/麦克风 —— probe B：`volume 33` → 状态 0.33 + audio_spike 独立读
+  `level=0.330` + VolumeChanged 事件日志（事件驱动实证）
+- [~] 媒体控制 —— 读链路实证（spike B + sidecar manual：Chrome 会话
+  title/artist/timeline）；无会话时错误不静默实证（probe E + 截图红色错误条）；
+  **播放/暂停/切歌在真实播放器上的效果未实机验证**（本机无可控媒体源，
+  Chrome autoplay 被策略阻止），代码路径在 sidecar `MediaControl()` 已实现
+- [~] WiFi/蓝牙开关 —— 读链路实证（radios=2，蓝牙/WLAN state=1）；
+  SetStateAsync 写路径已实现但**未实机验证**（翻转用户真实硬件需人工确认，
+  探针 F 部分设计为 `-RadioRoundTrip` 显式 opt-in，默认跳过）
+- [x] CPU/内存监控 —— probe D + idle_stats（见上表）
+- [x] 弹出面板不常驻 —— probe A/G：show/hide + sidecar 随开随关（G 实证
+  hide 后 hw_sidecar 进程消失）
+- [x] 控制失败面板内错误提示 —— 截图像素级：红色“媒体控制失败：no media
+  session”+ DF_WARN 日志
+
+## 未运行/未覆盖（诚实边界）
+
+1. 播放/暂停/切歌/无线电翻转的正向实机验证（原因见上）。需要：一台可接受
+   蓝牙/WiFi 短暂断开的机器 + 一个可控 SMTC 媒体源（或手动在 Chrome 里点一次
+   播放），然后 `tools/hw_panel_probe.ps1 -RadioRoundTrip` + 人工观察面板按钮。
+2. 8 小时长跑句柄采样：T-068 DoD 未要求，未运行（短时 40s 稳定）。
+3. sidecar 的 push 事件推送（PlaybackInfoChanged→{"push":"media"}）在探针中
+   未观察到（无媒体会话自然无事件）；订阅代码在 `hw_sidecar.cs WireEvents()`，
+   行为留给媒体源在场时验证。
+4. 多显示器/不同 DPI 面板位置：面板取主显示器 work area，未在多屏环境验证。
+
+## 复现
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/gate.ps1 -Action all
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/hw_panel_probe.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/idle_stats.ps1 -Out evidence/T-068/idle_cpu.txt -Seconds 40   # 需先按 probe 方式启动 app
+```

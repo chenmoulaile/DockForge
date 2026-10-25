@@ -36,6 +36,18 @@ std::wstring HrText(const wchar_t* what, HRESULT hr) {
 // back into it).
 AudioHardware* g_callback_owner = nullptr;
 
+// Where the audio thread's notifications get posted. MEASURED (T-068 probe
+// run dockforge-t068-21589703): OnNotify arrives on the AUDIO SERVICE's
+// thread, not ours. Touching COM (GetEndpoint), the event bus or GDI repaint
+// from that callback dead-locks the audio thread on some runs (one probe pass,
+// one fail with the event never delivered). So the callback does exactly one
+// thing - PostMessage - and the main thread owns the rest.
+HWND g_notify_hwnd = nullptr;
+
+// Registered message carrying one endpoint volume change. wparam bits: 1 =
+// capture endpoint, 2 = muted. lparam: level * 10000, truncated.
+const UINT kVolumeNotifyMsg = WM_APP + 0x31;
+
 class EndpointNotify : public IAudioEndpointVolumeCallback {
   public:
     bool capture = false;
@@ -58,16 +70,16 @@ EndpointNotify g_capture_notify;
 
 }  // namespace
 
-// Defined after AudioHardware is complete (reaches the public bridge members).
+UINT VolumeNotifyMessage() { return kVolumeNotifyMsg; }
+
+// The whole audio-thread body: copy two fields into a PostMessage. No COM, no
+// bus, no paint - those all run on the main thread from the panel's WndProc.
 STDMETHODIMP EndpointNotify::OnNotify(PAUDIO_VOLUME_NOTIFICATION_DATA data) {
-    if (!g_callback_owner || !data) return S_OK;
-    const bool capture = this->capture;
-    VolumeChanged event;
-    event.device_id = capture ? AudioHardware::CaptureDeviceIdForCallback()
-                              : AudioHardware::RenderDeviceIdForCallback();
-    event.level = data->fMasterVolume;
-    event.muted = data->bMuted != FALSE;
-    g_callback_owner->PublishVolumeCallback(event);
+    if (!data || !g_notify_hwnd) return S_OK;
+    const WPARAM flags = (capture ? 1u : 0u) | ((data->bMuted != FALSE) ? 2u : 0u);
+    const LPARAM level10000 =
+        static_cast<LPARAM>(data->fMasterVolume * 10000.0f);
+    PostMessageW(g_notify_hwnd, kVolumeNotifyMsg, flags, level10000);
     return S_OK;
 }
 
@@ -159,6 +171,9 @@ bool AudioHardware::Initialize() {
 void AudioHardware::Shutdown() {
     if (!initialized_) return;
     auto* c = reinterpret_cast<AudioCom*>(com_);
+    // Detach the sink FIRST: after the unregister calls below, a notification
+    // racing in from the audio thread must find no window to post to.
+    g_notify_hwnd = nullptr;
     if (c->render_volume) c->render_volume->UnregisterControlChangeNotify(&g_render_notify);
     if (c->capture_volume) {
         c->capture_volume->UnregisterControlChangeNotify(&g_capture_notify);
@@ -376,16 +391,22 @@ void AudioHardware::PublishVolumeCallback(const VolumeChanged& event) {
     if (on_volume_changed_) on_volume_changed_(event);
 }
 
-std::wstring AudioHardware::RenderDeviceIdForCallback() {
-    return g_callback_owner
-               ? reinterpret_cast<AudioCom*>(g_callback_owner->com_)->render_id
-               : std::wstring();
+void AudioHardware::SetEventSink(HWND hwnd) {
+    // Reached through the public surface from the integration; the audio
+    // thread's notify objects read this pointer as their only cross-thread
+    // state (plain assignment, set once before events can flow, cleared on
+    // shutdown before the interfaces go away).
+    g_notify_hwnd = hwnd;
 }
 
-std::wstring AudioHardware::CaptureDeviceIdForCallback() {
-    return g_callback_owner
-               ? reinterpret_cast<AudioCom*>(g_callback_owner->com_)->capture_id
-               : std::wstring();
+void AudioHardware::DispatchQueuedVolume(bool capture_endpoint, float level,
+                                         bool muted) {
+    auto* c = reinterpret_cast<AudioCom*>(com_);
+    VolumeChanged event;
+    event.device_id = capture_endpoint ? c->capture_id : c->render_id;
+    event.level = level;
+    event.muted = muted;
+    if (on_volume_changed_) on_volume_changed_(event);
 }
 
 std::wstring SessionDisplayName(DWORD pid) {

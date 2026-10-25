@@ -48,6 +48,9 @@ class HardwarePanel {
     void Close();  // hide (HWND survives for the next open)
     bool visible() const { return hwnd_ != nullptr && IsWindowVisible(hwnd_); }
     bool IsValid() const { return hwnd_ != nullptr; }
+    // The panel's HWND - the audio thread posts volume notifications here
+    // (AudioHardware::SetEventSink). Valid after Create.
+    HWND Handle() const { return hwnd_; }
 
     // VolumeChanged arrived (audio callback or sidecar push): refresh the
     // affected row and repaint. Cheap when hidden.

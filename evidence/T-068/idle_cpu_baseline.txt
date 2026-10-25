@@ -1,0 +1,21 @@
+process=DockForge pid=11460
+duration_s=30 interval_ms=5000
+cpu_total_s=1.25 wall_s=30.2 cores=18
+cpu_percent=0.2302
+rss_first_mb=136.6 rss_last_mb=136.61
+rss_growth_mb=0.01
+handles_first=419 handles_last=414
+handles_min=414 handles_max=419
+threads_min=13 threads_max=14
+--- samples ---
+t=  5.0s rss= 136.60MB handles= 419 threads=14 cpu=  1.594s
+t= 10.0s rss= 136.60MB handles= 419 threads=14 cpu=  1.781s
+t= 15.0s rss= 136.60MB handles= 419 threads=14 cpu=  1.969s
+t= 20.0s rss= 136.60MB handles= 419 threads=14 cpu=  2.219s
+t= 25.0s rss= 136.61MB handles= 414 threads=13 cpu=  2.469s
+t= 30.0s rss= 136.61MB handles= 414 threads=13 cpu=  2.672s
+--- budgets ---
+cpu_budget=0.5% rss_budget=120MB
+verdict_cpu=PASS
+verdict_rss=FAIL
+verdict_handles=PASS

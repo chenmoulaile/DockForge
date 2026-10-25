@@ -616,18 +616,18 @@
 
 ### T-068 · MyFinder 硬件控制面板（P1 · 低风险）
 
-- 状态: TODO
+- 状态: PARTIAL（音频全链路+CPU/内存+面板+错误提示实测达标；媒体/无线电的控制写路径待实机正向验证）
 - 依赖: T-050（设置窗口骨架）、T-062（日志基础设施）
 - 上下文: `src/finderbar/`、`C-23`
 - DoD:
-  - [ ] 分程序音量：`IAudioSessionManager2` → `GetSessionEnumerator` + `ISimpleAudioVolume`
-  - [ ] 全局音量/麦克风：`IAudioEndpointVolume`
-  - [ ] 媒体控制：`GlobalSystemMediaTransportControlsSessionManager.RequestAsync()`，播放/暂停/切歌/曲目信息
-  - [ ] WiFi/蓝牙开关：`Windows.Devices.Radios`
-  - [ ] CPU/内存监控：`GetSystemTimes` + `GlobalMemoryStatusEx`，每 2 秒采样，空闲 CPU 增量 < 0.3%
-  - [ ] Finder Bar 中以弹出面板呈现，不常驻占顶部栏
-  - [ ] 控制失败显示 Toast 或面板内错误提示，不静默失败
-- 证据: `evidence/T-068/`
+  - [x] 分程序音量：`IAudioSessionManager2` → `GetSessionEnumerator` + `ISimpleAudioVolume` —— MinGW 直连实测（spike 7 会话；probe C：session 0 → 0.5 状态文件确认）；audio 回调实测在 audio 服务线程到达、回调内做 COM/bus/GDI 会间歇死锁 → 回调只 PostMessage、主线程走完整 C-23 链（修复过程记录于 verify.txt）
+  - [x] 全局音量/麦克风：`IAudioEndpointVolume` —— probe B：volume 33 → 状态 0.33 + audio_spike 独立读 level=0.330 + VolumeChanged 事件日志（事件驱动）
+  - [ ] 媒体控制：`GlobalSystemMediaTransportControlsSessionManager.RequestAsync()`，播放/暂停/切歌/曲目信息 —— MinGW 直连 async 15s 不完成（BLOCKERS B-007）→ .NET sidecar（tools/hw_sidecar.cs，csc 编译无 SDK 依赖，随面板开/关起/停）；读链路实证（Chrome 会话 title/artist/timeline）；无会话时报错不静默实证（probe E + 截图红色错误条）；**播放/暂停/切歌在真实播放器上的效果未实机验证**（本机无可控 SMTC 媒体源，Chrome autoplay 被策略阻止）
+  - [ ] WiFi/蓝牙开关：`Windows.Devices.Radios` —— 读链路实证（蓝牙+WLAN state=1）；SetStateAsync 写路径已实现但未实机验证（翻转用户真实硬件需人工确认；probe F 设计为 -RadioRoundTrip 显式 opt-in，默认跳过）
+  - [x] CPU/内存监控：`GetSystemTimes` + `GlobalMemoryStatusEx`，每 2 秒采样，空闲 CPU 增量 < 0.3% —— 面板开 40s 实测稳态 0.23–0.26%（基线 0.23%）；CPU% 数学（idle 计入 kernel）单测锁定
+  - [x] Finder Bar 中以弹出面板呈现，不常驻占顶部栏 —— GDI 自有窗口类弹出面板（Finder Bar 属 M2 未建，暂挂主显示器 work area 顶部，Esc/失活关闭同 folder_panel 语义）；probe A/G 实证 show/hide + sidecar 随开随关（hide 后 hw_sidecar 进程消失）
+  - [x] 控制失败显示 Toast 或面板内错误提示，不静默失败 —— 截图像素级实证（红色“媒体控制失败：no media session”）+ DF_WARN 日志；所有控制 API 走 HardwareControlError 形状
+- 证据: `evidence/T-068/`（spike_audio/spike_winrt_dotnet/spike_winrt_mingw/spike_sidecar_manual 四份 spike 日志；probe.txt A..G 全 PASS + 两张面板截图；idle_cpu.txt + idle_cpu_baseline.txt；test.log 371 用例 4048 断言；verify.txt 汇总与诚实边界）
 
 ### T-069 · 热区与全局热键系统（P1 · 低风险）
 

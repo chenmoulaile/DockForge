@@ -59,3 +59,25 @@
   （微信/QQ 主窗口标题 `(N) …`，应用自身可观测面，不 hook、不读聊天内容）。
   `UserNotificationListener` 完整链路留给 T-076（通知中心），那里是正确数据源。
 - **所需帮助**：无。
+
+## B-007 · WinRT async（GSMTC / Radios）在 MinGW 进程内永不完成（T-068）
+- **状态**：OPEN → 已按 ADR-0002 的既有边界走 .NET sidecar 降级（不阻塞 T-068 交付）
+- **现象**：`Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager.RequestAsync()`
+  与 `Windows.Devices.Radios.Radio.GetRadiosAsync()` 在 MinGW-w64 直连
+  （`RoGetActivationFactory` 动态解析，combase.dll）下返回合法
+  `IAsyncOperation`，但状态恒为 Started：15 秒轮询不完成、注册的
+  completion handler 从不触发（含 MTA、消息泵、put_Completed 三种等待方式）。
+  与 T-065 记录的 console 进程 async 边界一致——这是 WinRT async 完成机制
+  与本进程形态的边界，不是 MinGW 编译边界（同一调用在 .NET 投影下 ~1s 完成）。
+- **已尝试**：`spikes/T-068_hw_probe/winrt_mingw.cpp`（GSMTC Statics IID
+  {2050C4EE-11A0-57DE-AED7-C97C70338245}、Radio Statics IID
+  {5FB6A12E-67CB-46AE-AAE9-65919F86EFF4}，均 GetIids 实测发现；两路 async
+  各等 15s）；`.NET 投影 winrt_probe.cs` 对照（两路 async 均 Completed，
+  Chrome 会话 title/timeline、蓝牙+WLAN 无线电全可读）。
+- **重试次数**：1（spike 一次性定性）
+- **影响**：T-068 的媒体控制与 WiFi/蓝牙开关不能在主进程内直连实现，
+  改为 `tools/hw_sidecar.cs`（.NET Framework 自带 csc 编译，无 SDK 依赖）
+  子进程 + stdin/stdout 行协议（`src/finderbar/media_sidecar.cpp` 桥）。
+  sidecar 随面板开/关起/停，无孤儿进程（T-068 probe G 部分实证）。
+  C++/WinRT 工具链（ADR-0002 已记本机无 MSVC）恢复后可收回 sidecar。
+- **所需帮助**：无。

@@ -5,11 +5,12 @@
 // session enumeration, per-session + endpoint read/write, and change callbacks
 // all work in an unpackaged process).
 //
-// Threading: created and used from the app's OLE-STA main thread. The change
-// callbacks arrive on this thread while the main loop pumps; they publish
-// VolumeChanged directly on the bus (synchronous dispatch, same as every other
-// producer in the app). No locks: everything lives on one thread. A control
-// called from the panel's WndProc runs on that same thread.
+// Threading: created and used from the app's OLE-STA main thread. MEASURED
+// (T-068 probe): IAudioEndpointVolumeCallback::OnNotify fires on the AUDIO
+// SERVICE's thread, not ours - doing COM/bus/paint work there dead-locks the
+// audio thread on some runs. The callback therefore only PostMessages the
+// panel window (SetEventSink); the panel's WndProc answers on the main thread
+// through DispatchQueuedVolume, which runs the full C-23 chain safely.
 //
 // Error policy (C-23): every mutating call returns its HRESULT through a
 // HardwareControlError so the panel can show it instead of dropping it.
@@ -77,8 +78,15 @@ class AudioHardware {
     // are file-locals there, hand events in through these. Not for any other
     // caller.
     void PublishVolumeCallback(const VolumeChanged& event);
-    static std::wstring RenderDeviceIdForCallback();
-    static std::wstring CaptureDeviceIdForCallback();
+
+    // ---- audio-thread -> main-thread bridge --------------------------------
+    // The audio thread's OnNotify posts VolumeNotifyMessage() to `hwnd`; the
+    // panel's WndProc answers with DispatchQueuedVolume ON THE MAIN THREAD.
+    // Null detaches.
+    void SetEventSink(HWND hwnd);
+    // Turns one posted notification into the full C-23 chain (bus publish,
+    // log, repaint) - main thread only, called from the panel's WndProc.
+    void DispatchQueuedVolume(bool capture_endpoint, float level, bool muted);
 
   private:
 
@@ -102,6 +110,11 @@ class AudioHardware {
 // Display name for a pid: base name of the process image; "系统声音" for pid 0
 // (the audiosrv system session). Exposed for the unit test (no HWND needed).
 std::wstring SessionDisplayName(DWORD pid);
+
+// The registered message the audio thread posts (see AudioHardware::
+// SetEventSink). wparam bits: 1 = capture endpoint, 2 = muted; lparam =
+// level * 10000.
+UINT VolumeNotifyMessage();
 
 // Formats a level as the panel shows it ("76%"). Exposed for the test.
 std::wstring FormatLevelPercent(float level);

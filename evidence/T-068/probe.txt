@@ -1,0 +1,11 @@
+=== T-068 probe: scratch=C:\Users\chenk\AppData\Local\Temp\dockforge-t068-22169890 ===
+  shot panel_open.png rect=(1100,0)-(1780,1012)
+A. open+sidecar: PASS (radios=2, sessions=4, media.has_session=False)
+B. endpoint volume: PASS (0.33 set, event logged, spike confirmed: 2. endpoint volume               : 0x00000000 level=0.330 muted=0)
+C. session volume: PASS (session[0] '进程 5432' -> 0.5)
+D. system stats: PASS (cpu=17.5% mem=97.4% used=15.1 GB)
+E. media control: PASS (no session; error surfaced, not silent)
+F. radio round trip: SKIPPED (needs -RadioRoundTrip; flips real hardware)
+  shot panel_after.png rect=(1100,0)-(1780,1012)
+G. hide: PASS (panel closed, sidecar gone, volume restored to 90%)
+=== T-068 probe: ALL PASS ===
