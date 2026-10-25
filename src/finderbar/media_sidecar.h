@@ -18,6 +18,7 @@
 #include <string>
 #include <vector>
 
+#include "platform/line_process.h"
 #include "platform/win_common.h"
 
 namespace dockforge::finderbar {
@@ -84,7 +85,7 @@ class MediaSidecarBridge {
     // Terminates the sidecar (close pipes + wait, hard-kill as backstop).
     void Stop();
 
-    bool running() const { return process_ != nullptr; }
+    bool running() const { return process_.running(); }
 
     // Writes one command line ("poll" / "media play" / "radio 1 1").
     bool SendCommand(const std::string& line);
@@ -101,10 +102,7 @@ class MediaSidecarBridge {
     bool ChildDied();
 
   private:
-    HANDLE out_read_ = nullptr;   // sidecar stdout
-    HANDLE in_write_ = nullptr;   // sidecar stdin
-    HANDLE process_ = nullptr;
-    std::string buffer_;
+    platform::LineProcess process_;
 };
 
 }  // namespace dockforge::finderbar

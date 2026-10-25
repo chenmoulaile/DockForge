@@ -582,7 +582,7 @@
   - [x] 设置窗口中可单独开关每个适配器 —— C-01 增 `integrations.message_counts.<id>.enabled`（默认开），Behavior 页两个复选框，热重载生效（探针 Part D 实测）
   - [x] 单测：适配器注册/注销、计数归零、目标进程退出 —— `tests/message_counts_test.cpp` 9 用例（注册/注销、单 id、变更才通知、节流、退出归零、Init 失败跳过、开关、CountForEntry 双身份、真实扫描降级、config roundtrip）
 - 证据: `evidence/T-065/`（probe.log 全 PASS：注册/计数 4→0/热重载开关 + 像素判定 589/589/0；test.log；spike 双日志）
-- 剩余工作：① `UserNotificationListener` 适配器随 T-076 通知中心一并落地（那里才有消费方与授权 UI 的意义）；② 微信/QQ 真机未读数长测（本会话两应用均未运行，仅验证了"未运行静默降级"路径与等价 probe 链路）；③ 强调色读取改 DPI/主题变更监听（当前进程内缓存）
+- 剩余工作: ① `UserNotificationListener` 的传输层已在 T-076 落地（`tools/notification_sidecar.cs` + `src/notifications/`），但**没有**做成 C-25 计数适配器：实测该源枚举的是「通知中心里还留着多少条」，微信/QQ 恒不出现（B-006），其余应用在连续两次枚举间 id 列表完全一致（62→62、63→63），即它不随用户读消息而下降——不是未读数，画到 Dock 上比标题解析更差。判定不实现，理由记录在此；② 微信/QQ 真机未读数长测（本会话两应用均未运行，仅验证了"未运行静默降级"路径与等价 probe 链路）；③ 强调色读取改 DPI/主题变更监听（当前进程内缓存）
 
 ### T-066 · Dock 文件夹穿透浏览器（P1 · 中高风险）
 
@@ -662,17 +662,35 @@
 
 ### T-076 · macOS 风格通知中心（P1 · 中风险）
 
-- 状态: TODO
+- 状态: DONE
 - 依赖: T-065
 - 上下文: `src/notifications/`、`ADR-0025`
 - DoD:
-  - [ ] **Spike 先行**：`UserNotificationListener` 需清单声明 `userNotificationListener` 能力；MSIX 打包前用非打包方式验证可用性，受限则降级为仅显示本应用通知
-  - [ ] 右上角 macOS 风格通知窗，支持堆叠、超时收起、点击跳转
-  - [ ] 通知窗使用与 Dock 一致的材质降级链（C-21）
-  - [ ] 与 Dock 图标红点联动：通知到达时对应图标短暂脉冲
-  - [ ] 通知历史面板（点击 Finder Bar 时钟区域展开），支持清除
-  - [ ] 通知数据仅存内存，不落盘、不采集内容
-- 证据: `evidence/T-076/`
+  - [x] **Spike 先行**：`UserNotificationListener` 需清单声明 `userNotificationListener` 能力；MSIX 打包前用非打包方式验证可用性，受限则降级为仅显示本应用通知
+  - [x] 右上角 macOS 风格通知窗，支持堆叠、超时收起、点击跳转
+  - [x] 通知窗使用与 Dock 一致的材质降级链（C-21）
+  - [x] 与 Dock 图标红点联动：通知到达时对应图标短暂脉冲
+  - [x] 通知历史面板（点击 Finder Bar 时钟区域展开），支持清除
+  - [x] 通知数据仅存内存，不落盘、不采集内容
+- 证据: `evidence/T-076/`（verify.txt 含逐条 DoD 与诚实边界）
+- 实现要点:
+  - 非打包进程 `GetAccessStatus=Allowed` 实测成立，无需 MSIX 清单，**未降级**。
+  - MinGW 直连 WinRT async 在 STA + 真实消息泵下仍恒 Started（spike_async_pump.log），
+    故 listener 住在 `tools/notification_sidecar.cs` 子进程里，复用 `platform::LineProcess`。
+  - 正文可读路径是 `Notification.Visual.Bindings[i].GetTextElements()[k].Text`；
+    文档里的 `Notification.Content` 在该投影不存在（spike_notif_text.log 实测）。
+  - C-21 由 `render::MaterialMonitor` 统一实现：全进程唯一 `GetSystemPowerStatus` 轮询点，
+    降级只降不升、恢复一次跳回；banner/panel 只订阅，不各自轮询。
+  - C-22 pulse 落在 `dock_view.cpp` 的 `PulseAlphaFor`（320ms×2，不循环），
+    优先级仍在 message_badge / progress_bar / weather_text 之后。
+- 诚实边界:
+  - 面板锚点暂挂主显示器工作区右上角（Finder Bar 属 M2，仍 TODO），沿用 T-068 先例；
+    M2 落地后只改锚点。
+  - 清除按钮的实机验证走 `-StubSidecar`（桩 sidecar）；真实 `ClearNotifications` 未被自动化跑过
+    （会清掉操作者机器上的真实通知），需要时加 `-ClearRoundTrip`。
+  - 点击跳转只做了代码路径 + 单测，未做真人鼠标点击的实机验证。
+  - C-21 的电池省电分支未被实机触发；实机跑到的是设备丢失分支。
+  - Launchpad / FolderPanel 仍未订阅 C-21（既有缺口，Launchpad 固定 Solid、FolderPanel 走 GDI）。
 
 ### T-085 · 社区主题分发替代方案（P1 · 低风险）
 

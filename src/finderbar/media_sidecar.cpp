@@ -1,4 +1,7 @@
 // DockForge - .NET sidecar bridge implementation (T-068, C-23).
+//
+// The pipe plumbing lives in platform::LineProcess since T-076 needed the same
+// transport for the notification sidecar; this file keeps only the protocol.
 #include "finderbar/media_sidecar.h"
 
 #include "core/paths.h"
@@ -114,122 +117,22 @@ std::wstring FormatMediaClock(long long ticks) {
 MediaSidecarBridge::~MediaSidecarBridge() { Stop(); }
 
 bool MediaSidecarBridge::Start(const std::wstring& exe_path) {
-    if (running()) return true;
-    std::wstring path = exe_path;
-    if (path.empty()) {
-        wchar_t self[MAX_PATH] = {};
-        if (GetModuleFileNameW(nullptr, self, MAX_PATH) == 0) return false;
-        std::wstring full(self);
-        const std::size_t slash = full.find_last_of(L"\\/");
-        if (slash == std::wstring::npos) return false;
-        path = full.substr(0, slash) + L"\\hw_sidecar.exe";
-    }
-    const DWORD attrs = GetFileAttributesW(path.c_str());
-    if (attrs == INVALID_FILE_ATTRIBUTES || (attrs & FILE_ATTRIBUTE_DIRECTORY)) {
-        DF_WARN("finderbar", "hw_sidecar.exe not found at %s",
+    const std::wstring path = platform::SiblingExecutablePath(exe_path, L"hw_sidecar.exe");
+    if (path.empty()) return false;
+    if (!process_.Start(path)) {
+        DF_WARN("finderbar", "hw_sidecar not started (missing or spawn failed): %s",
                 core::WideToUtf8(path).c_str());
         return false;
     }
-
-    SECURITY_ATTRIBUTES sa{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
-    HANDLE in_read = nullptr, out_write = nullptr;
-    if (!CreatePipe(&in_read, &in_write_, &sa, 0)) return false;
-    if (!CreatePipe(&out_read_, &out_write, &sa, 0)) {
-        CloseHandle(in_read);
-        CloseHandle(in_write_);
-        in_write_ = nullptr;
-        return false;
-    }
-    // Non-blocking reads on our end of the stdout pipe.
-    SetHandleInformation(out_read_, HANDLE_FLAG_INHERIT, 0);
-    SetHandleInformation(in_write_, HANDLE_FLAG_INHERIT, 0);
-
-    STARTUPINFOW si{};
-    si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESTDHANDLES;
-    si.hStdInput = in_read;
-    si.hStdOutput = out_write;
-    si.hStdError = out_write;
-    PROCESS_INFORMATION pi{};
-    std::wstring cmd = L"\"" + path + L"\"";
-    const BOOL ok = CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, TRUE,
-                                   CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
-    // The child owns its ends now regardless of the spawn result.
-    CloseHandle(in_read);
-    CloseHandle(out_write);
-    if (!ok) {
-        DF_WARN("finderbar", "CreateProcess(hw_sidecar) failed err=%lu", GetLastError());
-        CloseHandle(out_read_);
-        out_read_ = nullptr;
-        CloseHandle(in_write_);
-        in_write_ = nullptr;
-        return false;
-    }
-    CloseHandle(pi.hThread);
-    process_ = pi.hProcess;
-    DF_INFO("finderbar", "hw_sidecar started pid=%lu", pi.dwProcessId);
+    DF_INFO("finderbar", "hw_sidecar started pid=%lu", process_.pid());
     return true;
 }
 
-void MediaSidecarBridge::Stop() {
-    if (in_write_) {
-        // Graceful: let the sidecar see EOF and exit on its own.
-        CloseHandle(in_write_);
-        in_write_ = nullptr;
-        if (process_) WaitForSingleObject(process_, 2000);
-    }
-    if (process_) {
-        if (WaitForSingleObject(process_, 0) == WAIT_TIMEOUT) {
-            TerminateProcess(process_, 0);
-            WaitForSingleObject(process_, 2000);
-        }
-        CloseHandle(process_);
-        process_ = nullptr;
-    }
-    if (out_read_) {
-        CloseHandle(out_read_);
-        out_read_ = nullptr;
-    }
-    buffer_.clear();
-}
+void MediaSidecarBridge::Stop() { process_.Stop(); }
 
-bool MediaSidecarBridge::SendCommand(const std::string& line) {
-    if (!in_write_) return false;
-    const std::string raw = line + "\n";
-    DWORD written = 0;
-    if (!WriteFile(in_write_, raw.data(), static_cast<DWORD>(raw.size()), &written,
-                   nullptr) ||
-        written != raw.size()) {
-        return false;
-    }
-    FlushFileBuffers(in_write_);
-    return true;
-}
+bool MediaSidecarBridge::SendCommand(const std::string& line) { return process_.SendLine(line); }
 
-std::vector<std::string> MediaSidecarBridge::DrainLines() {
-    std::vector<std::string> lines;
-    if (!out_read_) return lines;
-    for (;;) {
-        DWORD available = 0;
-        if (!PeekNamedPipe(out_read_, nullptr, 0, nullptr, &available, nullptr)) {
-            return lines;  // pipe gone: child died
-        }
-        if (available == 0) break;
-        char chunk[4096];
-        const DWORD want = available < sizeof(chunk) ? available : sizeof(chunk);
-        DWORD got = 0;
-        if (!ReadFile(out_read_, chunk, want, &got, nullptr) || got == 0) break;
-        buffer_.append(chunk, got);
-    }
-    std::size_t nl;
-    while ((nl = buffer_.find('\n')) != std::string::npos) {
-        std::string line = buffer_.substr(0, nl);
-        buffer_.erase(0, nl + 1);
-        if (!line.empty() && line.back() == '\r') line.pop_back();
-        if (!line.empty()) lines.push_back(std::move(line));
-    }
-    return lines;
-}
+std::vector<std::string> MediaSidecarBridge::DrainLines() { return process_.DrainLines(); }
 
 SidecarState MediaSidecarBridge::PollSync(unsigned timeout_ms) {
     SidecarState state;
@@ -249,9 +152,6 @@ SidecarState MediaSidecarBridge::PollSync(unsigned timeout_ms) {
     return state;
 }
 
-bool MediaSidecarBridge::ChildDied() {
-    if (!process_) return true;
-    return WaitForSingleObject(process_, 0) != WAIT_TIMEOUT;
-}
+bool MediaSidecarBridge::ChildDied() { return process_.ChildDied(); }
 
 }  // namespace dockforge::finderbar

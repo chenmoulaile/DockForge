@@ -110,6 +110,20 @@ BadgeGeometry ComputeBadgeGeometry(const render::RectF& slot) {
     return badge;
 }
 
+// ---- notification pulse (T-076, C-22 pulse) ---------------------------------
+
+float PulseAlphaFor(double clock_ms, double start_ms) {
+    if (start_ms <= 0.0 || clock_ms < start_ms) return 0.0f;
+    const double elapsed = clock_ms - start_ms;
+    const double total = kPulsePeriodMs * static_cast<double>(kPulseRepeats);
+    if (elapsed >= total) return 0.0f;
+    // One beat = a full 0 -> 1 -> 0 ramp inside kPulsePeriodMs, so the ring
+    // swells and fades twice instead of blinking on and off twice. A hard on/off
+    // reads as an error light; a swell reads as "something just happened".
+    const double phase = std::fmod(elapsed, kPulsePeriodMs) / kPulsePeriodMs;
+    return static_cast<float>(std::sin(phase * 3.14159265358979));
+}
+
 // ---- progress bar (T-067, C-22 progress_bar) --------------------------------
 
 ProgressGeometry ComputeProgressGeometry(const render::RectF& slot, float fraction) {
@@ -613,6 +627,30 @@ bool DockPainter::Paint(ID2D1DeviceContext& dc, render::IRenderBackend& backend,
             // 2 DIP corner would otherwise describe a pill wider than the bar.
             const float radius = std::min(kProgressBarCornerDip, pg.bar.Width() * 0.5f);
             backend.FillRoundedRect(pg.bar, radius, color);
+        }
+
+        // Notification pulse (T-076, C-22 pulse), last in the priority chain:
+        // a badge, a progress bar or the weather text all outrank it, and it is
+        // suppressed while the tile is dragged (same phantom-app reasoning).
+        //
+        // A ring outside the slot rather than a tint over it: the icon has to stay
+        // recognisable while it pulses, and C-22 caps overlay coverage at 25% of
+        // the icon's area. PulseAlphaFor returns 0 once the two beats are over,
+        // so an expired pulse costs one branch and paints nothing.
+        if (tile.pulse_start_ms > 0.0 && tile.message_count <= 0 &&
+            tile.progress_state == shell::ProgressState::NoProgress && !tile.weather &&
+            i != drag_source) {
+            const float alpha = PulseAlphaFor(input.clock_ms, tile.pulse_start_ms);
+            if (alpha > 0.0f) {
+                // Geometry from the same slot rect the icon pass used (C-22).
+                const render::RectF ring{slot.left - kPulseRingOutsetDip,
+                                         slot.top - kPulseRingOutsetDip,
+                                         slot.right + kPulseRingOutsetDip,
+                                         slot.bottom + kPulseRingOutsetDip};
+                render::ColorF color = BadgeAccentColor();
+                color.a = alpha;
+                backend.StrokeRoundedRect(ring, ring.Width() * 0.5f, color, kPulseRingWidthDip);
+            }
         }
     }
 

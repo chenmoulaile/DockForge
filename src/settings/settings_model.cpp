@@ -49,6 +49,14 @@ constexpr FieldSpec kFields[] = {
     // integrations.message_counts.<adapter_id>.enabled.
     {"integrations.message_counts.weixin.exe.enabled", FieldSpec::Kind::Bool},
     {"integrations.message_counts.qq.exe.enabled", FieldSpec::Kind::Bool},
+    // T-076: the notification centre. Five rows, all C-01 keys of
+    // `notifications`. SameNotifications() is the owner's change detector, so
+    // an edit that lands on the stored value restarts nothing.
+    {"notifications.enabled", FieldSpec::Kind::Bool},
+    {"notifications.banner_enabled", FieldSpec::Kind::Bool},
+    {"notifications.pulse_icons", FieldSpec::Kind::Bool},
+    {"notifications.banner_timeout_seconds", FieldSpec::Kind::Int},
+    {"notifications.poll_seconds", FieldSpec::Kind::Int},
 };
 
 // Strips `prefix` and `suffix` off `field`, returning the id between them.
@@ -143,6 +151,13 @@ std::string SettingsModel::CurrentValueText(const core::Config& config,
             if (field == "launchpad.page_size") std::snprintf(buffer, sizeof(buffer), "%d", config.launchpad.page_size);
             if (field == "appearance.corner_radius") std::snprintf(buffer, sizeof(buffer), "%d", config.appearance.corner_radius);
             if (field == "weather.refresh_minutes") std::snprintf(buffer, sizeof(buffer), "%d", config.weather.refresh_minutes);
+            // T-076: both notification intervals are clamped by core, so the
+            // row shows what the loader would actually accept.
+            if (field == "notifications.banner_timeout_seconds")
+                std::snprintf(buffer, sizeof(buffer), "%d",
+                              config.notifications.banner_timeout_seconds);
+            if (field == "notifications.poll_seconds")
+                std::snprintf(buffer, sizeof(buffer), "%d", config.notifications.poll_seconds);
             // T-069: hotspot size reads the entry, or the catalog default when
             // the entry does not exist yet.
             {
@@ -170,6 +185,14 @@ std::string SettingsModel::CurrentValueText(const core::Config& config,
             if (field == "behavior.autostart") return config.behavior.autostart ? "1" : "0";
             if (field == "behavior.hide_taskbar") return config.behavior.hide_taskbar ? "1" : "0";
             if (field == "weather.enabled") return config.weather.enabled ? "1" : "0";
+            // T-076: the three notification switches. The banner and pulse
+            // defaults are ON so a user who only flips `enabled` gets the whole
+            // feature; reading them from config keeps the row honest.
+            if (field == "notifications.enabled") return config.notifications.enabled ? "1" : "0";
+            if (field == "notifications.banner_enabled")
+                return config.notifications.banner_enabled ? "1" : "0";
+            if (field == "notifications.pulse_icons")
+                return config.notifications.pulse_icons ? "1" : "0";
             // T-065: adapter switches default to ON when the id is absent.
             if (field == "integrations.message_counts.weixin.exe.enabled") {
                 const auto it = config.integrations.message_counts.find("weixin.exe");
@@ -264,6 +287,20 @@ int SettingsModel::Apply(core::Config& config, std::vector<std::string>* changed
                                       core::WeatherRefreshMinutesRange());
                     moved = target != config.weather.refresh_minutes;
                     config.weather.refresh_minutes = target;
+                } else if (edit.field == "notifications.banner_timeout_seconds") {
+                    // T-076: 2-30s. 0 would mean "vanish before it is read",
+                    // which is indistinguishable from a broken banner.
+                    target = ClampInt(static_cast<int>(value),
+                                      core::NotificationBannerTimeoutRange());
+                    moved = target != config.notifications.banner_timeout_seconds;
+                    config.notifications.banner_timeout_seconds = target;
+                } else if (edit.field == "notifications.poll_seconds") {
+                    // T-076: 1-30s. The floor is 1 because a 0-second poll is a
+                    // spin loop against a sidecar that answers in ~700ms.
+                    target = ClampInt(static_cast<int>(value),
+                                      core::NotificationPollRange());
+                    moved = target != config.notifications.poll_seconds;
+                    config.notifications.poll_seconds = target;
                 }
                 // T-069: hotspot size. The entry is created on first edit with
                 // the catalog's defaults (edge/corner/action) so a size edit
@@ -328,6 +365,15 @@ int SettingsModel::Apply(core::Config& config, std::vector<std::string>* changed
                 } else if (edit.field == "weather.enabled") {
                     moved = value != config.weather.enabled;
                     config.weather.enabled = value;
+                } else if (edit.field == "notifications.enabled") {
+                    moved = value != config.notifications.enabled;
+                    config.notifications.enabled = value;
+                } else if (edit.field == "notifications.banner_enabled") {
+                    moved = value != config.notifications.banner_enabled;
+                    config.notifications.banner_enabled = value;
+                } else if (edit.field == "notifications.pulse_icons") {
+                    moved = value != config.notifications.pulse_icons;
+                    config.notifications.pulse_icons = value;
                 } else if (edit.field.rfind("integrations.message_counts.", 0) == 0 &&
                            edit.field.size() > strlen("integrations.message_counts.") &&
                            edit.field.substr(edit.field.size() - strlen(".enabled")) ==

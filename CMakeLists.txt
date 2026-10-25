@@ -132,23 +132,73 @@ if(DOCKFORGE_BUILD_BENCH)
     endforeach()
   endif()
   if(DOCKFORGE_CSC)
+    # csc.exe splits any argument containing forward slashes, so a path like
+    # D:/MacDock/tools/x.cs arrives as a bare "x.cs" resolved against the build
+    # directory and the compile fails with CS1504. Every path handed to csc
+    # therefore goes through TO_NATIVE_PATH first - this is why a clean build
+    # of these two targets used to fail while an incremental one succeeded.
+    file(TO_NATIVE_PATH "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}" _df_csc_out_dir)
+    file(TO_NATIVE_PATH "${CMAKE_CURRENT_SOURCE_DIR}" _df_csc_src_dir)
     add_custom_command(OUTPUT "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/hw_sidecar.exe"
       COMMAND "${CMAKE_COMMAND}" -E make_directory
               "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
       COMMAND "${DOCKFORGE_CSC}" -nologo -target:exe
-              "-out:${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/hw_sidecar.exe"
+              "-out:${_df_csc_out_dir}\\hw_sidecar.exe"
               -r:System.Runtime.WindowsRuntime.dll
               -r:System.Runtime.InteropServices.WindowsRuntime.dll
-              -r:"C:/Windows/Microsoft.NET/Framework64/v4.0.30319/System.Runtime.dll"
-              -r:C:/Windows/System32/WinMetadata/Windows.Foundation.winmd
-              -r:C:/Windows/System32/WinMetadata/Windows.Media.winmd
-              -r:C:/Windows/System32/WinMetadata/Windows.Devices.winmd
-              "${CMAKE_CURRENT_SOURCE_DIR}/tools/hw_sidecar.cs"
+              "-r:C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\System.Runtime.dll"
+              "-r:C:\\Windows\\System32\\WinMetadata\\Windows.Foundation.winmd"
+              "-r:C:\\Windows\\System32\\WinMetadata\\Windows.Media.winmd"
+              "-r:C:\\Windows\\System32\\WinMetadata\\Windows.Devices.winmd"
+              "${_df_csc_src_dir}\\tools\\hw_sidecar.cs"
       DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tools/hw_sidecar.cs
       COMMENT "csc: hw_sidecar.exe (T-068 media/radio bridge)"
       VERBATIM)
     add_custom_target(hw_sidecar ALL
       SOURCES "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/hw_sidecar.exe")
+
+    # T-076 notification sidecar: UserNotificationListener's async calls never
+    # complete in this process even with RoInitialize(STA) and a real message
+    # pump (evidence/T-076/spike_async_pump.log stayed Started for 8s), so the
+    # listener lives in a .NET child and speaks the same line protocol as
+    # hw_sidecar. Same csc dependency, same degradation rule: without csc the
+    # centre runs with no history instead of failing the build.
+    add_custom_command(
+      OUTPUT "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/notification_sidecar.exe"
+      COMMAND "${CMAKE_COMMAND}" -E make_directory
+              "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
+      COMMAND "${DOCKFORGE_CSC}" -nologo -target:exe
+              "-out:${_df_csc_out_dir}\\notification_sidecar.exe"
+              -r:System.Runtime.WindowsRuntime.dll
+              -r:System.Runtime.InteropServices.WindowsRuntime.dll
+              "-r:C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\System.Runtime.dll"
+              "-r:C:\\Windows\\System32\\WinMetadata\\Windows.Foundation.winmd"
+              "-r:C:\\Windows\\System32\\WinMetadata\\Windows.UI.winmd"
+              "-r:C:\\Windows\\System32\\WinMetadata\\Windows.ApplicationModel.winmd"
+              "${_df_csc_src_dir}\\tools\\notification_sidecar.cs"
+      DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tools/notification_sidecar.cs
+      COMMENT "csc: notification_sidecar.exe (T-076 notification bridge)"
+      VERBATIM)
+    add_custom_target(notification_sidecar ALL
+      SOURCES "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/notification_sidecar.exe")
+
+    # T-076 clear-path stub: same line protocol, fixed two-row list, no WinRT.
+    # The probe points DOCKFORGE_NOTIFICATION_SIDECAR at this binary so the
+    # clear chain can be exercised end to end without wiping the operator's real
+    # Windows notification centre. Plain C++ because it must not depend on csc
+    # succeeding - the probe still needs it on a machine without a .NET SDK.
+    add_custom_command(
+      OUTPUT "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/notification_sidecar_stub.exe"
+      COMMAND "${CMAKE_COMMAND}" -E make_directory
+              "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
+      COMMAND "${CMAKE_CXX_COMPILER}" -std=c++17 -O2 -static
+              -o "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/notification_sidecar_stub.exe"
+              "${CMAKE_CURRENT_SOURCE_DIR}/spikes/T-076_notification_center/stub_sidecar.cpp"
+      DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/spikes/T-076_notification_center/stub_sidecar.cpp
+      COMMENT "g++: notification_sidecar_stub.exe (T-076 clear-path probe)"
+      VERBATIM)
+    add_custom_target(notification_sidecar_stub ALL
+      SOURCES "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/notification_sidecar_stub.exe")
   else()
     message(STATUS "hw_sidecar: csc.exe not found - media/radio controls will be unavailable")
   endif()

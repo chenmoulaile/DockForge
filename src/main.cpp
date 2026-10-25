@@ -31,6 +31,11 @@
 #include "finderbar/hardware_panel.h"
 #include "finderbar/media_sidecar.h"
 #include "finderbar/system_stats.h"
+#include "notifications/notification_banner.h"
+#include "notifications/notification_panel.h"
+#include "notifications/notification_sidecar.h"
+#include "notifications/notification_store.h"
+#include "notifications/notification_targets.h"
 #include "settings/settings_window.h"
 #include "platform/composition.h"
 #include "platform/display.h"
@@ -40,6 +45,9 @@
 #include "render/backend.h"
 #include "render/backdrop_capture.h"
 #include "render/material.h"
+#include "render/material_events.h"
+#include "render/material_monitor.h"
+#include "shell/app_launcher.h"
 #include "shell/app_resolver.h"
 #include "shell/drop_resolver.h"
 #include "shell/icon_cache.h"
@@ -1020,6 +1028,351 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         if (!ok) DF_WARN("core", "config watcher could not start; no hot reload this run");
         return ok;
     }();
+
+    // ---- notification centre (T-076, ADR-0025) ---------------------------
+    // Three owners, one job each:
+    //   * NotificationSidecarBridge - the .NET child that can actually complete
+    //     UserNotificationListener's async calls. T-065 measured that this
+    //     process never completes them; T-076 re-measured it with RoInitialize
+    //     (STA) and a real PeekMessage/DispatchMessage pump for 8s and the
+    //     status stayed Started (evidence/T-076/spike_async_pump.log).
+    //   * NotificationStore - the in-memory history and the "what is new" rule
+    //     (the first poll of a session is a baseline, not a burst of arrivals).
+    //   * NotificationBanner / NotificationPanel - two GDI windows in the
+    //     folder-panel family.
+    // Nothing here touches the disk except the probe channel, and the probe
+    // payloads carry counts only: ADR-0025 says notification content is not
+    // written anywhere, including our own evidence files.
+    notifications::NotificationSidecarBridge notif_sidecar;
+    notifications::NotificationStore notif_store;
+    notifications::NotificationBanner notif_banner;
+    notifications::NotificationPanel notif_panel;
+    // One clear implementation for the 清除 button and the probe command. Two
+    // copies would drift, and the probe would then be certifying a path the user
+    // never touches. Local clear comes first: the panel must empty even when the
+    // sidecar is gone, and the ids stay in the store's seen set so the next poll
+    // does not re-announce what the user just dismissed.
+    const auto notif_clear_history = [&](int dpi) {
+        notif_store.ClearLocal();
+        notif_panel.SetItems(&notif_store.items());
+        notif_panel.Refresh(dpi);
+        if (notif_sidecar.running()) notif_sidecar.RequestClear();
+        DF_INFO("notifications", "history cleared");
+    };
+    bool notif_ready = false;
+    if (notifications::NotificationBanner::RegisterWindowClass(instance) &&
+        notifications::NotificationPanel::RegisterWindowClass(instance) &&
+        notif_banner.Create(instance) && notif_panel.Create(instance)) {
+        notif_ready = true;
+        // C-21: both windows start at the tier the dock resolved at startup and
+        // follow MaterialMonitor from then on. Neither reads the power state.
+        notif_banner.SetMaterialTier(tier);
+        notif_panel.SetMaterialTier(tier);
+        notif_panel.SetItems(&notif_store.items());
+        notif_panel.SetAccessStatus(notif_store.access());
+        notif_panel.SetClearHandler([&] { notif_clear_history(window.Dpi()); });
+    } else {
+        DF_WARN("notifications", "banner/panel window creation failed; centre disabled");
+    }
+
+    // A banner click and a panel row click do the same thing: take the user to
+    // the app that posted the notification. A pinned app goes through the dock's
+    // own click path (which knows about minimize-on-second-click); an unpinned
+    // one is started from its AUMID, because "click the notification" must not be
+    // a no-op for an app the user never pinned.
+    const auto notif_activate = [&](const notifications::NotificationItem& item) {
+        std::vector<notifications::TileIdentity> identities;
+        identities.reserve(tiles.size());
+        for (const dock::DockTile& tile : tiles) {
+            identities.push_back(notifications::TileIdentity{tile.app.aumid,
+                                                             tile.app.display_name});
+        }
+        const int index = notifications::FindTileForNotification(item, identities);
+        if (index >= 0) {
+            const dock::DockTile& tile = tiles[static_cast<std::size_t>(index)];
+            const shell::ActionResult result = shell::ActivateOrMinimizeTimed(tile.app);
+            DF_INFO("notifications", "click -> tile[%d] %s (%s, pid=%lu)", index,
+                    core::WideToUtf8(tile.app.display_name).c_str(),
+                    shell::ToString(result.action),
+                    static_cast<unsigned long>(result.process_id));
+            return;
+        }
+        if (!item.aumid.empty()) {
+            shell::AppEntry entry;
+            entry.kind = shell::AppKind::Uwp;
+            entry.aumid = item.aumid;
+            entry.display_name = item.DisplayApp();
+            const shell::LaunchResult result = shell::Launch(entry);
+            DF_INFO("notifications", "click -> launch aumid '%s' (%s, ok=%d)",
+                    core::WideToUtf8(item.aumid).c_str(), result.route,
+                    result.ok() ? 1 : 0);
+            return;
+        }
+        DF_INFO("notifications", "click -> no target for '%s'",
+                core::WideToUtf8(item.DisplayApp()).c_str());
+    };
+    notif_banner.SetActivateHandler(notif_activate);
+    notif_panel.SetActivateHandler(notif_activate);
+
+    // The feature defaults off in config; the env flag can turn it on for a
+    // probe without editing the user's file (same rule as every other
+    // system-visible feature in this app). Not const: the settings window can
+    // flip it at runtime, and the tick block reads this same flag.
+    bool notif_enabled =
+        notif_ready && ReadEnvFlag(L"DOCKFORGE_NOTIFICATIONS", config.notifications.enabled);
+    std::wstring notif_sidecar_path;  // probe hook: point at a stub sidecar
+    {
+        wchar_t buffer[MAX_PATH]{};
+        const DWORD n = GetEnvironmentVariableW(L"DOCKFORGE_NOTIFICATION_SIDECAR", buffer,
+                                                ARRAYSIZE(buffer));
+        if (n > 0 && n < ARRAYSIZE(buffer)) notif_sidecar_path.assign(buffer, n);
+    }
+    notif_banner.model().SetTimeoutSeconds(config.notifications.banner_timeout_seconds);
+    // Starts at one full interval so the first poll happens on the first frame
+    // rather than after a delay: the panel would otherwise say "waiting" for
+    // `poll_seconds` with a sidecar already answering.
+    double notif_since_poll_ms = 1e9;
+    if (notif_enabled) {
+        if (notif_sidecar.Start(notif_sidecar_path)) {
+            DF_INFO("notifications", "centre ready pid=%lu poll=%ds timeout=%ds banner=%d pulse=%d",
+                    notif_sidecar.pid(), config.notifications.poll_seconds,
+                    config.notifications.banner_timeout_seconds,
+                    config.notifications.banner_enabled ? 1 : 0,
+                    config.notifications.pulse_icons ? 1 : 0);
+        } else {
+            DF_WARN("notifications", "sidecar did not start; centre shows no history this run");
+        }
+    } else {
+        DF_INFO("notifications", "disabled (notifications.enabled=%d ready=%d)",
+                config.notifications.enabled ? 1 : 0, notif_ready ? 1 : 0);
+    }
+
+    // C-21: one monitor for the whole process. Every window that uses a material
+    // subscribes to its events; none of them polls the power state (that is the
+    // contract, and the reason the monitor exists rather than each window reading
+    // GetSystemPowerStatus itself).
+    render::MaterialMonitor material_monitor(bus, [] { return render::ReadSystemPower(); });
+    material_monitor.SetBaseline(render::MaterialBaseline{requested, tier});
+    bus.Subscribe<core::MaterialDegraded>([&](const core::MaterialDegraded& event) {
+        DF_INFO("render", "material degraded %s -> %s: %s", core::ToString(event.from),
+                core::ToString(event.to), event.reason);
+        notif_banner.SetMaterialTier(event.to);
+        notif_panel.SetMaterialTier(event.to);
+        // The dock's own plate keeps its startup style (D2D resources are built
+        // around it), so the honest response is a repaint plus the log line the
+        // evidence probe reads - not a silent no-op.
+        InvalidateRect(window.Handle(), nullptr, FALSE);
+    });
+    bus.Subscribe<core::MaterialRestored>([&](const core::MaterialRestored& event) {
+        DF_INFO("render", "material restored to %s", core::ToString(event.to));
+        notif_banner.SetMaterialTier(event.to);
+        notif_panel.SetMaterialTier(event.to);
+        InvalidateRect(window.Handle(), nullptr, FALSE);
+    });
+
+    // Probe channel (T-076, same shape as the hardware panel's). Commands:
+    //   show | hide | toggle   banner + panel visibility is what these drive;
+    //                          `show` also opens the history panel
+    //   clear                  clears the local history and asks the sidecar
+    //   state                  writes DOCKFORGE_NOTIFICATIONS_STATE_FILE
+    //   push <app>|<title>|<body>
+    //                          injects a synthetic arrival through the exact
+    //                          banner + pulse path a real toast takes, so the
+    //                          visual behaviour is probeable without waiting
+    //                          for a real notification to arrive
+    // The state file carries counts and tiers only - never notification text
+    // (ADR-0025).
+    std::wstring notif_cmd_file;
+    std::wstring notif_state_file;
+    {
+        wchar_t buffer[MAX_PATH]{};
+        DWORD n = GetEnvironmentVariableW(L"DOCKFORGE_NOTIFICATIONS_CMD_FILE", buffer,
+                                          ARRAYSIZE(buffer));
+        if (n > 0 && n < ARRAYSIZE(buffer)) notif_cmd_file.assign(buffer, n);
+        n = GetEnvironmentVariableW(L"DOCKFORGE_NOTIFICATIONS_STATE_FILE", buffer,
+                                    ARRAYSIZE(buffer));
+        if (n > 0 && n < ARRAYSIZE(buffer)) notif_state_file.assign(buffer, n);
+        if (!notif_cmd_file.empty() || !notif_state_file.empty()) {
+            DF_INFO("notifications", "probe cmd=%s state=%s",
+                    notif_cmd_file.empty() ? "<none>"
+                                           : core::WideToUtf8(notif_cmd_file).c_str(),
+                    notif_state_file.empty() ? "<none>"
+                                             : core::WideToUtf8(notif_state_file).c_str());
+        }
+    }
+    auto write_notif_state_file = [&]() {
+        if (notif_state_file.empty()) return;
+        std::string json = "{\"enabled\":";
+        json += notif_enabled ? "true" : "false";
+        json += ",\"ready\":";
+        json += notif_ready ? "true" : "false";
+        json += ",\"sidecar\":";
+        json += notif_sidecar.running() ? "true" : "false";
+        json += ",\"pid\":";
+        json += std::to_string(notif_sidecar.pid());
+        json += ",\"count\":";
+        json += std::to_string(notif_store.size());
+        json += ",\"primed\":";
+        json += notif_store.primed() ? "true" : "false";
+        json += ",\"access\":\"";
+        json += notifications::ToString(notif_store.access());
+        json += "\",\"banner\":";
+        json += notif_banner.SnapshotJson();
+        json += ",\"panel\":";
+        json += notif_panel.SnapshotJson();
+        json += "}\n";
+        HANDLE h = CreateFileW(notif_state_file.c_str(), GENERIC_WRITE,
+                               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                               nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (h == INVALID_HANDLE_VALUE) return;
+        DWORD written = 0;
+        WriteFile(h, json.data(), static_cast<DWORD>(json.size()), &written, nullptr);
+        CloseHandle(h);
+    };
+    std::string notif_last_command;
+    double notif_cmd_since_read_ms = 1e9;
+    // Synthetic ids start above anything the sidecar reports so a probe push
+    // can never collide with a real notification id.
+    std::uint32_t notif_probe_id = 0xF0000000u;
+    // One delivery path for every notification, real toast or probe push. Two
+    // copies would drift, and the probe would then be certifying behaviour the
+    // shipped path does not have. The history feed is NOT part of this: a real
+    // arrival reaches the store through ApplyState, a probe push has to build a
+    // synthetic state because there may be no sidecar at all.
+    const auto notif_deliver = [&](const notifications::NotificationItem& item, bool* dirty) {
+        if (config.notifications.banner_enabled && notif_banner.model().Push(item)) {
+            notif_banner.Refresh(window.Dpi());
+        }
+        if (!config.notifications.pulse_icons) return;
+        // C-22 pulse: 320ms x2, driven by the shared clock. Only the tile this
+        // notification belongs to pulses; an unmatched toast pulses nothing,
+        // because a wrong pulse points the user at an app that did nothing.
+        std::vector<notifications::TileIdentity> identities;
+        identities.reserve(tiles.size());
+        for (const dock::DockTile& tile : tiles) {
+            identities.push_back(
+                notifications::TileIdentity{tile.app.aumid, tile.app.display_name});
+        }
+        const int index = notifications::FindTileForNotification(item, identities);
+        if (index < 0) return;
+        tiles[static_cast<std::size_t>(index)].pulse_start_ms = dock_clock_ms > 0.0 ? dock_clock_ms : 1.0;
+        if (dirty != nullptr) *dirty = true;
+        // The probe greps this line, so it must be emitted from the shared path
+        // rather than from the probe branch - otherwise the probe would be
+        // proving its own copy of the logic.
+        DF_DEBUG("notifications", "pulse tile[%d]", index);
+    };
+    auto read_notif_command = [&](double delta_ms) {
+        notif_cmd_since_read_ms += delta_ms;
+        if (notif_cmd_since_read_ms < 50.0) return;
+        notif_cmd_since_read_ms = 0.0;
+        if (notif_cmd_file.empty()) return;
+        HANDLE h = CreateFileW(notif_cmd_file.c_str(), GENERIC_READ,
+                               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                               nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (h == INVALID_HANDLE_VALUE) return;
+        char raw[1024]{};
+        DWORD got = 0;
+        const BOOL read_ok = ReadFile(h, raw, sizeof(raw) - 1, &got, nullptr);
+        CloseHandle(h);
+        if (!read_ok || got == 0) return;
+        raw[got] = '\0';
+        std::string content(raw);
+        while (!content.empty() &&
+               (content.back() == '\n' || content.back() == '\r' || content.back() == ' ')) {
+            content.pop_back();
+        }
+        // Full-content dedup, same as the hardware probe: the script appends a
+        // unique token line so repeated identical commands all arrive.
+        if (content.empty() || content == notif_last_command) return;
+        notif_last_command = content;
+        std::string command = content;
+        const std::size_t nl = command.find('\n');
+        if (nl != std::string::npos) command.resize(nl);
+        while (!command.empty() && (command.back() == '\r' || command.back() == ' ')) {
+            command.pop_back();
+        }
+        if (command.empty()) return;
+        // Log the verb only. `push` carries app|title|body, and ADR-0025 says
+        // notification text never reaches the log file - a probe command must
+        // obey the same rule as a real toast, or the evidence run itself would
+        // prove the leak.
+        const std::size_t verb_end = command.find(' ');
+        const std::string verb =
+            verb_end == std::string::npos ? command : command.substr(0, verb_end);
+        DF_INFO("notifications", "probe command=%s", verb.c_str());
+        if (command == "show") {
+            notif_panel.Open(window.Dpi());
+        } else if (command == "hide") {
+            notif_panel.Close();
+            notif_banner.model().Clear();
+            notif_banner.Hide();
+        } else if (command == "toggle") {
+            if (notif_panel.Visible()) {
+                notif_panel.Close();
+            } else {
+                notif_panel.Open(window.Dpi());
+            }
+        } else if (command == "clear") {
+            notif_clear_history(window.Dpi());
+        } else if (command == "material degrade" || command == "material restore") {
+            // C-21 has no UI of its own: the trigger is a real render device loss
+            // or the OS battery-saver flag, neither of which a probe can cause on
+            // demand. Driving MaterialMonitor::SetDeviceLost is the closest honest
+            // substitute - it runs the shipped evaluation, publishes the real
+            // events and moves the real windows, so the state file's banner.tier /
+            // panel.tier afterwards is evidence about the shipped chain, not about
+            // a probe-only branch.
+            material_monitor.SetDeviceLost(command == "material degrade");
+            notif_banner.Refresh(window.Dpi());
+            notif_panel.Refresh(window.Dpi());
+        } else if (command.rfind("push ", 0) == 0) {
+            // app|title|body - the pipe separator keeps the probe script to one
+            // line while still exercising the full DisplayApp/Headline/Detail
+            // fallback chain.
+            std::string payload = command.substr(5);
+            std::string app = payload;
+            std::string title;
+            std::string body;
+            const std::size_t first = payload.find('|');
+            if (first != std::string::npos) {
+                app = payload.substr(0, first);
+                const std::size_t second = payload.find('|', first + 1);
+                if (second == std::string::npos) {
+                    title = payload.substr(first + 1);
+                } else {
+                    title = payload.substr(first + 1, second - first - 1);
+                    body = payload.substr(second + 1);
+                }
+            }
+            notifications::NotificationItem item;
+            item.id = notif_probe_id++;
+            item.app = core::Utf8ToWide(app);
+            item.title = core::Utf8ToWide(title);
+            item.body = core::Utf8ToWide(body);
+            notif_deliver(item, nullptr);
+            // Also put it in the history so the panel screenshot shows a row:
+            // the store is normally fed by the sidecar, and a probe run may have
+            // no sidecar at all. Rebuilding a state from the current list keeps
+            // the two views consistent instead of letting them drift.
+            {
+                notifications::NotificationState synthetic;
+                synthetic.valid = true;
+                synthetic.access = notifications::AccessStatus::Allowed;
+                synthetic.items.push_back(item);
+                for (const notifications::NotificationItem& existing : notif_store.items()) {
+                    synthetic.items.push_back(existing);
+                }
+                synthetic.total = static_cast<int>(synthetic.items.size());
+                notif_store.ApplyState(synthetic, nullptr);
+                notif_panel.SetItems(&notif_store.items());
+                notif_panel.SetAccessStatus(notif_store.access());
+                notif_panel.Refresh(window.Dpi());
+            }
+        }
+        write_notif_state_file();
+    };
+
     std::string last_reload_reason;
     settings::SettingsWindow settings;
     bool settings_ready = false;
@@ -2004,6 +2357,45 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                 config.weather.refresh_minutes);
     });
 
+    // T-076: notification centre re-apply. Same rule as weather: only a real
+    // change against the running config acts. The sidecar is only started when
+    // the master switch flips on, so an interval edit never spawns a process.
+    bus.Subscribe<core::ConfigChanged>([&](const core::ConfigChanged& event) {
+        if (core::SameNotifications(config.notifications, event.config.notifications)) return;
+        const bool was_enabled = config.notifications.enabled;
+        config.notifications = event.config.notifications;
+        // Recompute from the same expression the startup block uses: the env
+        // flag still wins, so a probe that forced the centre on is not turned
+        // off by a config publish that carries the default (false).
+        notif_enabled =
+            notif_ready && ReadEnvFlag(L"DOCKFORGE_NOTIFICATIONS", config.notifications.enabled);
+        notif_banner.model().SetTimeoutSeconds(config.notifications.banner_timeout_seconds);
+        if (!notif_ready) return;
+        if (notif_enabled && !was_enabled && !notif_sidecar.running()) {
+            if (notif_sidecar.Start(notif_sidecar_path)) {
+                DF_INFO("notifications", "centre started pid=%lu", notif_sidecar.pid());
+            } else {
+                DF_WARN("notifications", "sidecar did not start after config change");
+            }
+        } else if (!config.notifications.enabled && notif_sidecar.running()) {
+            // Stop() closes stdin and the child exits on its own; the store is
+            // kept so the history the user was reading does not vanish the
+            // moment they un-tick the switch.
+            notif_sidecar.Stop();
+            notif_banner.model().Clear();
+            notif_banner.Hide();
+            notif_panel.Close();
+            DF_INFO("notifications", "centre stopped");
+        }
+        DF_INFO("notifications",
+                "config applied: enabled=%d banner=%d pulse=%d timeout=%ds poll=%ds",
+                config.notifications.enabled ? 1 : 0,
+                config.notifications.banner_enabled ? 1 : 0,
+                config.notifications.pulse_icons ? 1 : 0,
+                config.notifications.banner_timeout_seconds,
+                config.notifications.poll_seconds);
+    });
+
     // ---- OLE drop target (T-014) ----------------------------------------
     // The sink is a set of std::functions rather than a subclass because every piece
     // of state it needs is a local in this function, and threading a subclass through
@@ -2432,6 +2824,85 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                             config.hotspots[static_cast<std::size_t>(fired)].action.c_str());
                     RunShortcutAction(
                         config.hotspots[static_cast<std::size_t>(fired)].action);
+                }
+            }
+        }
+        // ---- notification centre (T-076) --------------------------------
+        // C-21: the monitor is ticked here rather than from a timer of its own
+        // so the whole process keeps exactly one clock (C-12).
+        material_monitor.Tick(delta_ms);
+        // Outside the notif_enabled guard on purpose: the probe channel must be
+        // able to open the panel and push a synthetic arrival on a machine where
+        // the feature is still switched off, which is exactly how the evidence
+        // screenshots are produced.
+        read_notif_command(delta_ms);
+        if (notif_enabled) {
+            notif_since_poll_ms += delta_ms;
+            // The sidecar answers a poll in 700-840ms (measured), so asking
+            // faster than the configured interval only queues work. The clamp
+            // lives in core::NotificationPollRange, not here.
+            const double poll_ms =
+                static_cast<double>(config.notifications.poll_seconds) * 1000.0;
+            if (notif_since_poll_ms >= poll_ms) {
+                notif_since_poll_ms = 0.0;
+                if (!notif_sidecar.running()) {
+                    // A crashed child is restarted at most once per poll
+                    // interval: a sidecar that dies on every poll must not turn
+                    // into a spawn loop.
+                    if (notif_sidecar.Start(notif_sidecar_path)) {
+                        DF_INFO("notifications", "sidecar restarted pid=%lu",
+                                notif_sidecar.pid());
+                    }
+                } else {
+                    notif_sidecar.RequestPoll();
+                }
+            }
+            const notifications::NotificationDrain drain = notif_sidecar.DrainEvents();
+            if (drain.ready) {
+                notif_store.set_access(drain.ready_access);
+                notif_panel.SetAccessStatus(drain.ready_access);
+                DF_INFO("notifications", "sidecar ready access=%s",
+                        notifications::ToString(drain.ready_access));
+            }
+            if (!drain.error.empty()) {
+                DF_WARN("notifications", "protocol: %s",
+                        core::WideToUtf8(drain.error).c_str());
+            }
+            for (const notifications::NotificationState& state : drain.states) {
+                std::vector<notifications::NotificationItem> arrived;
+                const bool changed = notif_store.ApplyState(state, &arrived);
+                notif_panel.SetAccessStatus(notif_store.access());
+                if (changed) {
+                    notif_panel.SetItems(&notif_store.items());
+                    dirty = true;
+                }
+                for (const notifications::NotificationItem& item : arrived) {
+                    // ADR-0025: the log is on disk, so it gets the sender and the
+                    // id and nothing else. Logging the headline would put the
+                    // user's message text in a file that outlives the session -
+                    // exactly what "in memory only" forbids.
+                    DF_INFO("notifications", "arrived id=%u app='%s'", item.id,
+                            core::WideToUtf8(item.DisplayApp()).c_str());
+                    notif_deliver(item, &dirty);
+                }
+            }
+            // The banner ages on its own clock: a card's timeout is a property
+            // of the card, not of the poll interval.
+            if (notif_banner.model().Tick(delta_ms)) {
+                notif_banner.Refresh(window.Dpi());
+            }
+            // A pulse that has finished still needs one repaint to erase its
+            // ring: PulseAlphaFor returns 0 after 640ms but the last painted
+            // frame still shows it.
+            for (std::size_t i = 0; i < tiles.size(); ++i) {
+                const double start = tiles[i].pulse_start_ms;
+                if (start <= 0.0) continue;
+                const double total = dock::kPulsePeriodMs * dock::kPulseRepeats;
+                if (dock_clock_ms - start < total) {
+                    dirty = true;  // keep frames coming while the ring is alive
+                } else {
+                    tiles[i].pulse_start_ms = 0.0;
+                    dirty = true;
                 }
             }
         }
@@ -3193,6 +3664,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     // a live composition target on a destroyed HWND is a shutdown hang, not a leak.
     if (launchpad_hotkey) UnregisterHotKey(window.Handle(), kLaunchpadHotkeyId);
     if (taskbar_hotkey) UnregisterHotKey(window.Handle(), kTaskbarRestoreHotkeyId);
+    // T-076: the sidecar is a child process with a stdin pipe; leaving it
+    // behind would keep a dotnet host alive after the dock is gone. Stop()
+    // closes stdin (the child exits on EOF) and terminates after 2s.
+    notif_sidecar.Stop();
+    notif_banner.Destroy();
+    notif_panel.Destroy();
     // T-069: every config-driven hotkey goes too - the DoD's "no system-level
     // residue" guarantee. The host's destructor would do the same; doing it
     // here keeps all three unregisters on the same lines of the shutdown path.

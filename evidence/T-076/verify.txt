@@ -1,0 +1,151 @@
+T-076 · macOS 风格通知中心 —— 验证记录
+======================================
+
+结论：DoD 六条全部落地。两条 DoD 有明确的验证边界，写在最后一节，不藏在中间。
+
+一、交付物
+----------
+新增 src/notifications/（10 个文件）：
+  notification_types.h/.cpp     sidecar 行协议解析 + 文本回落链（DisplayApp/Headline/Detail）
+  notification_store.h/.cpp     仅内存历史（40 条上限、首次 poll 只做基线、seen 集合防重播）
+  notification_sidecar.h/.cpp   子进程桥（FoldNotificationLines 纯函数 + LineProcess 封装）
+  notification_banner.h/.cpp    右上角堆叠通知窗（4 张上限、每卡独立超时、点击跳转）
+  notification_panel.h/.cpp     历史面板（8 行视窗、滚动、清除）
+  notification_targets.h/.cpp   AUMID 严格 + 显示名宽松的 tile 匹配
+新增 src/platform/line_process.h/.cpp：
+  从 media_sidecar.cpp 原样搬迁的子进程行管道，两处 sidecar 共用（hw_sidecar 的 14 用例 67 断言未受影响）。
+新增 src/render/material_events.h + material_monitor.h/.cpp：
+  C-21 契约的实现——全进程唯一电源轮询点，降级 mica→acrylic→blur→solid 只降不升，恢复一次跳回。
+新增 tools/notification_sidecar.cs：
+  UserNotificationListener 的 .NET 子进程（见二·1 的 spike 结论）。
+新增 spikes/T-076_notification_center/：
+  spike.cpp（async 泵边界探针）、notif_content_probe.cs、notif_text_probe.cs、stub_sidecar.cpp（清除路径的确定性替身）。
+新增 tools/notifications_probe.ps1：
+  十步实机探针，见三。
+新增 tests/notifications_test.cpp：
+  32 用例 181 断言。
+改动：
+  src/core/config.h/.cpp        NotificationsConfig 五键 + 范围 2..30 / 1..30 + SameNotifications
+  src/dock/dock_view.h/.cpp     C-22 pulse（320ms×2，PulseAlphaFor，DockTile.pulse_start_ms）
+  src/settings/settings_model.cpp + settings_window.cpp  Behavior 区五行
+  src/main.cpp                  sidecar 生命周期、poll 节流、投递、探针通道、C-21 接线（+477 行）
+  src/finderbar/media_sidecar.* 改为持有 platform::LineProcess（-124 行）
+  CMakeLists.txt                notification_sidecar 与 notification_sidecar_stub 两个 csc/g++ 目标；
+                                顺带修掉 csc 路径含正斜杠被当选项切开的既有 bug（见五·3）
+
+二、DoD 逐条
+------------
+1. Spike 先行 + 非打包可用性
+   evidence/T-076/spike_async_pump.log：
+     MinGW 直连 WinRT，STA + RoInitialize + 真实消息队列 + 8s PeekMessage/DispatchMessage 泵（400 轮）
+     → GetNotificationsAsync 恒 status=0 (Started)，永不完成。GetAccessStatus=1 (Allowed)。
+     结论：T-065 的 console 边界同样存在于 GUI 消息泵条件下，与是否泵消息无关。
+     因此 listener 必须住在 .NET 子进程里。
+   evidence/T-076/spike_notif_text.log：
+     .NET 投影下 GetAccessStatus=Allowed（非打包进程即可，不需要 MSIX 清单），
+     枚举 183ms / 62 条通知，二次枚举 id 列表完全一致（可用 id 去重）。
+     正文可读路径实测为 n.Notification.Visual.Bindings[i].GetTextElements()[k].Text
+     ——文档里的 Notification.Content 在这个投影不存在，按文档写会拿到空。
+   evidence/T-076/spike_sidecar_protocol.log：
+     最终 sidecar 二进制实测：ready 90ms access=1；poll 693-707ms count=63；
+     remove <未知 id> 回 {"ok":true}（RemoveNotification 对已消失的 id 不抛错）；
+     非法命令回 {"ok":false,"error":"bad command"}；quit 退出码 0。
+   → 非打包进程可用，无需降级到"仅本应用通知"。降级分支仍写进了 access=Denied 的文案里。
+
+2. 右上角通知窗：堆叠 / 超时收起 / 点击跳转
+   probe C 步：连推两条 → cards=2、窗口可见、新的在上（evidence/T-076/banner_two.png）。
+   probe D 步：不干预等 7s → cards=0 且窗口自隐（每卡独立计时，见 notification_banner.h 的注释）。
+   点击跳转：命中 dock 图标走 ActivateOrMinimizeTimed（与点图标同一条路径），
+   未命中且带 AUMID 则从 AUMID 启动，两者都不成立才记 no target。
+   本项只做了代码路径与单测（targets 六组用例），没有做真人鼠标点击的实机验证。
+
+3. 材质降级链与 Dock 一致（C-21）
+   实现：src/render/material_monitor.h/.cpp，全进程唯一 GetSystemPowerStatus 轮询点（5s），
+   banner 与 panel 只订阅事件，不自己读电源状态。
+   probe J 步（实机）：banner/panel tier 从 blur → solid → 回到 blur。
+   evidence/T-076/probe_real_sidecar.log 的 J 行：
+     "J. material chain: PASS (blur -> solid -> blur on both windows)"
+   边界：Dock 主板的 D2D 资源是围绕启动时 tier 建的，收到事件只重绘并记日志，不重建资源
+   （src/main.cpp:1161-1164 的注释）。这是既有实现，不是 T-076 引入的。
+
+4. 通知到达时 Dock 图标脉冲（C-22）
+   dock_view.cpp:115 PulseAlphaFor：sin 半波，320ms 一拍、两拍、不循环，640ms 后返回 0。
+   probe G 步（实机）：从启动日志读出 tile[0] 的真实名字再推同名通知，
+   命中 "pulse tile[0]" → PASS。日志来自共享投递函数，不是探针专属分支。
+
+5. 通知历史面板（点击 Finder Bar 时钟展开）+ 清除
+   面板：8 行视窗、滚轮滚动、行点击跳转、footer 清除（probe E 步，panel_open.png）。
+   锚点偏离 DoD 原文：Finder Bar 属 M2，仍 TODO，所以面板暂挂主显示器工作区右上角
+   ——沿用 T-068 硬件面板的先例（TASKS.md:628）。M2 落地后只需改锚点。
+   清除：probe F 步在 -StubSidecar 模式下跑通
+   （store 清空 + sidecar ack + 下一次 poll 空列表 + 面板保持打开且为空，panel_cleared_stub.png）。
+   默认模式跳过这一步，因为真实 ClearNotifications 会清掉操作者 Windows 通知中心里的真实通知；
+   加 -ClearRoundTrip 才会对真实 listener 执行。
+
+6. 仅内存、不落盘、不采集内容（ADR-0025）
+   probe H 步：把只在本脚本里存在的 marker 串塞进通知标题，然后 grep 运行期写过的每个文件
+   （日志、状态文件、config）——marker 一处都不出现。
+   状态文件与两个 SnapshotJson 只输出计数、tier、可见性和 access，不含任何通知文本。
+   本项曾真的失败过一次：探针命令的整行被写进日志，H 步抓到了（见五·2）。
+
+三、探针
+--------
+tools/notifications_probe.ps1，两种模式，都是 ALL PASS：
+  默认（真实 sidecar）：A B C D E G H I J 全 PASS，F 跳过。
+    evidence/T-076/probe_real_sidecar.log
+  -StubSidecar（桩 sidecar）：十步全 PASS，含 F。
+    evidence/T-076/probe_stub_clear.log
+    evidence/T-076/banner_two_stub.png、panel_open_stub.png、panel_cleared_stub.png
+
+四、单测与构建
+--------------
+构建：cmake --build build -j 8 → 全部目标 exit 0（evidence/T-076/build.log）
+      含 hw_sidecar / notification_sidecar / notification_sidecar_stub / DockForge / dockforge_tests。
+全量测试：All tests passed (4554 assertions in 448 test cases)，exit 0（evidence/T-076/test.log）
+T-076 专项：All tests passed (181 assertions in 32 test cases)，exit 0
+      （evidence/T-076/test_notifications.log）
+T-075 基线是 416 用例 4381 断言；本次净增 32 用例 173 断言。
+
+五、过程中修掉的真 bug（都不是 T-076 计划内的）
+----------------------------------------------
+1. notification_types.cpp 的 Trim 谓词极性写反：遇到非空格字符就删，等于把整串吃光。
+   症状是解析出的 app 非空但断言拿到空串、Detail() 返回 ""。单测抓到的。
+2. main.cpp 的探针命令把整行写进日志，含 push 的标题与正文——违反 ADR-0025。
+   probe H 步抓到的（这是 H 步存在的意义）。改成只记动词。
+   连带把 arrived 日志里的 title 字段去掉，只留 id 与 app。
+3. CMake 里 csc 的路径含正斜杠会被 csc 当成选项分隔符切开，
+   于是 tools\x.cs 到编译器只剩 x.cs、被解析到 build/ 下 → CS1504。
+   这是既有 bug（hw_sidecar 在干净构建下同样会失败，已复现确认），
+   修法是 file(TO_NATIVE_PATH ...) 后全部用反斜杠。增量构建掩盖了它很久。
+4. notification_panel.cpp 的 Relayout ↔ Refresh 无限互递归：面板可见时收到 push 就栈溢出，
+   进程无 crash 日志地当场消失。已复现（DEAD after push while panel visible）并修复，
+   修复后同一序列 ALIVE 且状态正确。
+5. 探针本身的两处不稳定：PowerShell 5.1 的 Set-Content -Encoding UTF8 会写 BOM 让首行命令失效；
+   固定 Start-Sleep 会抢在通知中心初始化之前。都改成了显式无 BOM 写入 + 轮询日志/文件时间戳。
+
+六、诚实边界
+------------
+1. 清除按钮的实机验证走的是桩 sidecar（-StubSidecar）。真实 UserNotificationListener
+   .ClearNotifications 本身没有被自动化跑过——它会清掉操作者机器上的真实通知，
+   不适合作为无人值守证据的一部分。要跑加 -ClearRoundTrip。
+2. 点击跳转只做了代码路径 + 单测，没有做真人鼠标点击 banner/行的实机验证。
+3. 面板锚点不是 Finder Bar 时钟（M2 未落地），暂挂工作区右上角，沿用 T-068 先例。
+4. C-21 的电池省电分支没有被实机触发（本机没有进入省电模式）；
+   实机跑到的是设备丢失分支（probe J 用 MaterialMonitor::SetDeviceLost 驱动）。
+5. Launchpad 与 FolderPanel 仍未订阅 C-21（Launchpad 本身就固定 Solid，
+   FolderPanel 用的是 GDI 自绘），所以"所有使用材质的窗口都订阅"这条契约目前
+   只对 Dock 主板与两个通知窗成立。这是既有缺口，记录在案。
+6. T-065 留下的"UserNotificationListener 计数适配器"没有实现，这是判定而非遗漏：
+   实测该源枚举的是通知中心里还留着的条数，微信/QQ 恒不出现（B-006），
+   其余应用在连续两次枚举间 id 列表完全一致（62→62、63→63），不随用户读消息下降。
+   拿它做未读数会得到一个只在用户手动清空通知中心时才动的数字。
+   理由同步写进 TASKS.md 的 T-065「剩余工作」。
+
+七、复现
+--------
+cmake -S . -B build
+cmake --build build -j 8
+build\bin\dockforge_tests.exe
+build\bin\dockforge_tests.exe "[notifications]"
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\notifications_probe.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\notifications_probe.ps1 -StubSidecar

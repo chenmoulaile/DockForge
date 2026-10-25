@@ -35,6 +35,12 @@ const std::unordered_set<std::string> kIntegrationsKeys = {"message_counts"};
 // T-075: the weather section owns exactly these keys.
 const std::unordered_set<std::string> kWeatherKeys = {"enabled", "provider", "city",
                                                       "refresh_minutes"};
+// T-076: the notification section. Five switches, no content - the notification
+// list itself never touches disk (ADR-0025).
+const std::unordered_set<std::string> kNotificationsKeys = {"enabled", "banner_enabled",
+                                                            "pulse_icons",
+                                                            "banner_timeout_seconds",
+                                                            "poll_seconds"};
 
 // Upper bound on the persisted tile list.
 //
@@ -483,26 +489,27 @@ json StripUnknownKeys(const json& source) {
     json result = json::object();
     if (!source.is_object()) return result;
 
-        for (const char* section :
-             {"dock", "appearance", "behavior", "launchpad", "integrations", "weather"}) {
+    for (const char* section : {"dock", "appearance", "behavior", "launchpad", "integrations",
+                                "weather", "notifications"}) {
         if (!source.contains(section) || !source[section].is_object()) continue;
         json section_out = json::object();
         const std::string name = section;
-        const auto& owned = name == "dock"           ? kDockKeys
-                            : name == "appearance"   ? kAppearanceKeys
-                            : name == "behavior"     ? kBehaviorKeys
-                            : name == "integrations" ? kIntegrationsKeys
-                            : name == "weather"      ? kWeatherKeys
-                                                     : kLaunchpadKeys;
+        const auto& owned = name == "dock"            ? kDockKeys
+                            : name == "appearance"    ? kAppearanceKeys
+                            : name == "behavior"      ? kBehaviorKeys
+                            : name == "integrations"  ? kIntegrationsKeys
+                            : name == "weather"       ? kWeatherKeys
+                            : name == "notifications" ? kNotificationsKeys
+                                                      : kLaunchpadKeys;
         PreserveUnknown(source[section], section_out, owned);
         if (!section_out.empty()) result[section] = section_out;
     }
-    // Top-level unknown keys. "hotkeys"/"hotspots" (T-069) and "weather"
-    // (T-075) are owned by the schema now, so they must NOT be
+    // Top-level unknown keys. "hotkeys"/"hotspots" (T-069), "weather" (T-075) and
+    // "notifications" (T-076) are owned by the schema now, so they must NOT be
     // double-preserved here.
     static const std::unordered_set<std::string> kTopKeys = {
         "dock", "appearance", "behavior", "launchpad", "integrations", "hotkeys", "hotspots",
-        "weather"};
+        "weather", "notifications"};
     PreserveUnknown(source, result, kTopKeys);
     return result;
 }
@@ -605,10 +612,18 @@ IntRange LaunchpadIconSizeRange() { return {48, 192}; }
 IntRange LaunchpadPageSizeRange() { return {10, 70}; }
 IntRange HotspotSizeRange() { return {1, 256}; }
 IntRange WeatherRefreshMinutesRange() { return {5, 360}; }
+IntRange NotificationBannerTimeoutRange() { return {2, 30}; }
+IntRange NotificationPollRange() { return {1, 30}; }
 
 bool SameWeather(const WeatherConfig& a, const WeatherConfig& b) {
     return a.enabled == b.enabled && a.provider == b.provider && a.city == b.city &&
            a.refresh_minutes == b.refresh_minutes;
+}
+
+bool SameNotifications(const NotificationsConfig& a, const NotificationsConfig& b) {
+    return a.enabled == b.enabled && a.banner_enabled == b.banner_enabled &&
+           a.pulse_icons == b.pulse_icons && a.banner_timeout_seconds == b.banner_timeout_seconds &&
+           a.poll_seconds == b.poll_seconds;
 }
 
 const char* ToString(FalloffCurve value) {
@@ -791,6 +806,24 @@ bool ClampConfig(Config& config) {
             changed = true;
         }
     }
+
+    // T-076: notification bounds. Both are seconds and both are hand-editable,
+    // so a "poll_seconds": 0 must not turn the poll loop into a spin.
+    {
+        const int timeout = ClampInt(config.notifications.banner_timeout_seconds,
+                                     NotificationBannerTimeoutRange(),
+                                     "notifications.banner_timeout_seconds");
+        if (timeout != config.notifications.banner_timeout_seconds) {
+            config.notifications.banner_timeout_seconds = timeout;
+            changed = true;
+        }
+        const int poll = ClampInt(config.notifications.poll_seconds, NotificationPollRange(),
+                                  "notifications.poll_seconds");
+        if (poll != config.notifications.poll_seconds) {
+            config.notifications.poll_seconds = poll;
+            changed = true;
+        }
+    }
     return changed;
 }
 
@@ -919,12 +952,30 @@ bool ParseConfig(const std::string& json_text, Config& out, std::string* error) 
     }
     parsed.unknown_keys_json = StripUnknownKeys(document).dump();
 
+    // T-076: the notification section. Same lenient shape: a wrong type warns and
+    // keeps the default rather than failing the whole file.
+    if (document.contains("notifications")) {
+        const auto& node = document["notifications"];
+        if (node.is_object()) {
+            bad_value |= ReadBool(node, "enabled", parsed.notifications.enabled);
+            bad_value |= ReadBool(node, "banner_enabled", parsed.notifications.banner_enabled);
+            bad_value |= ReadBool(node, "pulse_icons", parsed.notifications.pulse_icons);
+            bad_value |= ReadNumber(node, "banner_timeout_seconds",
+                                    parsed.notifications.banner_timeout_seconds);
+            bad_value |= ReadNumber(node, "poll_seconds", parsed.notifications.poll_seconds);
+        } else if (!node.is_null()) {
+            DF_WARN("core", "config notifications is not an object, keeping default");
+            bad_value = true;
+        }
+    }
+
     // Snapshot the raw parsed values so we can tell whether clamping actually
     // changed anything (that drives the rewrite decision together with enums).
     const DockConfig raw_dock = parsed.dock;
     const AppearanceConfig raw_appearance = parsed.appearance;
     const LaunchpadConfig raw_launchpad = parsed.launchpad;
     const WeatherConfig raw_weather = parsed.weather;
+    const NotificationsConfig raw_notifications = parsed.notifications;
 
     ClampConfig(parsed);
 
@@ -943,7 +994,8 @@ bool ParseConfig(const std::string& json_text, Config& out, std::string* error) 
         raw_launchpad.folders.size() != parsed.launchpad.folders.size() ||
         hotkeys_raw != parsed.hotkeys.size() ||
         hotspots_raw != parsed.hotspots.size() ||
-        !SameWeather(raw_weather, parsed.weather);
+        !SameWeather(raw_weather, parsed.weather) ||
+        !SameNotifications(raw_notifications, parsed.notifications);
 
     out = std::move(parsed);
     return true;
@@ -1043,6 +1095,24 @@ std::string SerializeConfig(const Config& config) {
             {"provider", config.weather.provider},
             {"city", config.weather.city},
             {"refresh_minutes", config.weather.refresh_minutes},
+        };
+    }
+
+    // T-076: same quiet-file rule. Note the DEFAULT of banner_enabled /
+    // pulse_icons is true, so they are compared against those defaults: a file
+    // where the user only turned the master switch on still records the two
+    // sub-switches explicitly, which is what a later "I turned pulse off"
+    // report needs to be diagnosable.
+    if (config.notifications.enabled || !config.notifications.banner_enabled ||
+        !config.notifications.pulse_icons ||
+        config.notifications.banner_timeout_seconds != 5 ||
+        config.notifications.poll_seconds != 2) {
+        document["notifications"] = {
+            {"enabled", config.notifications.enabled},
+            {"banner_enabled", config.notifications.banner_enabled},
+            {"pulse_icons", config.notifications.pulse_icons},
+            {"banner_timeout_seconds", config.notifications.banner_timeout_seconds},
+            {"poll_seconds", config.notifications.poll_seconds},
         };
     }
 

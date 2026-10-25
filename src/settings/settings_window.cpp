@@ -104,6 +104,17 @@ constexpr ControlRow kBehaviorRows[] = {
      ControlRow::Kind::Check, nullptr, 0},
     {"integrations.message_counts.qq.exe.enabled", L"Unread badge: QQ",
      ControlRow::Kind::Check, nullptr, 0},
+    // T-076: the notification centre. Master switch first, then the two
+    // presentation switches and the two intervals. Everything is off until
+    // `enabled` is ticked, so a fresh install never spawns a sidecar process
+    // the user did not ask for.
+    {"notifications.enabled", L"Notification centre", ControlRow::Kind::Check, nullptr, 0},
+    {"notifications.banner_enabled", L"Show banners (top-right)", ControlRow::Kind::Check,
+     nullptr, 0},
+    {"notifications.pulse_icons", L"Pulse the Dock icon", ControlRow::Kind::Check, nullptr, 0},
+    {"notifications.banner_timeout_seconds", L"Banner seconds (2-30)",
+     ControlRow::Kind::Edit, nullptr, 0},
+    {"notifications.poll_seconds", L"Poll seconds (1-30)", ControlRow::Kind::Edit, nullptr, 0},
 };
 
 // T-069 (C-24): the shortcut catalog as checkbox rows. A fresh config has no

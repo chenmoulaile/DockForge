@@ -139,6 +139,21 @@ struct WeatherConfig {
 
 bool SameWeather(const WeatherConfig& a, const WeatherConfig& b);
 
+// Notification centre (T-076, ADR-0025). OFF by default, and that default is
+// the whole privacy design: reading the system notification store means reading
+// other applications' message text, so the app does not even start the sidecar
+// until the user says yes. Nothing here is persisted notification CONTENT -
+// these are only the switches.
+struct NotificationsConfig {
+    bool enabled = false;             // master switch; false means no sidecar process
+    bool banner_enabled = true;       // top-right banner for newly arrived toasts
+    bool pulse_icons = true;          // C-22 pulse on the matching dock tile
+    int banner_timeout_seconds = 5;   // 2..30, how long a banner stays up
+    int poll_seconds = 2;             // 1..30, sidecar poll cadence while the dock runs
+};
+
+bool SameNotifications(const NotificationsConfig& a, const NotificationsConfig& b);
+
 struct Config {
     DockConfig dock;
     AppearanceConfig appearance;
@@ -153,6 +168,9 @@ struct Config {
     // T-075: weather widget. Off by default (outbound network), so a default
     // config.json carries no "weather" key either.
     WeatherConfig weather;
+    // T-076: notification centre. Off by default; a default config.json carries
+    // no "notifications" key.
+    NotificationsConfig notifications;
 
     // Raw JSON as loaded from disk. Unknown keys live here so that a
     // save round-trip never silently drops user data (C-01 实现约束).
@@ -205,6 +223,8 @@ IntRange LaunchpadIconSizeRange();
 IntRange LaunchpadPageSizeRange();
 IntRange HotspotSizeRange();
 IntRange WeatherRefreshMinutesRange();
+IntRange NotificationBannerTimeoutRange();
+IntRange NotificationPollRange();
 
 // Hotspot enum <-> string helpers (C-24 canonical spellings).
 const char* ToString(HotspotEdge value);

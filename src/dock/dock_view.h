@@ -78,6 +78,25 @@ inline constexpr render::ColorF kProgressErrorColor{0xE8 / 255.0f, 0x11 / 255.0f
 inline constexpr render::ColorF kProgressPausedColor{0xFF / 255.0f, 0xB9 / 255.0f,
                                                      0x00 / 255.0f, 1.0f};  // #FFB900
 
+// ---- notification pulse (T-076, C-22 pulse) ---------------------------------
+// Contract text: 320ms, twice, never looping. A pulse that repeated until the
+// user clicked would be a strobe light on a dock that is visible all day; two
+// beats are enough to catch peripheral vision and then stop.
+//
+// What it draws: a ring just outside the icon's slot, not a fill over it. C-22
+// caps overlay coverage at 25% of the icon's area, and a badge or a progress
+// bar already earns its space - a third opaque element on a 48 DIP icon would
+// bury the artwork the user is trying to recognise.
+inline constexpr double kPulsePeriodMs = 320.0;
+inline constexpr int kPulseRepeats = 2;
+inline constexpr float kPulseRingWidthDip = 2.0f;
+inline constexpr float kPulseRingOutsetDip = 2.5f;
+
+// Alpha of the pulse ring at `clock_ms` for a pulse that began at `start_ms`.
+// Returns 0.0 once both beats are over (or when the pulse never started), so
+// the painter needs no separate "is it done" state.
+float PulseAlphaFor(double clock_ms, double start_ms);
+
 // Progress overlay geometry for one painted slot, in window DIP. `track` is
 // the full-width lane at the icon's bottom inside edge; `bar` is the filled
 // part for `fraction` (clamped 0..1).
@@ -179,6 +198,12 @@ struct DockTile {
     // never apply. The snapshot itself lives in DockPaintInput (one widget,
     // not per-tile data).
     bool weather = false;
+    // Notification arrival marker (T-076, C-22 pulse). Written by the main loop
+    // when a notification for this app arrives; the painter draws the ring for
+    // 320ms twice and then stops on its own. 0.0 means "never pulsed", which is
+    // the same as a finished pulse (PulseAlphaFor returns 0 for both), so a
+    // freshly built tile needs no initialisation.
+    double pulse_start_ms = 0.0;
 };
 
 // FNV-1a over the UTF-16 source string. Only needs to be collision-resistant
