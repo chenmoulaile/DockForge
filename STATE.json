@@ -1,14 +1,14 @@
 {
     "project": "DockForge",
     "schema": 1,
-    "milestone": "M3",
-    "last_task": "T-052",
-    "last_commit": "16b2340",
-    "current_module": "settings",
-    "current_task": "T-050",
+    "milestone": "M5",
+    "last_task": "T-060",
+    "last_commit": "d35ba8e",
+    "current_module": "core",
+    "current_task": "T-060",
     "counters": {
-        "total": 23,
-        "done": 23,
+        "total": 24,
+        "done": 24,
         "partial": 0,
         "blocked": 0
     },
@@ -128,7 +128,9 @@
         "探针不得用物理窗口 rect 反算期望列数：scale=2.0 时必然算错，要读 app 日志里自己报的 viewport（DIP）再代入 C-18 公式",
         "PowerShell 5.1 的 -NoProfile 会话没有任何程序集被加载过，[System.Windows.Forms.SystemInformation] 必须显式 Add-Type -AssemblyName System.Windows.Forms，否则报 Unable to find type",
         "FrameClock 是 1000 样本滚动窗，p99 必须在 frames>=1000 之后读，否则仍含启动首帧（实测 frames=377 时 19.6ms，frames=1000 后 16.5ms）",
-        "TASKS.md / CONTRACTS.md 在 HEAD 中是 UTF-8 无 BOM + LF；用 WriteAllText 写中文后必须把 CRLF 归一化成 LF，否则 git diff 会把整文件标成改动"
+        "TASKS.md / CONTRACTS.md 在 HEAD 中是 UTF-8 无 BOM + LF；用 WriteAllText 写中文后必须把 CRLF 归一化成 LF，否则 git diff 会把整文件标成改动",
+        "PowerShell function 参数名 $Args 与自动变量同名会被吞：实测 [string[]]$Args 绑定恒为 count=0，schtasks /tn 静默丢失退化成整库查询 rc=0；参数必须改名（T-060 探针 9 个假阴性全部源于此）",
+        "schtasks /create /sc onlogon 非提升必拒（Access denied，/rl limited 与 /ru 变体同拒）；COM ITaskFolder::RegisterTaskDefinition + LogonTrigger + TASK_LOGON_INTERACTIVE_TOKEN 非提升可注册（T-060 spike 实测，注册成员在 ITaskFolder 不在 ITaskService，MinGW 成员名 get_Xml/GetTask）"
     ],
-    "updated_at": "2026-10-25T10:55:00+08:00"
+    "updated_at": "2026-10-25T11:59:00+08:00"
 }
