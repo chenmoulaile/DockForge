@@ -7,6 +7,7 @@
 #include "core/app_loop.h"
 #include "core/config.h"
 #include "core/config_reload.h"
+#include "core/theme.h"
 #include "core/event_bus.h"
 #include "core/frame_clock.h"
 #include "core/log.h"
@@ -325,6 +326,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     const bool dpi_forced_by_env = platform::Window::DpiOverride() != 0;
 
     core::Config config = core::LoadConfig();
+    // Theme lens (T-052): config.json stores base values; the pack's overrides
+    // apply at runtime only. A pack that fails to resolve leaves the config as
+    // loaded and the dock keeps its current look (never black).
+    if (!core::LoadThemeInto(config.appearance.theme, config, nullptr)) {
+        DF_WARN("core", "theme '%s' unavailable; running with base values",
+                config.appearance.theme.c_str());
+    }
     DF_INFO("app", "config: icon_size=%d gap=%d mag=%.2f falloff=%s material=%s corner=%d",
             config.dock.icon_size, config.dock.gap,
             static_cast<double>(config.dock.magnification),
@@ -1129,6 +1137,21 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     };
     apply_region();
 
+    // Dock refresh on ConfigChanged (T-051/T-052): the settings window's flush
+    // and the hot reload both publish synchronously inside the tick, so this
+    // handler runs on the frame path. It re-applies the theme lens (the event
+    // carries the base snapshot) and rebuilds the click region; the per-frame
+    // layout reads `config` directly, so everything else follows on the next
+    // frame with no extra work.
+    bus.Subscribe<core::ConfigChanged>([&](const core::ConfigChanged& event) {
+        std::string theme_error;
+        if (!core::LoadThemeInto(event.config.appearance.theme, config, &theme_error)) {
+            DF_WARN("core", "theme '%s' unavailable; base values in effect",
+                    event.config.appearance.theme.c_str());
+        }
+        apply_region();
+    });
+
     // ---- OLE drop target (T-014) ----------------------------------------
     // The sink is a set of std::functions rather than a subclass because every piece
     // of state it needs is a local in this function, and threading a subclass through
@@ -1555,6 +1578,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
             const core::ReloadVerdict verdict = core::ReloadConfigFromDisk(config, next, &reason);
             if (verdict == core::ReloadVerdict::Adopted) {
                 config = std::move(next);
+                std::string theme_error;
+                if (!core::LoadThemeInto(config.appearance.theme, config, &theme_error)) {
+                    DF_WARN("core", "theme '%s' unavailable after reload; base values in effect",
+                            config.appearance.theme.c_str());
+                }
                 DF_INFO("core", "config reloaded (%s); publishing ConfigChanged", reason.c_str());
                 bus.Publish(core::ConfigChanged{config});
                 dirty = true;

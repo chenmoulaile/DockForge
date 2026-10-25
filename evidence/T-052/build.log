@@ -1,0 +1,15 @@
+[ 60%] Built target dockforge_lib
+[ 63%] Built target DockForge
+[ 68%] Built target layout_bench
+[ 68%] Building CXX object CMakeFiles/dockforge_tests.dir/tests/theme_test.cpp.obj
+[ 69%] Linking CXX executable bin\dockforge_tests.exe
+[100%] Built target dockforge_tests
+[  1%] Building CXX object CMakeFiles/dockforge_lib.dir/src/core/theme.cpp.obj
+[  2%] Linking CXX static library libdockforge_lib.a
+[ 60%] Built target dockforge_lib
+[ 62%] Linking CXX executable bin\DockForge.exe
+[ 63%] Linking CXX executable bin\layout_bench.exe
+[ 65%] Linking CXX executable bin\dockforge_tests.exe
+[ 66%] Built target layout_bench
+[ 68%] Built target DockForge
+[100%] Built target dockforge_tests

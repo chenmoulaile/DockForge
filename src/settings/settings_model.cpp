@@ -16,7 +16,7 @@ struct FieldSpec {
     const char* name;
     // Kind discriminator: int/float ranges come from core, enums parse by name,
     // bools parse 0/1/false/true.
-    enum class Kind { Int, Float, Bool, Position, Material, Falloff } kind;
+    enum class Kind { Int, Float, Bool, Position, Material, Falloff, Theme } kind;
 };
 
 // The field table is the single place a settings control maps onto C-01. The
@@ -33,6 +33,7 @@ constexpr FieldSpec kFields[] = {
     {"launchpad.icon_size", FieldSpec::Kind::Int},
     {"launchpad.page_size", FieldSpec::Kind::Int},
     {"appearance.material", FieldSpec::Kind::Material},
+    {"appearance.theme", FieldSpec::Kind::Theme},
     {"appearance.corner_radius", FieldSpec::Kind::Int},
     {"behavior.autostart", FieldSpec::Kind::Bool},
     {"behavior.hide_taskbar", FieldSpec::Kind::Bool},
@@ -115,6 +116,8 @@ std::string SettingsModel::CurrentValueText(const core::Config& config,
             return core::ToString(config.appearance.material);
         case FieldSpec::Kind::Falloff:
             return core::ToString(config.dock.hover_falloff);
+        case FieldSpec::Kind::Theme:
+            return config.appearance.theme;
     }
     return std::string(buffer);
 }
@@ -224,6 +227,17 @@ int SettingsModel::Apply(core::Config& config, std::vector<std::string>* changed
                 if (!parsed) break;
                 moved = value != config.dock.hover_falloff;
                 config.dock.hover_falloff = value;
+                break;
+            }
+            case FieldSpec::Kind::Theme: {
+                // Any non-empty token is a legal theme id; an unknown one is
+                // rejected at lens time (LoadThemeInto falls back) rather than
+                // here, so the combo can list packs the loader will validate.
+                const std::string value = edit.text;
+                parsed = !value.empty() && value.find_first_of(" 	") == std::string::npos;
+                if (!parsed) break;
+                moved = value != config.appearance.theme;
+                config.appearance.theme = value;
                 break;
             }
         }

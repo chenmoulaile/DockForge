@@ -396,7 +396,7 @@
 - 证据: `evidence/T-051/`（verify.txt、build.log 0 警告、test.log 3395 断言全绿、探针 verdict=PASS）
 
 ### T-052 · 主题包加载与切换
-- 状态: TODO
+- 状态: DONE
 - 优先级: P1
 - 依赖: T-051
 - 预估: 1 会话

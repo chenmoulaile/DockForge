@@ -314,3 +314,20 @@ LaunchpadWatcher 指向 ConfigPath 真实父目录（300ms 防抖）；tests/con
 Open 用新值；dock tiles 的增删重建属 T-052/Dock 重构。
 
 - 下轮开始于：T-052 主题包加载与切换
+
+## 2026-10-25T10:50:00+08:00 | T-052 | DONE
+
+**产物**：`src/core/theme.{h,cpp}`（C-02 解析、themeable 白名单、extends 链、失败回退、
+内置 default/dark、ListThemes）、schema 加性扩展 `appearance.theme`、主题镜头三处应用
+（启动/热重载/订阅）、设置窗口 Theme 动态下拉、tests/theme_test.cpp 8 例。
+
+**实测**：构建 0 警告；单测 3436 断言 / 284 用例全绿；探针 verdict=PASS——dark 切换
+持久化、ghost 回退存活、default 恢复。
+
+**顺带修掉**：LoadThemeInto 终结包走 break 落进失败路径的重写笔误；探针读盘与
+300ms 防抖的竞态（改为轮询）。
+
+**诚实边界**：v1 主题面只有度量键无色值（dark = material solid），色值键属 v1.1；
+事件载荷=基值快照，镜头由 main 消费前应用；preview.png/icons 未消费（T-085）。
+
+- 下轮开始于：T-060 开机自启（M5）

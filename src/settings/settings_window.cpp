@@ -1,5 +1,7 @@
 #include "settings/settings_window.h"
 
+#include "core/theme.h"
+
 #include "core/log.h"
 #include "core/paths.h"
 
@@ -77,6 +79,9 @@ constexpr ControlRow kLaunchpadRows[] = {
 constexpr ControlRow kAppearanceRows[] = {
     {"appearance.material", L"Material", ControlRow::Kind::Combo, kMaterialChoices, 4},
     {"appearance.corner_radius", L"Corner radius (0-40)", ControlRow::Kind::Edit, nullptr, 0},
+    // choices == nullptr marks the one dynamic combo: its items come from
+    // core::ListThemes() at creation time, not from a static table.
+    {"appearance.theme", L"Theme", ControlRow::Kind::Combo, nullptr, 0},
 };
 
 constexpr ControlRow kBehaviorRows[] = {
@@ -334,9 +339,18 @@ void SettingsWindow::CreateControls() {
                                               reinterpret_cast<HMENU>(
                                                   static_cast<INT_PTR>(next_id)),
                                               instance_, nullptr);
-                    for (int c = 0; c < row.choice_count; ++c) {
-                        SendMessageW(control, CB_ADDSTRING, 0,
-                                     reinterpret_cast<LPARAM>(row.choices[c]));
+                    if (row.choices != nullptr) {
+                        for (int c = 0; c < row.choice_count; ++c) {
+                            SendMessageW(control, CB_ADDSTRING, 0,
+                                         reinterpret_cast<LPARAM>(row.choices[c]));
+                        }
+                    } else if (row.field == std::string("appearance.theme")) {
+                        // Dynamic: the theme list is whatever is installed now.
+                        for (const std::string& theme : core::ListThemes()) {
+                            const std::wstring wide = core::Utf8ToWide(theme);
+                            SendMessageW(control, CB_ADDSTRING, 0,
+                                         reinterpret_cast<LPARAM>(wide.c_str()));
+                        }
                     }
                     break;
                 }

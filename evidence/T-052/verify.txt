@@ -1,0 +1,39 @@
+﻿DockForge T-052 · 主题包加载与切换 — 验证报告
+=================================================
+日期: 2026-10-25  环境: MinGW-w64 (ADR-0002)
+
+一、产物
+--------
+- src/core/theme.{h,cpp}: C-02 theme.json 解析（name/author/version/extends/overrides）、
+  themeable 键白名单（C-01/C-18 冻结面：material/corner_radius/dock 度量/launchpad 度量；
+  tiles/hidden/extra_paths/folders/page_size/behavior 明确不可主题化）、extends 链
+  （基先行、深度 5 上限、环检测）、失败回退（配置原样保留，Dock 不变黑）、内置
+  default/dark 两套（dark = material solid——C-01 v1 无色值键，v1.1 缺口已记录）、
+  ListThemes（内置永远在前 + 目录扫描）
+- schema 增量: appearance.theme（加性扩展，旧二进制按未知键回写保留，向后兼容）
+- 主题镜头（lens）位于 main.cpp：启动、热重载采纳后、ConfigChanged 订阅三处应用；
+  config.json 只存基值，包覆盖仅运行时生效（切换主题不会残留旧包的覆盖值）
+- 设置窗口: Appearance 区新增 Theme 动态下拉（core::ListThemes() 填充），走既有
+  防抖保存链
+- tests/theme_test.cpp: 8 例（键白名单、覆盖应用+忽略、钳制、内置解析、缺失回退、
+  extends 链、环拒绝、损坏文件拒绝）
+
+二、实际执行的命令与结果
+------------------------
+1) 构建: exit=0, warning=0
+2) 测试: All tests passed (3436 assertions in 284 test cases)
+3) 实机探针: tools/theme_probe.ps1（隔离 config）verdict=PASS：
+   - set appearance.theme dark → flush saved=1、内置包解析（无 WARN）、config 回读 dark
+   - set appearance.theme ghost-theme → 镜头 WARN 回退、进程存活
+   - 恢复 default → config 回读 default（第二轮修复了读盘时序——固定 sleep 输给
+     300ms 防抖，改为轮询 config 文件本身）
+
+三、诚实边界
+------------
+- v1 主题面 = C-01 冻结的度量键（material/corner_radius/尺寸），没有色值——"dark"
+  目前表现为 material solid，真正的暗色视觉需要 C-01 v1.1 的色值键（roadmap）。
+- C-20 事件载荷是基值快照；主题镜头由 main 在消费前应用（订阅处理器内），
+  已在代码注释与本文档声明。
+- 预览图（C-02 的 preview.png）与 icons/ 目录本轮未消费，属主题浏览器 T-085。
+
+- 下轮开始于：T-060 开机自启（M5）

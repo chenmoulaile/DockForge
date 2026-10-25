@@ -41,6 +41,11 @@ struct DockConfig {
 struct AppearanceConfig {
     MaterialLevel material = MaterialLevel::Mica;
     int corner_radius = 22;  // 0..40 px @100% DPI
+    // Active theme pack id (T-052, C-02). "default" applies nothing. This is
+    // an additive v1 schema extension: old binaries round-trip it as an unknown
+    // key, and the theme lens in main applies the pack's overrides at runtime
+    // only - config.json always stores the user's base values.
+    std::string theme = "default";
 };
 
 struct BehaviorConfig {

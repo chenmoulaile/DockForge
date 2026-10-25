@@ -24,7 +24,7 @@ using json = nlohmann::json;
 const std::unordered_set<std::string> kDockKeys = {
     "icon_size", "gap", "magnification", "hover_falloff",
     "influence_radius", "falloff_sharpness", "position", "tiles", "hidden"};
-const std::unordered_set<std::string> kAppearanceKeys = {"material", "corner_radius"};
+const std::unordered_set<std::string> kAppearanceKeys = {"material", "corner_radius", "theme"};
 const std::unordered_set<std::string> kBehaviorKeys = {"autostart", "hide_taskbar"};
 const std::unordered_set<std::string> kLaunchpadKeys = {"extra_paths", "columns", "icon_size",
                                                        "page_size", "folders"};
@@ -553,6 +553,15 @@ bool ParseConfig(const std::string& json_text, Config& out, std::string* error) 
         const auto& node = document["appearance"];
         bad_value |= ReadNumber(node, "corner_radius", parsed.appearance.corner_radius);
         bad_value |= ReadEnum(node, "material", ParseMaterial, parsed.appearance.material);
+        if (node.contains("theme")) {
+            const auto& value = node.at("theme");
+            if (value.is_string()) {
+                parsed.appearance.theme = value.get<std::string>();
+                if (parsed.appearance.theme.empty()) parsed.appearance.theme = "default";
+            } else {
+                bad_value = true;
+            }
+        }
     }
 
     if (document.contains("behavior") && document["behavior"].is_object()) {
@@ -620,6 +629,7 @@ std::string SerializeConfig(const Config& config) {
     document["appearance"] = {
         {"material", ToString(config.appearance.material)},
         {"corner_radius", config.appearance.corner_radius},
+        {"theme", config.appearance.theme},
     };
     document["behavior"] = {
         {"autostart", config.behavior.autostart},
