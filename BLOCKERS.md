@@ -8,8 +8,13 @@
 - **已尝试**：`gh auth status`（失败）；网络可达性已验证（`https://api.github.com` 返回 200）。
 - **重试次数**：1
 - **影响**：所有任务 commit 正常，push 步骤 SKIPPED 并在 STATE.json 记录。
-- **所需帮助**：人类执行 `gh auth login`（或提供已有 remote URL / PAT），之后单条命令即可补齐：
-  `gh repo create DockForge --private --source=. --remote=origin --push`
+- **所需帮助**：人类执行 `gh auth login`（或提供已有 remote URL / PAT），之后单条命令即可补齐。
+- **更新（2026-10-25）**：用户要求"新开一个公开 GitHub 项目并推送"。当前 `gh auth status`
+  仍为未登录，Agent 无法代办（登录是交互式流程）。解锁只需一步：
+  **`gh auth login`（在终端里按提示走浏览器授权）**，然后 Agent 或用户执行：
+  `gh repo create DockForge --public --source=. --remote=origin --push`
+  （若想要私有仓库把 --public 换成 --private；推送内容已含全部源码/测试/证据/文档，
+  evidence/ 与 spikes/ 是否公开由 P3 的 C-10 排除清单在正式发布前再清理）。
 
 ## B-002 · 无 MSVC / Windows SDK / Windows App SDK
 - **状态**：RESOLVED（ADR-0002）
