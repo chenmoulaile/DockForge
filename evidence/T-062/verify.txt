@@ -1,0 +1,122 @@
+T-062 · 崩溃转储与日志轮转 — 验证记录（verify.txt）
+日期: 2026-10-25  环境: Windows 10.0.26300 x64, g++ (MSYS2 mingw-w64) 15.2.0,
+cmake 4.4.2 (MinGW Makefiles), 本机单屏 2880x1920 @192 DPI
+
+==========================================================================
+1. 实际执行的检查与原始结果
+==========================================================================
+
+[1] 门禁（build + 全量单测，最终态）
+    命令: powershell -NoProfile -ExecutionPolicy Bypass -File tools/gate.ps1 -Action all
+    退出码: 0
+    输出尾部: All tests passed (3755 assertions in 319 test cases)
+    全文见 build_test.log。新增 tests/log_rotation_test.cpp 15 用例（82 断言）。
+    T-061 基线 3485 断言 / 304 用例 -> 3755 / 319，仅增不减。
+
+[2] spike（实现前实测，spikes/t062_dump/）
+    命令: g++ -std=c++20 -O2 -Wall -o spike.exe spike.cpp -ldbghelp   (退出 0)
+          ./spike.exe > spike_run.txt 2>&1                            (故意崩溃)
+    原始输出（spike_run.txt / spike-marker.txt 已归档）:
+      head filter: dumped=1 err=0 ms=62 file=spike-crash-3484.dmp
+      exit_code=139           # bash 对 0xC0000005 的映射
+      wall_ms=1741
+      tail filter ran: taskbar-restore step executed
+    file(1) 识别: "Mini DuMP crash report, 13 streams"
+    结论: Q1 MinGW -ldbghelp 可链接；Q2 转储 62ms（预算 2000ms 的 3%）；
+          Q3 无 WER 挂起直接退出；Q4 prev 过滤器只能在安装时经返回值捕获、
+          转发链工作；Q5 有存活工作线程时 dump 照常。
+    逐问题结论与实现依据: spikes/t062_dump/findings.md
+
+[3] 实机探针（tools/log_rotation_probe.ps1，本会话最后一次运行）
+    命令: powershell -NoProfile -ExecutionPolicy Bypass -File tools/log_rotation_probe.ps1
+    退出码: 0, verdict=PASS failures=0（全文见 probe.txt）
+    摘要（数字为最后一次运行的原始输出）:
+      A 尺寸轮转  cap=20000B spin=150000B -> 8 个文件（primary + 序号 1..7），
+                  每个文件 <= 20000+300B 容差
+      B 按期清理  DOCKFORGE_LOG_KEEP_DAYS=1 -> 昨天/30 天前文件均被删除，今天的保留
+      C 窗口保留  默认 14 天 -> 5 天前文件保留
+      D 真实崩溃  DockForge.exe + DOCKFORGE_TASKBAR_CRASH_TEST=1 ->
+                  exit -1073741819 (0xC0000005)，wall 4346ms（armed 3s + 启动）；
+                  dump 119964 bytes 于 DOCKFORGE_DUMP_DIR；
+                  crash-dump.txt 标记 dumped=1 ms=150（预算 2000ms）；
+                  taskbar-crash.txt 增长 => T-061 tail 过滤器经转发链照常执行
+      E About 按钮  真实窗口树枚举到 'Open log folder' 按钮(vis=True)，
+                  BM_CLICK 后 app 日志出现
+                  "[settings] opened log folder (...logs-e)"，
+                  且 CabinetWClass 窗口标题 'logs-e - 文件资源管理器' 打开并被关闭
+                  截图 E1-about-open-log-folder.png（PrintWindow，含按钮）
+    说明: Part D 的 dump 由真实产品代码写入（src/core/crash_dump.cpp 过滤器），
+    探针只做断言；Part A/B/C 由 build/bin/log_probe.exe 驱动与产品完全相同的
+    Logger（src/core/log.cpp），尺寸/保留上限经 DOCKFORGE_LOG_MAX_BYTES /
+    DOCKFORGE_LOG_KEEP_DAYS 注入，因此无需等待真实 10MB / 14 天。
+
+[4] dump 可打开性（补充）
+    file(1) 识别 13 streams（spike 与产品 dump 同一 MiniDumpWriteDump 参数集）。
+    未做 WinDbg/VS 加载验证 —— 本机无调试器，见下节。
+
+==========================================================================
+2. 交付物
+==========================================================================
+  src/core/crash_dump.{h,cpp}   SetUnhandledExceptionFilter 链尾安装 dump 过滤器
+                                （MiniDumpNormal + 异常指针，QPC 计时写 marker，
+                                转发给 prev 过滤器）；SetErrorMode 抑制 WER 弹窗
+  src/core/log_rotation.{h,cpp} 纯逻辑决策：文件名生成/解析、ShouldRollBySize、
+                                DayOrdinal、ExpiredLogFiles（全部单测）
+  src/core/log.{h,cpp}          Logger 集成：同日超限续写 dockforge-YYYYMMDD-N.log、
+                                跨天滚动时清理、启动时清理；上限 env 可覆盖
+  src/core/paths.{cpp,h}        DOCKFORGE_LOG_DIR / DOCKFORGE_DUMP_DIR 隔离覆盖
+                                （与 DOCKFORGE_CONFIG_PATH 同约定）
+  src/settings/settings_window.{cpp,h}
+                                About 页 'Open log folder' 按钮 + pane 子类化
+  src/main.cpp                  InstallCrashDumper() 接线（在 InstallTaskbarCrashRecovery
+                                之后，链序承载语义）
+  tools/log_probe.cpp           日志轮转探针宿主（CMake target log_probe）
+  tools/log_rotation_probe.ps1  五段实机探针
+  tests/log_rotation_test.cpp   15 用例
+  spikes/t062_dump/             spike.cpp + findings.md + 运行输出
+
+==========================================================================
+3. 探针过程中发现并修复的产品缺陷（本次任务外收益）
+==========================================================================
+设置窗口的所有控件通知自 T-050 起从未到达主窗口：控件 parent 是 STATIC 容器
+pane，BUTTON/EDIT/COMBOBOX 的 WM_COMMAND 只发给直接 parent，而系统 STATIC
+窗口过程不向上转发。此前 T-050/T-051/T-060/T-061 的探针全部走 RecordEdit 文件
+通道，绕过了真实控件通知路径，因此从未暴露。真实用户点击设置控件等于无效。
+修复: SettingsWindow::SubclassPane —— pane 子类化转发 WM_COMMAND 给主窗口
+（src/settings/settings_window.cpp，SetPropW 保存原过程）。
+证据: 探针 run5 修复前 BM_CLICK 后 app 日志无 'opened log folder'；修复后同一
+命令日志出现该行且 Explorer 窗口真实打开（probe.txt Part E）。
+
+==========================================================================
+4. 诚实边界 / 未验证项
+==========================================================================
+- dump 的符号化调试器加载验证未做：本机无 WinDbg/cdb/lldb。dump 被工具识别为
+  合法 Mini DuMP（13 streams）+ 源码用标准 API + spike 同参数集成功，但
+  "能在调试器里打开看到调用栈" 这一步未实测。
+- MiniDumpWriteDump 无超时参数：2 秒预算靠 MiniDumpNormal + 实测背书
+  （spike 62ms / 探针 150/171/120/109ms），不是可强制的看门狗。若未来实测
+  超预算需评估看门狗线程方案（spikes/t062_dump/findings.md 已记录）。
+- 真实 10MB / 14 天路径未等真实时间与容量：通过 env 覆盖（20000B / 1 天 /
+  默认 14 天窗口）实测同一代码分支；产品默认值常量在 log_rotation.h 与
+  Logger::Init 直接可读，无独立分支。
+- C-07 契约原文"保留 7 天"与 T-062 DoD"保留 14 天"冲突：按 DoD 执行并在
+  CONTRACTS.md C-07 追加演进注记（保留 14 天 + 10MB 上限，T-062 起）。
+- 探针 Part D 会让真实 app 崩溃一次（0xC0000005），崩溃转储与 taskbar-crash.txt
+  标记写入本机真实 %LOCALAPPDATA%（T-061 探针既有行为，无隔离通道可写）。
+- SetUnhandledExceptionFilter 覆盖不了 abort()/CRT terminate（T-061 已声明，
+  DoD 只要求未处理异常路径）。
+
+==========================================================================
+5. 会话内迭代记录（探针自身缺陷，产品代码最终零未诊断问题）
+==========================================================================
+- run1: E1 设置窗口未找到 —— PowerShell 5.1 把 P/Invoke string 参数 $null 编组
+  为 ""（非 NULL）：FindWindowW(cls,"") 只匹配空标题窗口；FindWindowExW(..,$null,..)
+  直接 ERROR_INVALID_NAME(123)。改 [NullString]::Value。
+- run3/run4: 扫描不到按钮且 sweep 类名全部单字符（cls=D/cls=S）——
+  W6.GetClassNameW 缺 CharSet.Unicode，ANSI 编组进 W 函数（T-061 同款陷阱）。
+- run6: pane 子类化修复第一次编译失败（static 成员访问 hwnd_），探针跑了旧
+  二进制 —— 门禁 build 输出里有 error 行，本轮起每次先确认 build 干净。
+- run7: BM_CLICK 生效但 Explorer 标题精确匹配失败 —— 实测标题为
+  "logs-e - 文件资源管理器"（含本地化后缀），改 CONTAINS 匹配。
+- 截图两次抓到浏览器 —— SetForegroundWindow 从后台被拒（项目已知 gotcha），
+  改 PrintWindow(PW_RENDERFULLCONTENT)，与遮挡无关。

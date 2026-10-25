@@ -21,6 +21,18 @@ std::wstring KnownFolder(REFKNOWNFOLDERID id) {
     return result;
 }
 
+// Env override, same isolation contract as ConfigPath()/DOCKFORGE_CONFIG_PATH:
+// probes and tests point logs (and dumps) at a scratch directory instead of
+// the developer's real profile. Returns an empty string when unset.
+std::wstring EnvDirOverride(const wchar_t* name) {
+    wchar_t buffer[1024] = {};
+    const DWORD written = GetEnvironmentVariableW(name, buffer, static_cast<DWORD>(std::size(buffer)));
+    if (written > 0 && written < std::size(buffer)) {
+        return std::wstring(buffer, written);
+    }
+    return {};
+}
+
 }  // namespace
 
 std::wstring ConfigDir() {
@@ -53,6 +65,12 @@ std::wstring ThemesDir() { return ConfigDir() + L"\\themes"; }
 
 std::wstring LogsDir() {
     static const std::wstring cached = [] {
+        // Probe/test isolation (T-062): DOCKFORGE_LOG_DIR repoints the daily
+        // log directory, mirroring DOCKFORGE_CONFIG_PATH.
+        if (std::wstring overridden = EnvDirOverride(L"DOCKFORGE_LOG_DIR");
+            !overridden.empty()) {
+            return overridden;
+        }
         std::wstring base = KnownFolder(FOLDERID_LocalAppData);
         if (base.empty()) return std::wstring(L"DockForge\\logs");
         return base + L"\\DockForge\\logs";
@@ -61,6 +79,12 @@ std::wstring LogsDir() {
 }
 
 std::wstring DumpsDir() {
+    // Not cached: the crash filter reads this at crash time, and probes point
+    // DOCKFORGE_DUMP_DIR at a scratch directory for one run at a time.
+    if (std::wstring overridden = EnvDirOverride(L"DOCKFORGE_DUMP_DIR");
+        !overridden.empty()) {
+        return overridden;
+    }
     std::wstring base = KnownFolder(FOLDERID_LocalAppData);
     if (base.empty()) return L"DockForge\\dumps";
     return base + L"\\DockForge\\dumps";

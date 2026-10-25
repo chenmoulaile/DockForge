@@ -14,7 +14,7 @@
 | M2 | Finder Bar | 顶部栏 | TODO |
 | M3 | Launchpad | 全屏网格启动器 | DONE (T-040/T-041/T-042 全部完成) |
 | M4 | 配置与主题 | 热重载 + 主题包 | TODO |
-| M5 | 系统集成 | 自启、隐藏任务栏、转储、日志轮转 | TODO |
+| M5 | 系统集成 | 自启、隐藏任务栏、转储、日志轮转 | DONE（T-060/T-061/T-062 全部 DONE） |
 | M6 | Stage Manager | 窗口分组与切换 | TODO |
 | M7 | 质量加固与分发 | 冒烟测试、性能基准、安装包 | TODO |
 
@@ -440,16 +440,17 @@
 - 备注: 探针第一版 FAIL(9) 全部为脚本自身缺陷（P/Invoke FindWindowExW 缺 CharSet.Unicode，ANSI 编组使命中类名恒失败，显/隐断言两个方向同时说谎），修正后产品代码零改动重跑 PASS；决策层 ForceShowTaskbar 与显隐决策矩阵进了单元测试（fake backend，10 用例）
 
 ### T-062 · 崩溃转储与日志轮转
-- 状态: TODO
+- 状态: DONE
 - 优先级: P1
 - 依赖: T-002（日志基础设施）
 - 预估: 1 会话
 - DoD:
-  - [ ] `MiniDumpWriteDump` 在未处理异常时写 minidump 到 `%LOCALAPPDATA%\DockForge\dumps\`
-  - [ ] 日志按天轮转，保留 14 天，单文件上限 10MB
-  - [ ] 设置窗口「关于」页提供「打开日志目录」
-  - [ ] 人为触发一次崩溃，验证 dump 生成且不阻塞退出
-- 证据: `evidence/T-062/`
+  - [x] `MiniDumpWriteDump` 在未处理异常时写 minidump 到 `%LOCALAPPDATA%\DockForge\dumps\` —— `core::InstallCrashDumper()` 装在 SetUnhandledExceptionFilter 链尾（prev 过滤器只能在安装时经返回值捕获，spike Q4 实证），崩溃时先写 `MiniDumpNormal` dump 再转发给 T-061 taskbar 恢复过滤器；目录 paths.cpp `DumpsDir()`，可用 `DOCKFORGE_DUMP_DIR` 隔离
+  - [x] 日志按天轮转，保留 14 天，单文件上限 10MB —— T-002 已有按天切分；同日超限续写 `dockforge-YYYYMMDD-N.log`，超龄文件启动/跨天时删除；决策函数纯逻辑（`core/log_rotation.cpp`）15 用例单测；上限 env 可覆盖；C-07 契约加演进注记（覆盖原 7 天）
+  - [x] 设置窗口「关于」页提供「打开日志目录」—— About 页 'Open log folder' 按钮；实机探针 BM_CLICK 后 app 日志出现 `opened log folder` 且 Explorer 窗口真实打开；截图 PrintWindow 归档
+  - [x] 人为触发一次崩溃，验证 dump 生成且不阻塞退出 —— 探针 Part D 真实 0xC0000005：dump 119964 bytes、写入耗时 150ms（预算 2000ms）、进程 4.3s 内退出（armed 3s + 启动）、无 WER 挂起（SetErrorMode 抑制）、T-061 tail 过滤器经转发链照常执行（taskbar-crash.txt 增长）
+- 证据: `evidence/T-062/`（verify.txt、probe.txt verdict=PASS、build_test.log 3755 断言全绿、E1 截图、spike 输出；spike 本体 `spikes/t062_dump/`）
+- 备注: 本任务修掉一个 T-050 以来的真实产品缺陷——设置窗口控件 parent 是 STATIC 容器，子控件 WM_COMMAND 被系统 STATIC 过程吞掉，真用户点击设置控件从未生效（此前探针全走 RecordEdit 文件通道掩盖了它）；已按 pane 子类化转发修复（settings_window.cpp SubclassPane）。转储 2 秒预算靠 MiniDumpNormal + 实测背书（spike 62ms / 探针 109-171ms），MiniDumpWriteDump 无超时参数，见 spikes/t062_dump/findings.md。
 
 ## M6 · Stage Manager（P2）
 

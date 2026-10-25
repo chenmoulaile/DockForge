@@ -77,6 +77,8 @@ class SettingsWindow {
     void FlushPending();
     void PaintNav();
     void RestartDebounceTimer();
+    void OpenLogsDirectory();     // T-062 About-page action button
+    static void SubclassPane(HWND pane, HWND owner);  // forwards child WM_COMMAND to owner
 
     HWND hwnd_ = nullptr;
     HWND nav_ = nullptr;
@@ -87,6 +89,7 @@ class SettingsWindow {
     int active_section_ = 0;
     bool updating_controls_ = false;  // suppresses EN_CHANGE while echoing
     HFONT ui_font_ = nullptr;
+    int open_logs_id_ = 0;  // control id of the About-page action button (T-062)
 
     // One HWND per bound field, keyed by the dotted C-01 name. Static labels are
     // not in here - they carry no state.

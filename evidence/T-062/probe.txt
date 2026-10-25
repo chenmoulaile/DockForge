@@ -1,0 +1,42 @@
+== T-062 crash dump + log rotation probe 2026-10-25T13:01:03.6254206+08:00 ==
+exe=build\bin\DockForge.exe probe=build\bin\log_probe.exe temp=C:\Users\chenk\AppData\Local\Temp\dockforge-t062-4262281 os=Microsoft Windows NT 10.0.26300.0
+--- Part A: size roll (cap 20000 bytes via DOCKFORGE_LOG_MAX_BYTES) ---
+A1 files: dockforge-20261025.log, dockforge-20261025-1.log, dockforge-20261025-2.log, dockforge-20261025-3.log, dockforge-20261025-4.log, dockforge-20261025-5.log, dockforge-20261025-6.log, dockforge-20261025-7.log
+A1 ok: 8 files (primary + sequences)
+A2 ok: primary dockforge-20261025.log present
+A3 ok: sequences contiguous 1..7
+A4 ok: every file <= 20000 + 300 line tolerance
+--- Part B: age prune, DOCKFORGE_LOG_KEEP_DAYS=1 ---
+B1 files after run: dockforge-20261025.log
+B1 ok: yesterday's file deleted
+B2 ok: 30-days-ago file deleted
+B3 ok: today's file kept
+--- Part C: default keep 14 days keeps a 5-day-old file ---
+C1 ok: 5-days-ago file kept under default keep 14
+--- Part D: real crash -> minidump, no blocked exit ---
+D1 ok: process exited, code -1073741819, wall 4367ms
+D2 ok: exit code -1073741819 (0xC0000005)
+D3 ok: crash -> exit did not hang
+D4 ok: dump written: dockforge-crash-20261025-130107.dmp (118892 bytes)
+D5 ok: dump size > 10KB
+D6 ok: marker dumped=1
+D7 ok: dump write took 148ms (budget 2000ms)
+D8 ok: T-061 tail filter ran (taskbar-crash.txt grew) - chain intact
+--- Part E: About page 'Open log folder' button ---
+[E1] section about, locate the button
+E1 scanned top-level child windows: 6
+E1 sweep: top#1 cls=DockForgeSettingsNav children=0
+E1 sweep: top#2 cls=Static children=8
+E1 sweep: top#3 cls=Static children=6
+E1 sweep: top#4 cls=Static children=6
+E1 sweep: top#5 cls=Static children=4
+E1 sweep:   hwnd=264900 vis=False text='Start with Windows'
+E1 sweep:   hwnd=853382 vis=False text='Hide the taskbar'
+E1 sweep: top#6 cls=Static children=6
+E1 sweep:   hwnd=919844 vis=True text='Open log folder'
+E1 ok: 'Open log folder' push button found in the About pane
+shot: E1-about-open-log-folder.png (PrintWindow)
+[E2] BM_CLICK -> Explorer opens the logs directory
+E2 ok: Explorer window opened for the logs dir, title='logs-e - 文件资源管理器'
+cleanup: Explorer window closed
+== verdict=PASS failures=0 ==

@@ -43,7 +43,7 @@ target_link_libraries(dockforge_lib PUBLIC thirdparty_nlohmann)
 
 target_link_libraries(dockforge_lib PUBLIC
   user32 gdi32 shell32 shlwapi ole32 oleaut32 uuid dwmapi
-  d2d1 dwrite dcomp psapi advapi32 d3d11 dxgi shcore taskschd)
+  d2d1 dwrite dcomp psapi advapi32 d3d11 dxgi shcore taskschd dbghelp)
 
 # ---------------------------------------------------------------- executable
 add_executable(DockForge ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp)
@@ -91,5 +91,13 @@ if(DOCKFORGE_BUILD_BENCH)
   target_link_libraries(autostart_probe PRIVATE dockforge_lib)
   if(MINGW)
     target_link_options(autostart_probe PRIVATE -static-libgcc -static-libstdc++)
+  endif()
+
+  # T-062 log-rotation probe: drives the production Logger against a scratch
+  # directory (DOCKFORGE_LOG_DIR) so size/age rotation is observable in seconds.
+  add_executable(log_probe ${CMAKE_CURRENT_SOURCE_DIR}/tools/log_probe.cpp)
+  target_link_libraries(log_probe PRIVATE dockforge_lib)
+  if(MINGW)
+    target_link_options(log_probe PRIVATE -static-libgcc -static-libstdc++)
   endif()
 endif()

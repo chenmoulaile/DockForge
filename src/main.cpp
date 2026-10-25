@@ -6,6 +6,7 @@
 // T-009 real dock tile row (dock/dock_view.*).
 #include "core/app_loop.h"
 #include "core/autostart.h"
+#include "core/crash_dump.h"
 #include "core/config.h"
 #include "core/config_reload.h"
 #include "core/theme.h"
@@ -324,6 +325,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     // before any code that could crash in earnest. On a machine that never
     // hides the taskbar the filter's restore is a harmless no-op show.
     core::InstallTaskbarCrashRecovery();
+    // Crash dumps (T-062) install LAST on the SetUnhandledExceptionFilter chain
+    // so the dump filter runs FIRST at crash time (write the dump while the
+    // process state is freshest), then forwards to the taskbar filter it
+    // replaced. Order is load-bearing: the chain cannot be read back, only
+    // captured at install time (spikes/t062_dump Q4).
+    core::InstallCrashDumper();
     ApplyDpiOverrideFromEnvironment();
     // Remembered separately from Window::DpiOverride() because the WM_DPICHANGED
     // handler writes a synthetic override of its own; without this flag an

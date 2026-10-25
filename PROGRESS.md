@@ -395,3 +395,35 @@ config=false 不动任务——不主动清除用户手工创建的同名任务�
   CharSet.Unicode，ANSI 编组进 W 函数使命中类名恒失败，显/隐断言两个方向同时说谎（基线
   读隐藏、恢复断言全假阴性）；修正后产品代码零改动重跑 PASS。
 - 下轮开始于：T-062 崩溃转储与日志轮转（M5）
+
+## 2026-10-25T13:10:00+08:00 | T-062 | DONE
+- 做了什么：spike `spikes/t062_dump/`（MinGW g++ 15.2 实测 MiniDumpWriteDump：-ldbghelp
+  链接通过、真实 0xC0000005 下 dump 62ms/13 streams、prev 过滤器只能安装时捕获的链式
+  模式、存活工作线程不阻塞）；新增 `src/core/crash_dump.{h,cpp}`（链尾 dump 过滤器
+  MiniDumpNormal + 异常指针 + QPC 计时写 marker + 转发 prev + SetErrorMode 抑制 WER）；
+  `src/core/log_rotation.{h,cpp}` 纯逻辑决策（文件名生成/解析/ShouldRollBySize/
+  DayOrdinal/ExpiredLogFiles）+ `log.cpp` 集成（同日超限续写 -N 序号文件、跨天与启动
+  时按 14 天窗口清理、DOCKFORGE_LOG_MAX_BYTES/KEEP_DAYS env 覆盖）；paths.cpp 加
+  DOCKFORGE_LOG_DIR/DOCKFORGE_DUMP_DIR 隔离；settings About 页 'Open log folder'
+  按钮；main.cpp 接线（InstallTaskbarCrashRecovery 之后装 dump 过滤器）；C-07 契约
+  加演进注记（14 天 + 10MB 覆盖原 7 天）。
+- 实测：gate -Action all 退出 0，3755 断言 / 319 用例全绿（新增 15 用例）；探针
+  tools/log_rotation_probe.ps1 五段 verdict=PASS——A 尺寸轮转 8 文件全部 <= 上限+
+  容差、B KEEP_DAYS=1 删昨日/30 天前留今天、C 默认 14 天留 5 天前文件、D 真实
+  0xC0000005 崩溃 dump 119964B/写入 150ms（预算 2000ms）无 WER 挂起且 taskbar-crash.txt
+  增长证明转发链完好、E About 按钮真实窗口树命中 + BM_CLICK 后日志 opened log folder
+  + Explorer 窗口 'logs-e - 文件资源管理器' 打开；截图 PrintWindow 归档。
+- 修复的产品缺陷（T-050 遗留、本次实机暴露）：设置窗口控件 parent 是 STATIC 容器，
+  子控件 WM_COMMAND 被系统 STATIC 过程吞掉——真用户点击任何设置控件从未生效过，
+  此前所有探针走 RecordEdit 文件通道掩盖了它。修复：pane 子类化转发
+  （SubclassPane + SetPropW 保存原过程），探针点击→日志→Explorer 端到端实证。
+- 探针迭代：4 个脚本自身缺陷逐一定位修复（PowerShell $null 编组为空串致
+  FindWindow 失配须用 [NullString]::Value；GetClassNameW 缺 CharSet.Unicode 类名
+  截断为首字符——T-061 同款陷阱；Explorer 标题含本地化后缀须 CONTAINS 匹配；
+  SetForegroundWindow 被拒改 PrintWindow），产品代码缺陷只有 STATIC 吞通知一处。
+- 诚实边界：dump 调试器符号化加载未验证（本机无 WinDbg/cdb，file(1) 识别 13
+  streams 合法 Mini DuMP）；2 秒预算无强制看门狗（MiniDumpWriteDump 无超时参数，
+  靠 MiniDumpNormal + spike 62ms/探针 109-171ms 实测背书）；真实 10MB/14 天未等
+  真实时间容量，经 env 覆盖实测同一代码分支；Part D 崩溃写入真实 %LOCALAPPDATA%
+  （T-061 既有行为）。
+- 下轮开始于：T-070 Stage Manager 分组模型（M6）

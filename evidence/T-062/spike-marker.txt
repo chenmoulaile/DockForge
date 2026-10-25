@@ -1,0 +1,2 @@
+head filter: dumped=1 err=0 ms=62 file=spike-crash-3484.dmp
+tail filter ran: taskbar-restore step executed

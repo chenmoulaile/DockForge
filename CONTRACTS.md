@@ -121,6 +121,12 @@ x_i = base_i + Σ_{j} (s_j - 1) * w * 0.5 * sign(i - j)
 ```
 LEVEL ∈ TRACE/DEBUG/INFO/WARN/ERROR/FATAL。文件按天切分，保留 7 天。
 
+> 演进（T-062，2026-10-25）：保留窗口改为 14 天，另加单文件上限 10MB —— 同日
+> 超限续写 `dockforge-YYYYMMDD-N.log`（N 从 1 起），超龄文件在启动与跨天滚动时
+> 删除。两上限可用 `DOCKFORGE_LOG_KEEP_DAYS` / `DOCKFORGE_LOG_MAX_BYTES` 覆盖
+> （探针/测试隔离，同一约定见 `DOCKFORGE_CONFIG_PATH`）。决策函数为纯逻辑，
+> 见 `src/core/log_rotation.cpp` 与 `tests/log_rotation_test.cpp`。
+
 ## C-08 shell 应用解析契约（T-006 冻结）
 
 ### 身份五形态

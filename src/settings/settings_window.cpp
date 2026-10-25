@@ -52,7 +52,7 @@ constexpr int kCtrlFirst = 100;
 struct ControlRow {
     const char* field;      // dotted C-01 key, empty for display-only
     const wchar_t* label;
-    enum class Kind { Edit, Combo, Check, Label } kind;
+    enum class Kind { Edit, Combo, Check, Label, Action } kind;
     // Combo choices, comma-separated via separate entries; null for non-combos.
     const wchar_t* const* choices;
     int choice_count;
@@ -94,6 +94,9 @@ constexpr ControlRow kAboutRows[] = {
     {"", L"enhancement for Windows. Settings edit", ControlRow::Kind::Label, nullptr, 0},
     {"", L"%APPDATA%\\DockForge\\config.json and take", ControlRow::Kind::Label, nullptr, 0},
     {"", L"effect through ConfigChanged (C-20).", ControlRow::Kind::Label, nullptr, 0},
+    // T-062: one action button, field stays empty (nothing to RecordEdit); the
+    // WM_COMMAND handler matches the dedicated control id, not a config field.
+    {"", L"Open log folder", ControlRow::Kind::Action, nullptr, 0},
 };
 
 constexpr const ControlRow* kSectionRows[] = {
@@ -122,6 +125,35 @@ HFONT MakeUiFont() {
 }
 
 }  // namespace
+
+// The STATIC pane containers swallow their children's control notifications:
+// a BUTTON/EDIT/COMBOBOX sends WM_COMMAND to its DIRECT parent, and the system
+// STATIC window procedure never forwards it up the tree. Measured with the
+// T-062 probe: a real BM_CLICK on the About-page button reached the pane and
+// died there - the main window's WM_COMMAND handler never ran. Every probe
+// before T-062 drove RecordEdit directly and could not see this; a real user
+// clicking any control has been silently losing the notification since T-050.
+// Subclass the pane and forward WM_COMMAND to the main settings window
+// (HWND stashed in GWLP_USERDATA at subclass time).
+LRESULT CALLBACK SettingsPaneProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
+    if (msg == WM_COMMAND) {
+        const HWND owner = reinterpret_cast<HWND>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+        if (owner) SendMessageW(owner, WM_COMMAND, wparam, lparam);
+    }
+    const WNDPROC original =
+        reinterpret_cast<WNDPROC>(GetPropW(hwnd, L"DockForgePaneOrigProc"));
+    if (!original) return DefWindowProcW(hwnd, msg, wparam, lparam);
+    return CallWindowProcW(original, hwnd, msg, wparam, lparam);
+}
+
+void SettingsWindow::SubclassPane(HWND pane, HWND owner) {
+    const WNDPROC original = reinterpret_cast<WNDPROC>(
+        GetWindowLongPtrW(pane, GWLP_WNDPROC));
+    if (!original) return;
+    SetPropW(pane, L"DockForgePaneOrigProc", reinterpret_cast<HANDLE>(original));
+    SetWindowLongPtrW(pane, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(owner));
+    SetWindowLongPtrW(pane, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&SettingsPaneProc));
+}
 
 bool PreferLightTheme() {
     wchar_t buffer[8]{};
@@ -249,6 +281,12 @@ LRESULT SettingsWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wparam, LPARAM
             const int id = LOWORD(wparam);
             const int code = HIWORD(wparam);
             if (updating_controls_) break;
+            // T-062 action buttons carry no config field; match them first so
+            // the field sweep below cannot misread them.
+            if (id == open_logs_id_ && code == BN_CLICKED) {
+                OpenLogsDirectory();
+                return 0;
+            }
             // EN_CHANGE fires while the user types; combos and checks report on
             // commit. All of them funnel into RecordEdit, which is also what the
             // probe channel calls.
@@ -302,6 +340,7 @@ void SettingsWindow::CreateControls() {
                                     dip(kPaneX), dip(kPaneY), rc.right - dip(kPaneX + 16),
                                     rc.bottom - dip(kPaneY + 16), hwnd_, nullptr,
                                     instance_, nullptr);
+        SubclassPane(pane, hwnd_);
         section_panes_.push_back(pane);
 
         const ControlRow* rows = kSectionRows[section];
@@ -368,6 +407,22 @@ void SettingsWindow::CreateControls() {
                     break;
                 case ControlRow::Kind::Label:
                     control = nullptr;
+                    break;
+                case ControlRow::Kind::Action:
+                    // A push button bound to a local action, not to C-01. The
+                    // dedicated id lives in open_logs_id_; the label column is
+                    // hidden like the checkbox case does.
+                    ShowWindow(label, SW_HIDE);
+                    control = CreateWindowExW(0, L"BUTTON", row.label,
+                                              WS_CHILD | WS_VISIBLE | WS_TABSTOP |
+                                                  BS_PUSHBUTTON,
+                                              dip(8), dip(y), dip(160), dip(24), pane,
+                                              reinterpret_cast<HMENU>(
+                                                  static_cast<INT_PTR>(next_id)),
+                                              instance_, nullptr);
+                    open_logs_id_ = next_id;
+                    SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(ui_font_),
+                                 TRUE);
                     break;
             }
             if (control) {
@@ -470,6 +525,26 @@ void SettingsWindow::RecordEdit(const std::string& field, const std::string& tex
 
 void SettingsWindow::RestartDebounceTimer() {
     if (hwnd_) SetTimer(hwnd_, kDebounceTimerId, kDebounceMs, nullptr);
+}
+
+// T-062 About page: opens %LOCALAPPDATA%\DockForge\logs in Explorer. The
+// directory is ensured first (the Logger normally created it, but the About
+// page must not depend on call order).
+void SettingsWindow::OpenLogsDirectory() {
+    const std::wstring dir = core::LogsDir();
+    core::EnsureDirectory(dir);
+    HINSTANCE result = ShellExecuteW(nullptr, L"open", dir.c_str(), nullptr, nullptr,
+                                     SW_SHOWNORMAL);
+    // ShellExecuteW returns a value > 32 on success; anything else is an error
+    // code. Logged so a failure is visible, never silent.
+    const intptr_t err = reinterpret_cast<intptr_t>(result);
+    if (err > 32) {
+        DF_INFO(kLogModule, "opened log folder (%s)",
+                core::WideToUtf8(dir).c_str());
+    } else {
+        DF_WARN(kLogModule, "open log folder failed, ShellExecuteW=%zd dir=%s", err,
+                core::WideToUtf8(dir).c_str());
+    }
 }
 
 void SettingsWindow::ReloadConfig(const core::Config& config) {

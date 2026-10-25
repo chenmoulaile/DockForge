@@ -1,0 +1,6 @@
+[spike] pid=3484
+[spike] previous filter=00007ff6ec6f1800 (TaskbarStyleFilter=00007ff6ec6f1800) chain_installed=1
+[spike] arming null dereference
+head filter: dumped=1 err=0 ms=62 file=spike-crash-3484.dmp
+exit_code=139
+wall_ms=1741

@@ -6,12 +6,19 @@
 #include <string>
 #include <string_view>
 
+#include "core/log_rotation.h"
+
 namespace dockforge::core {
 
 enum class LogLevel : int { Trace = 0, Debug, Info, Warn, Error, Fatal };
 
 // Directory resolution per CONTRACTS.md C-03:
 //   %LOCALAPPDATA%\DockForge\logs\dockforge-YYYYMMDD.log
+// T-062 additions: a same-day file over the size cap continues into
+// dockforge-YYYYMMDD-N.log; daily files older than the keep window are deleted
+// at startup and whenever the day rolls over. Defaults 10MB / 14 days (T-062
+// DoD; supersedes C-07's initial 7-day note), overridable via
+// DOCKFORGE_LOG_MAX_BYTES / DOCKFORGE_LOG_KEEP_DAYS for probes and tests.
 class Logger {
 public:
     static Logger& Instance();
@@ -33,6 +40,9 @@ private:
     ~Logger();
 
     void RotateIfNeeded();
+    void RollBySizeIfNeeded(uint64_t incoming_bytes);
+    void PruneOldLogs();
+    bool OpenCurrentFile();
     std::wstring CurrentPathForToday() const;
 
     std::mutex mutex_;
@@ -40,7 +50,10 @@ private:
     std::wstring log_dir_;
     std::wstring file_path_;
     void* file_ = nullptr;  // FILE*
-    int current_day_ = -1;
+    int64_t current_ordinal_ = INT64_MIN;  // DayOrdinal of the open file's date
+    int sequence_ = 0;                     // same-day overflow counter (T-062)
+    uint64_t current_bytes_ = 0;           // size of the open file
+    LogRotationPolicy policy_;
     bool initialized_ = false;
 };
 

@@ -21,9 +21,12 @@ std::wstring ConfigPath();
 std::wstring ThemesDir();
 
 // %LOCALAPPDATA%\DockForge\logs
+// Overridable with DOCKFORGE_LOG_DIR (probe/test isolation, same contract as
+// DOCKFORGE_CONFIG_PATH).
 std::wstring LogsDir();
 
 // %LOCALAPPDATA%\DockForge\dumps
+// Overridable with DOCKFORGE_DUMP_DIR (probe/test isolation).
 std::wstring DumpsDir();
 
 // %LOCALAPPDATA%\DockForge\icons  (extracted icon PNG cache, CONTRACTS.md C-08)
