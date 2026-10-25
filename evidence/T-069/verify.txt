@@ -1,0 +1,94 @@
+﻿# T-069 verify.txt · 证据汇总与诚实边界
+
+日期：2026-10-25。全部结论来自本会话实际执行的命令与产物，未跑的检查逐条列出。
+
+## 交付物
+
+- `src/core/hotkeys.h` / `hotkeys.cpp` —— HotkeyHost（RegisterHotKey/UnregisterHotKey
+  封装；MOD_NOREPEAT 只在一处真实调用点 OR 入；冲突分类 1409；析构/UnregisterAll
+  全注销）+ HotspotTracker（fire-once-per-entry + 100ms 节流）+ HotspotRect 纯几何 +
+  四类动作表（9 动作）+ 目录（6 热键/3 热区，全部默认关）+ Import/ExportShortcutsJson
+  （按 id 合并；未知 action 整体拒绝）+ MinimizeAllWindows
+- `src/core/config.{h,cpp}` —— C-24 两个顶层数组 hotkeys/hotspots 的解析/序列化/钳制
+  （id `[a-z0-9_.-]{1,64}` 去重、modifiers 掩码 0xF、vk 1..254、size_px 1..256、
+  上限 64/16 条）；默认 config.json 不写这两个键；HotspotSizeRange + 边/角枚举
+- `src/settings/settings_model.cpp` —— `hotkeys.<id>.enabled`、`hotspots.<id>.enabled`、
+  `hotspots.<id>.size_px` 字段（形状匹配，目录校验；开=按目录默认 find-or-create，
+  关=只翻转已存在条目）
+- `src/settings/settings_window.{h,cpp}` —— Shortcuts 分节（6 热键 checkbox + 3 热区
+  checkbox + 3 size 编辑 + Export/Import 按钮 + 冲突状态行）；SetShortcutsStatus
+- `src/main.cpp` —— HotkeyHost/HotspotTracker 接线：WM_HOTKEY 分派、tick 内 10Hz
+  GetCursorPos 轮询（dock 所在显示器）、ConfigChanged 与已应用快照比较后 re-apply
+  （热重载路径先改主 config 再 publish，必须与快照比——实测踩过）、RunShortcutAction
+  四类分派、退出 UnregisterAll
+- `spikes/T-069_hotkey_probe/hotkey_spike.{cpp,exe,log}` —— Q1..Q5 spike
+- `tools/hotkeys_probe.ps1` —— 实机探针（A/B/C/C2/C3/D/H/E/F/F2/G，28 项断言）
+- `tests/hotkeys_test.cpp` —— 16 个单测用例
+
+## 实测记录（本会话执行的命令与结果）
+
+1. spike（`g++ -std=c++17 -O2 -o spikes/T-069_hotkey_probe/hotkey_spike.exe
+   spikes/T-069_hotkey_probe/hotkey_spike.cpp -luser32` 后直接运行）：
+   - Q1 RegisterHotKey+MOD_NOREPEAT → ok=1 err=0
+   - Q2 同组合重复注册 → ok=0 **err=1409**
+   - Q3 keybd_event 注入 Ctrl+Alt+K → WM_HOTKEY 到达（id=0x534b mods=3 vk=0x4b）
+   - Q4 GetCursorPos 10Hz 轮询 5s → 进程 CPU **0 us**（GetProcessTimes）
+   - Q5 注销后重注册 → ok=1（无残留）
+   - 产物：`evidence/T-069/spike_hotkey.log`
+2. 单测（`tools/gate.ps1 -Action test`，即 `build\bin\dockforge_tests.exe`）：
+   **387 用例 4262 断言全过**（T-068 时 371/4048 → 本任务 +16 用例 +214 断言）。
+   产物：`evidence/T-069/test.log`
+3. 构建+门禁（`tools/gate.ps1 -Action all`）→ **exit 0**。产物：`evidence/T-069/build.log`
+4. 实机探针（`powershell -NoProfile -ExecutionPolicy Bypass -File
+   tools\hotkeys_probe.ps1`，config/log 全部隔离在 %TEMP%\dockforge-t069-*）：
+   **28 ok / 0 fail**。逐条：
+   - A 默认全关：日志 "applied 0 hotkey entries, 0 registered, 0 failed"；默认
+     config.json 无 hotkeys/hotspots 键；本机 6 个目录组合中 5 个空闲
+     （Ctrl+Alt+P 被其它程序持有——环境事实，正是冲突检测的用武之地）
+   - B 设置勾选 `set hotkeys.toggle_dock.enabled 1`（RecordEdit→debounce→flush→
+     ConfigChanged 全链路）→ "applied 1 ... 1 registered"；config.json 写入 C-24 数组；
+     探针注册 Ctrl+Alt+D 得 **1409**（app 持有）
+   - C 注入 Ctrl+Alt+D → WM_HOTKEY 分派日志 → dock 隐藏；再按 → 显示（类别 0
+     组件显隐，端到端）
+   - C2 注入 Ctrl+Alt+G → toggle_magnify 触发（类别 2 显示模式），
+     config.json magnification 1.8→1.0
+   - C3 注入 Ctrl+Alt+B → toggle_taskbar 触发（类别 1 系统控制），
+     "hide_taskbar switch -> 1: ok"（T-061 应用路径）；随即设置还原为 0
+   - D 探针预注册 Ctrl+Alt+K 后经 config.json+热重载启用 probe.clash →
+     WARN "hotkey 'probe.clash' (toggle_dock) 已被其他程序占用 (err=1409)" +
+     "applied 4 ... 3 registered, 1 failed"
+   - H 冲突存续期间截图 Shortcuts 分节：`settings_shortcuts.png`（1760x1160@192dpi；
+     像素验证：右窗格 69 条文本行、底部状态行文本行位于 y=1044..1075，与
+     status_y=8+15*34+4 DIP *2 缩放的计算值 1044 吻合）
+   - E WM_CLOSE 正常退出 → 探针注册 Ctrl+Alt+D **成功**（退出注销、无系统残留）
+   - F 12px 左上角热区：SetCursorPos 入角 → "hotspot 'probe.corner' entered" +
+     dock 隐藏；移开后 1.2s 再入 → 再次触发 + dock 显示（fire-once + re-arm）
+   - F2 整条上边（corner=null）：中顶部入条 → "hotspot 'probe.edge' entered" + dock 隐藏
+   - G 热区开/关各 8s CPU 采样：ON 0.516s vs OFF 0.578s（delta -0.063s，噪声级；
+     单核预算 8s；spike Q4 的裸轮询环为 0us）
+   - 产物：`evidence/T-069/probe.txt`
+
+## 诚实边界（未验证/未覆盖，如实列出）
+
+1. **窗口管理类动作（minimize_all / minimize_foreground）未实机触发**：实现完整
+   （EnumWindows + cloaked/toolwindow/owner 过滤 + SW_MINIMIZE）且与已实测动作共用
+   同一 WM_HOTKEY→RunShortcutAction 分派链，但注入 Ctrl+Alt+M 会最小化桌面上全部
+   窗口，对在用桌面扰动过大，探针不自动执行。四类中其余三类（组件显隐/系统控制/
+   显示模式）均端到端实测。
+2. **toggle_launchpad / toggle_settings / cycle_dock_side / restore_taskbar 四个动作**
+   未逐一实机注入（同链路同类别的代表已测；cycle_dock_side 附带把 main.cpp 的
+   `edge` 从 const 改为 apply_placement 内重读，属顺带修复——设置窗口改 position
+   现在也会真正重排 dock）。
+3. **设置窗口 Export/Import 按钮未实机点击**：按钮转发路径是 T-062 已实测的
+   WM_COMMAND/BM_CLICK 链；Import/ExportShortcutsJson 的合并/拒绝语义有 6 个单测
+   用例锁定；shortcuts.json 的真实读写仅代码审查级。
+4. **多显示器**：热区定义在 dock 所在显示器（默认主屏）的 monitor rect 上，负坐标
+   原点已有单测（HotspotRect secondary monitor 用例）；未在真实双屏机上实测。
+5. MOD_NOREPEAT 的"长按不重复"语义本身无法用 keybd_event 注入模拟（注入即离散
+   按下/抬起），以 T-061 的既有实测（Ctrl+Alt+T 带 MOD_NOREPEAT 真实长按）+ 本任务
+   注册参数单测锁定为准。
+
+## 结论
+
+DoD 8 项全部实测达标（见 TASKS.md 勾选与上面的证据编号），状态 **DONE**；
+边界 1-5 为明确记录的未覆盖面，不构成 DoD 缺口。

@@ -91,12 +91,49 @@ struct IntegrationsConfig {
     std::map<std::string, bool> message_counts;
 };
 
+// One global hotkey (T-069, CONTRACTS.md C-24). `id` is the stable string the
+// import/export merge matches on - never a list index. `modifiers` is the
+// C-24 bitmask (MOD_ALT=1, MOD_CONTROL=2, MOD_SHIFT=4, MOD_WIN=8); MOD_NOREPEAT
+// (0x4000) is NOT stored here, it is OR'ed in at the single RegisterHotKey call
+// site in HotkeyHost. `vk` is a virtual-key code, 1..254. Everything defaults
+// to disabled: a fresh install registers nothing (C-24 所有热键默认 enabled=false).
+struct HotkeyConfig {
+    std::string id;
+    int modifiers = 0;
+    int vk = 0;
+    std::string action;
+    bool enabled = false;
+};
+
+enum class HotspotEdge { Top, Bottom, Left, Right };
+// Corner authority rule: when `corner` is not None, the trigger rectangle is
+// the corner square named by it and `edge` is ignored; when it is None, the
+// whole `edge` strip fires. C-24 allows both shapes on the same list.
+enum class HotspotCorner { None, TopLeft, TopRight, BottomLeft, BottomRight };
+
+// One screen hotspot (T-069, C-24). Hotspots live on the PRIMARY display's
+// monitor rectangle in virtual-screen coordinates. `size_px` is the trigger
+// band/corner size, 1..256.
+struct HotspotConfig {
+    std::string id;
+    HotspotEdge edge = HotspotEdge::Top;
+    HotspotCorner corner = HotspotCorner::None;
+    int size_px = 4;
+    std::string action;
+    bool enabled = false;
+};
+
 struct Config {
     DockConfig dock;
     AppearanceConfig appearance;
     BehaviorConfig behavior;
     LaunchpadConfig launchpad;
     IntegrationsConfig integrations;
+    // T-069 (C-24): top-level arrays, both empty by default. A default
+    // config.json therefore carries neither key - the same "a quiet default
+    // file advertises nothing" rule as dock.tiles.
+    std::vector<HotkeyConfig> hotkeys;
+    std::vector<HotspotConfig> hotspots;
 
     // Raw JSON as loaded from disk. Unknown keys live here so that a
     // save round-trip never silently drops user data (C-01 实现约束).
@@ -147,5 +184,12 @@ FloatRange FalloffSharpnessRange();
 IntRange LaunchpadColumnsRange();
 IntRange LaunchpadIconSizeRange();
 IntRange LaunchpadPageSizeRange();
+IntRange HotspotSizeRange();
+
+// Hotspot enum <-> string helpers (C-24 canonical spellings).
+const char* ToString(HotspotEdge value);
+const char* ToString(HotspotCorner value);
+bool ParseHotspotEdge(const std::string& text, HotspotEdge& out);
+bool ParseHotspotCorner(const std::string& text, HotspotCorner& out);
 
 }  // namespace dockforge::core

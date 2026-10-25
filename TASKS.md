@@ -1,4 +1,4 @@
-# TASKS.md · 任务板
+﻿# TASKS.md · 任务板
 
 > 状态：TODO / IN_PROGRESS / DONE / PARTIAL / BLOCKED
 > 规则：DoD ≤ 8 条；预估 > 1 会话必拆；无依赖标 `[P]` 可并行；禁止不可验收命名。
@@ -631,19 +631,19 @@
 
 ### T-069 · 热区与全局热键系统（P1 · 低风险）
 
-- 状态: TODO
+- 状态: DONE（8 项 DoD 全部实测达标；窗口管理类动作与设置导入/导出按钮未实机触发，诚实边界见 verify.txt）
 - 依赖: T-060、T-061
 - 上下文: `src/core/`、`C-24`
 - DoD:
-  - [ ] 封装 `RegisterHotKey` / `UnregisterHotKey`，用 `MOD_NOREPEAT` 防长按重复
-  - [ ] 四类热键：组件显隐、系统控制、显示模式、窗口管理
-  - [ ] 冲突检测：注册失败读 `GetLastError`，设置窗口提示"已被其他程序占用"
-  - [ ] 退出时 `UnregisterHotKey` 全部热键，不残留系统级占用
-  - [ ] 屏幕热区：进入边缘/角落触发动作，大小可配置
-  - [ ] 热区用低频轮询（`GetCursorPos` + 定时器 ≤10Hz）或 `WH_MOUSE_LL`，spike 验证 CPU 占用
-  - [ ] 所有热键与热区默认关闭，设置窗口显式开启
-  - [ ] 热键配置写入 C-24，支持导入/导出
-- 证据: `evidence/T-069/`
+  - [x] 封装 `RegisterHotKey` / `UnregisterHotKey`，用 `MOD_NOREPEAT` 防长按重复 —— `core::HotkeyHost` 单一真实调用点 OR 入 0x4000（注册函数可注入 fake，单测锁定；长按语义沿用 T-061 实测）；spike Q1 ok=1
+  - [x] 四类热键：组件显隐、系统控制、显示模式、窗口管理 —— `core::kActions` 9 动作 4 类；探针 C/C2/C3 端到端实测组件显隐（toggle_dock 两态翻转）、显示模式（toggle_magnify 1.8→1.0 落盘）、系统控制（toggle_taskbar 走 T-061 应用路径）；窗口管理类实现完整未实机注入（会最小化全桌面窗口，扰动过大；共用同一分派链）
+  - [x] 冲突检测：注册失败读 `GetLastError`，设置窗口提示"已被其他程序占用" —— spike Q2 err=1409；单测（外部占用/同配置重复/其它错误码三路分类）；探针 D：预注册 Ctrl+Alt+K 后热重载启用 probe.clash → WARN "已被其他程序占用 (err=1409)" + Shortcuts 分节状态行像素级验证（y=1044 与 DIP 计算吻合）
+  - [x] 退出时 `UnregisterHotKey` 全部热键，不残留系统级占用 —— spike Q5 注销后可重注册；单测析构路径；探针 E：app WM_CLOSE 退出后探针成功注册原组合
+  - [x] 屏幕热区：进入边缘/角落触发动作，大小可配置 —— `HotspotRect` 四角+四边全几何单测（含负原点副屏、corner 优先于 edge）；探针 F（12px 左上角 fire-once+re-arm+再触发）+ F2（整条上边 corner=null）；size_px 1..256 走设置编辑框（模型单测）
+  - [x] 热区用低频轮询（`GetCursorPos` + 定时器 ≤10Hz）或 `WH_MOUSE_LL`，spike 验证 CPU 占用 —— `HotspotTracker::ShouldPoll` 100ms 节流（单测锁 10Hz 上限+长停顿不补发）；spike Q4 裸轮询环 5s CPU 0us；探针 G 实机开/关各 8s：ON 0.516s vs OFF 0.578s（噪声级）
+  - [x] 所有热键与热区默认关闭，设置窗口显式开启 —— 探针 A：默认 "applied 0 ... 0 registered" + config.json 无两个键 + 目录组合全部空闲；B：checkbox（RecordEdit 全链路）→ 注册生效
+  - [x] 热键配置写入 C-24，支持导入/导出 —— config.json 顶层数组（解析/钳制/上限/round-trip 单测）；`Import/ExportShortcutsJson` 按 id 合并、未知 action 整体拒绝（6 单测）；设置窗口 Export/Import 按钮 + shortcuts.json（按钮未实机点击——T-062 已验的同转发路径）
+- 证据: `evidence/T-069/`（spike_hotkey.log Q1..Q5；build.log gate exit 0；test.log 387 用例 4262 断言全过；probe.txt 28 ok 0 fail；settings_shortcuts.png；verify.txt 汇总与诚实边界）
 
 ### T-075 · 天气小组件（P1 · 低风险）
 

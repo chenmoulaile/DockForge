@@ -1,0 +1,28 @@
+﻿A ok: 'applied 0 hotkey entries, 0 registered, 0 failed' (nothing registered at startup)
+A ok: default config.json carries no hotkeys/hotspots key
+A info: 5/6 catalog combos free on this machine (held by other programs: Ctrl+Alt+P)
+B ok: 'applied 1 hotkey entries, 1 registered, 0 failed' after the checkbox flip
+B ok: config.json persisted the C-24 hotkeys array
+B ok: Ctrl+Alt+D now 1409 here (the app holds it)
+C ok: 'hotkey 'toggle_dock' -> toggle_dock' (WM_HOTKEY dispatched)
+C ok: action fired (category 0 = ComponentToggle)
+C ok: dock HIDDEN after the first press
+C ok: dock VISIBLE again after the second press
+C2 ok: action fired (category 2 = DisplayMode)
+C2 ok: config.json magnification=1.0 (1.8 default toggled off)
+C3 ok: action fired (category 1 = SystemControl enum)
+C3 ok: 'hide_taskbar switch -> 1: ok' (the T-061 apply path ran)
+D ok: conflict surfaced -> 'probe.clash' (toggle_dock) 已被其他程序占用'
+D ok: 'applied 4 hotkey entries, 3 registered, 1 failed' (3 good + 1 conflict)
+H ok: settings_shortcuts.png saved (with the conflict line)
+E ok: app exited on WM_CLOSE
+E ok: Ctrl+Alt+D registerable after exit (unregistered on the way out)
+F ok: 'hotspot 'probe.corner' entered -> toggle_dock'
+F ok: hotspot dispatched the action
+F ok: dock HIDDEN after entering the corner
+F ok: re-entry fired again (fire-once + re-arm works)
+F ok: dock VISIBLE again after the second corner entry
+F2 ok: whole-edge strip fired at centre-top
+F2 ok: dock hidden by the edge entry
+G: CPU over 8s with hotspots ON = 0.516s, OFF = 0.578s (delta -0.063s, budget one core = 8s)
+G ok: hotspot polling adds < 0.5s CPU per 8s (<6%)

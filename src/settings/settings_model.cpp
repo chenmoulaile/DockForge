@@ -1,5 +1,6 @@
 #include "settings/settings_model.h"
 
+#include "core/hotkeys.h"
 #include "core/log.h"
 
 #include <algorithm>
@@ -45,9 +46,39 @@ constexpr FieldSpec kFields[] = {
     {"integrations.message_counts.qq.exe.enabled", FieldSpec::Kind::Bool},
 };
 
+// Strips `prefix` and `suffix` off `field`, returning the id between them.
+bool ShortcutFieldId(const std::string& field, const char* prefix, const char* suffix,
+                     std::string* id) {
+    const std::size_t prefix_len = std::strlen(prefix);
+    const std::size_t suffix_len = std::strlen(suffix);
+    if (field.size() <= prefix_len + suffix_len) return false;
+    if (field.compare(0, prefix_len, prefix) != 0) return false;
+    if (field.compare(field.size() - suffix_len, suffix_len, suffix) != 0) return false;
+    id->assign(field, prefix_len, field.size() - prefix_len - suffix_len);
+    return true;
+}
+
 const FieldSpec* FindField(const std::string& field) {
     for (const FieldSpec& spec : kFields) {
         if (field == spec.name) return &spec;
+    }
+    // T-069: shortcut fields are matched by shape, not by a static row, so the
+    // catalog can grow without touching this table:
+    //   hotkeys.<catalog id>.enabled
+    //   hotspots.<catalog id>.enabled
+    //   hotspots.<catalog id>.size_px
+    static const FieldSpec kHotkeyEnabled{"", FieldSpec::Kind::Bool};
+    static const FieldSpec kHotspotEnabled{"", FieldSpec::Kind::Bool};
+    static const FieldSpec kHotspotSize{"", FieldSpec::Kind::Int};
+    std::string id;
+    if (ShortcutFieldId(field, "hotkeys.", ".enabled", &id)) {
+        return core::FindHotkeyCatalogEntry(id) != nullptr ? &kHotkeyEnabled : nullptr;
+    }
+    if (ShortcutFieldId(field, "hotspots.", ".enabled", &id)) {
+        return core::FindHotspotCatalogEntry(id) != nullptr ? &kHotspotEnabled : nullptr;
+    }
+    if (ShortcutFieldId(field, "hotspots.", ".size_px", &id)) {
+        return core::FindHotspotCatalogEntry(id) != nullptr ? &kHotspotSize : nullptr;
     }
     return nullptr;
 }
@@ -106,6 +137,23 @@ std::string SettingsModel::CurrentValueText(const core::Config& config,
             if (field == "launchpad.icon_size") std::snprintf(buffer, sizeof(buffer), "%d", config.launchpad.icon_size);
             if (field == "launchpad.page_size") std::snprintf(buffer, sizeof(buffer), "%d", config.launchpad.page_size);
             if (field == "appearance.corner_radius") std::snprintf(buffer, sizeof(buffer), "%d", config.appearance.corner_radius);
+            // T-069: hotspot size reads the entry, or the catalog default when
+            // the entry does not exist yet.
+            {
+                std::string id;
+                if (ShortcutFieldId(field, "hotspots.", ".size_px", &id)) {
+                    const core::HotspotCatalogEntry* catalog =
+                        core::FindHotspotCatalogEntry(id);
+                    int value = catalog != nullptr ? catalog->size_px : 4;
+                    for (const core::HotspotConfig& entry : config.hotspots) {
+                        if (entry.id == id) {
+                            value = entry.size_px;
+                            break;
+                        }
+                    }
+                    std::snprintf(buffer, sizeof(buffer), "%d", value);
+                }
+            }
             break;
         case FieldSpec::Kind::Float:
             if (field == "dock.magnification") std::snprintf(buffer, sizeof(buffer), "%.2f", config.dock.magnification);
@@ -123,6 +171,22 @@ std::string SettingsModel::CurrentValueText(const core::Config& config,
             if (field == "integrations.message_counts.qq.exe.enabled") {
                 const auto it = config.integrations.message_counts.find("qq.exe");
                 return it == config.integrations.message_counts.end() || it->second ? "1" : "0";
+            }
+            // T-069: an absent catalog entry reads as disabled (C-24 default).
+            {
+                std::string id;
+                if (ShortcutFieldId(field, "hotkeys.", ".enabled", &id)) {
+                    for (const core::HotkeyConfig& entry : config.hotkeys) {
+                        if (entry.id == id) return entry.enabled ? "1" : "0";
+                    }
+                    return "0";
+                }
+                if (ShortcutFieldId(field, "hotspots.", ".enabled", &id)) {
+                    for (const core::HotspotConfig& entry : config.hotspots) {
+                        if (entry.id == id) return entry.enabled ? "1" : "0";
+                    }
+                    return "0";
+                }
             }
             break;
         case FieldSpec::Kind::Position:
@@ -185,6 +249,34 @@ int SettingsModel::Apply(core::Config& config, std::vector<std::string>* changed
                     moved = target != config.appearance.corner_radius;
                     config.appearance.corner_radius = target;
                 }
+                // T-069: hotspot size. The entry is created on first edit with
+                // the catalog's defaults (edge/corner/action) so a size edit
+                // alone is enough to configure a hotspot.
+                {
+                    std::string id;
+                    if (ShortcutFieldId(edit.field, "hotspots.", ".size_px", &id)) {
+                        const core::HotspotCatalogEntry* catalog =
+                            core::FindHotspotCatalogEntry(id);
+                        if (catalog != nullptr) {
+                            target = ClampInt(static_cast<int>(value),
+                                              core::HotspotSizeRange());
+                            auto it = std::find_if(
+                                config.hotspots.begin(), config.hotspots.end(),
+                                [&](const core::HotspotConfig& entry) {
+                                    return entry.id == id;
+                                });
+                            if (it == config.hotspots.end()) {
+                                config.hotspots.push_back(core::HotspotConfig{
+                                    id, catalog->edge, catalog->corner, target,
+                                    catalog->action, false});
+                                moved = true;
+                            } else {
+                                moved = target != it->size_px;
+                                it->size_px = target;
+                            }
+                        }
+                    }
+                }
                 break;
             }
             case FieldSpec::Kind::Float: {
@@ -233,6 +325,56 @@ int SettingsModel::Apply(core::Config& config, std::vector<std::string>* changed
                         it == config.integrations.message_counts.end() ? true : it->second;
                     moved = value != current;
                     config.integrations.message_counts[id] = value;
+                }
+                // T-069: hotkey enable. On = find-or-create with the catalog
+                // defaults (the checkbox is the first thing a user touches);
+                // off = only an EXISTING entry flips, so unchecking a box the
+                // user never turned on writes nothing (C-24 quiet default).
+                {
+                    std::string id;
+                    if (ShortcutFieldId(edit.field, "hotkeys.", ".enabled", &id)) {
+                        const core::HotkeyCatalogEntry* catalog =
+                            core::FindHotkeyCatalogEntry(id);
+                        if (catalog != nullptr) {
+                            auto it = std::find_if(
+                                config.hotkeys.begin(), config.hotkeys.end(),
+                                [&](const core::HotkeyConfig& entry) {
+                                    return entry.id == id;
+                                });
+                            if (it == config.hotkeys.end()) {
+                                if (value) {
+                                    config.hotkeys.push_back(core::HotkeyConfig{
+                                        id, catalog->modifiers, catalog->vk,
+                                        catalog->action, true});
+                                    moved = true;
+                                }
+                            } else {
+                                moved = value != it->enabled;
+                                it->enabled = value;
+                            }
+                        }
+                    } else if (ShortcutFieldId(edit.field, "hotspots.", ".enabled", &id)) {
+                        const core::HotspotCatalogEntry* catalog =
+                            core::FindHotspotCatalogEntry(id);
+                        if (catalog != nullptr) {
+                            auto it = std::find_if(
+                                config.hotspots.begin(), config.hotspots.end(),
+                                [&](const core::HotspotConfig& entry) {
+                                    return entry.id == id;
+                                });
+                            if (it == config.hotspots.end()) {
+                                if (value) {
+                                    config.hotspots.push_back(core::HotspotConfig{
+                                        id, catalog->edge, catalog->corner,
+                                        catalog->size_px, catalog->action, true});
+                                    moved = true;
+                                }
+                            } else {
+                                moved = value != it->enabled;
+                                it->enabled = value;
+                            }
+                        }
+                    }
                 }
                 break;
             }

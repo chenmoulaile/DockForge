@@ -1,4 +1,4 @@
-# PROGRESS.md · 执行日志（按时间正序追加）
+﻿# PROGRESS.md · 执行日志（按时间正序追加）
 
 > 每任务追加一条。格式见 PROMPT.md · CLOSE PROTOCOL。
 
@@ -536,3 +536,29 @@ config=false 不动任务——不主动清除用户手工创建的同名任务�
   -RadioRoundTrip 显式 opt-in）；读链路全部实证。sidecar 的 push 事件推送
   未在无媒体会话环境观察到。多显示器 DPI 位置未验证。
 - 下轮开始于：T-069 热区与全局热键系统（P1）
+
+## 2026-10-25T18:57:00+08:00 | T-069 | DONE
+- 做了什么：热区与全局热键系统（C-24）。src/core/hotkeys.{h,cpp}：HotkeyHost
+  （Register/Unregister 封装、MOD_NOREPEAT 单点 OR 入、1409 冲突分类、析构全注销、
+  注册函数可注入 fake 供单测）；HotspotTracker（GetCursorPos 10Hz 节流 +
+  fire-once-per-entry 重臂语义）+ HotspotRect 纯几何（四角/四边/负原点副屏）；
+  四类动作表 9 动作 + 目录 6 热键/3 热区（默认全关）；Import/ExportShortcutsJson
+  按 id 合并、未知 action 整体拒绝。config.cpp 解析 C-24 两顶层数组（钳制+上限
+  +默认 config 不写键）。设置窗口 Shortcuts 分节（checkbox/size 编辑/Export-Import
+  按钮/冲突状态行）。main.cpp 接线：WM_HOTKEY 分派、tick 10Hz 轮询、ConfigChanged
+  与已应用快照比较后 re-apply、退出 UnregisterAll；附带修复 dock.position 运行时
+  变更不重排（edge 改为 apply_placement 内重读 config）。
+- 实测：spike Q1..Q5（MOD_NOREPEAT 注册 ok；重复注册 err=1409；keybd_event 注入
+  触发 WM_HOTKEY；10Hz GetCursorPos 轮询 5s CPU 0us；注销后无残留）；gate -Action
+  all 退出 0（387 用例 4262 断言，+16 用例）；实机探针 tools/hotkeys_probe.ps1
+  28 ok 0 fail：A 默认全关（0 注册+config 无键）、B 设置勾选全链路+组合被 app 持有
+  （1409）、C/C2/C3 三类动作端到端（dock 显隐/放大 1.8→1.0 落盘/任务栏开关走
+  T-061 路径）、D 冲突 WARN"已被其他程序占用"+设置状态行像素验证（y=1044 与
+  DIP 计算吻合）、E 退出后组合可注册（无残留）、F/F2 角落+整边热区 fire-once+
+  re-arm+再触发、G 热区开/关 8s CPU 0.516/0.578s（噪声级）。
+- 诚实边界（evidence/T-069/verify.txt）：窗口管理类动作（minimize_all/
+  minimize_foreground）实现完整未实机注入（会最小化全桌面窗口）；toggle_launchpad/
+  toggle_settings/cycle_dock_side/restore_taskbar 未逐一注入；设置 Export/Import
+  按钮未实机点击（T-062 已验的同一 WM_COMMAND 转发路径 + 导入导出核心 6 单测）；
+  多显示器热区仅 dock 所在屏（负原点单测覆盖，无双屏实测）。
+- 下轮开始于：T-075 天气小组件（P1）

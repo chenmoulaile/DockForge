@@ -51,6 +51,17 @@ constexpr std::size_t kMaxFolderItems = 256;
 constexpr std::size_t kMaxFolderNameLength = 64;
 constexpr std::size_t kMaxFolderIdLength = 64;
 
+// T-069 (C-24) bounds: the lists are hand-editable, so they need the same
+// ceiling treatment as tiles/folders. 64 hotkeys is far above the catalog (6)
+// and above any plausible curated set; 16 hotspots likewise (catalog: 3).
+constexpr std::size_t kMaxHotkeys = 64;
+constexpr std::size_t kMaxHotspots = 16;
+constexpr std::size_t kMaxShortcutIdLength = 64;
+
+// C-24 modifier bits. MOD_NOREPEAT is never stored (hotkeys.h adds it at the
+// one RegisterHotKey call site).
+constexpr int kShortcutModifierMask = 0xF;
+
 // Reads a string array of identities, trimming over-long or non-string entries.
 // Returns true when the array was present but needed cleaning (caller rewrites).
 bool ReadIdentityList(const json& node, const char* key, std::vector<std::string>& out) {
@@ -260,6 +271,179 @@ void WriteFolders(json& node, const char* key, const std::vector<LaunchpadFolder
     node[key] = std::move(array);
 }
 
+// C-24 id rule: [a-z0-9_.-]{1,64}. Shared by the hotkey and hotspot readers.
+bool ValidShortcutId(const std::string& id) {
+    if (id.empty() || id.size() > kMaxShortcutIdLength) return false;
+    for (const char c : id) {
+        const bool ok = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' ||
+                        c == '.' || c == '-';
+        if (!ok) return false;
+    }
+    return true;
+}
+
+// Reads the top-level `hotkeys` array (T-069, C-24). Lenient by design - this
+// is the config loader, not the import path (ImportShortcutsJson is the strict
+// one): bad entries drop with a WARN, values clamp, unknown actions round-trip
+// so a downgrade cannot eat the user's file. Returns true when anything needed
+// cleaning (drives the rewrite).
+bool ReadHotkeys(const json& document, std::vector<HotkeyConfig>& out) {
+    if (!document.contains("hotkeys")) return false;
+    const auto& value = document.at("hotkeys");
+    if (!value.is_array()) {
+        DF_WARN("core", "config hotkeys has non-array type, keeping default");
+        return true;
+    }
+    bool dirty = false;
+    std::vector<HotkeyConfig> parsed;
+    std::unordered_set<std::string> seen_ids;
+    parsed.reserve(std::min(value.size(), kMaxHotkeys));
+
+    for (const auto& item : value) {
+        if (parsed.size() >= kMaxHotkeys) {
+            DF_WARN("core", "config hotkeys has more than %zu entries, extras dropped",
+                    kMaxHotkeys);
+            dirty = true;
+            break;
+        }
+        if (!item.is_object()) {
+            DF_WARN("core", "config hotkeys contains a non-object entry, dropped");
+            dirty = true;
+            continue;
+        }
+        HotkeyConfig entry;
+        const auto id_it = item.find("id");
+        if (id_it == item.end() || !id_it->is_string() ||
+            !ValidShortcutId(id_it->get<std::string>())) {
+            DF_WARN("core", "config hotkeys entry has no valid id, dropped");
+            dirty = true;
+            continue;
+        }
+        entry.id = id_it->get<std::string>();
+        if (!seen_ids.insert(entry.id).second) {
+            DF_WARN("core", "config hotkeys id \"%s\" repeated, keeping the first",
+                    entry.id.c_str());
+            dirty = true;
+            continue;
+        }
+        if (item.contains("modifiers") && item.at("modifiers").is_number()) {
+            const int raw = static_cast<int>(item.at("modifiers").get<double>());
+            entry.modifiers = raw & kShortcutModifierMask;
+            if (entry.modifiers != raw) {
+                DF_WARN("core", "config hotkeys \"%s\" modifiers=%d carries non-C-24 bits, "
+                                "masked to %d",
+                        entry.id.c_str(), raw, entry.modifiers);
+                dirty = true;
+            }
+        }
+        if (item.contains("vk") && item.at("vk").is_number()) {
+            const int raw = static_cast<int>(item.at("vk").get<double>());
+            entry.vk = std::clamp(raw, 1, 254);
+            if (entry.vk != raw) {
+                DF_WARN("core", "config hotkeys \"%s\" vk=%d out of [1,254], clamped to %d",
+                        entry.id.c_str(), raw, entry.vk);
+                dirty = true;
+            }
+        }
+        if (item.contains("action") && item.at("action").is_string()) {
+            entry.action = item.at("action").get<std::string>();
+        }
+        if (item.contains("enabled") && item.at("enabled").is_boolean()) {
+            entry.enabled = item.at("enabled").get<bool>();
+        }
+        parsed.push_back(std::move(entry));
+    }
+    out = std::move(parsed);
+    return dirty;
+}
+
+// Reads the top-level `hotspots` array. Same leniency contract as ReadHotkeys.
+// `corner` may be the JSON null literal (C-24: null = whole edge); a corner
+// inconsistent with `edge` is legal - corner is authoritative (hotkeys.h).
+bool ReadHotspots(const json& document, std::vector<HotspotConfig>& out) {
+    if (!document.contains("hotspots")) return false;
+    const auto& value = document.at("hotspots");
+    if (!value.is_array()) {
+        DF_WARN("core", "config hotspots has non-array type, keeping default");
+        return true;
+    }
+    bool dirty = false;
+    std::vector<HotspotConfig> parsed;
+    std::unordered_set<std::string> seen_ids;
+    parsed.reserve(std::min(value.size(), kMaxHotspots));
+
+    for (const auto& item : value) {
+        if (parsed.size() >= kMaxHotspots) {
+            DF_WARN("core", "config hotspots has more than %zu entries, extras dropped",
+                    kMaxHotspots);
+            dirty = true;
+            break;
+        }
+        if (!item.is_object()) {
+            DF_WARN("core", "config hotspots contains a non-object entry, dropped");
+            dirty = true;
+            continue;
+        }
+        HotspotConfig entry;
+        const auto id_it = item.find("id");
+        if (id_it == item.end() || !id_it->is_string() ||
+            !ValidShortcutId(id_it->get<std::string>())) {
+            DF_WARN("core", "config hotspots entry has no valid id, dropped");
+            dirty = true;
+            continue;
+        }
+        entry.id = id_it->get<std::string>();
+        if (!seen_ids.insert(entry.id).second) {
+            DF_WARN("core", "config hotspots id \"%s\" repeated, keeping the first",
+                    entry.id.c_str());
+            dirty = true;
+            continue;
+        }
+        const auto edge_it = item.find("edge");
+        if (edge_it != item.end() && edge_it->is_string()) {
+            if (!ParseHotspotEdge(edge_it->get<std::string>(), entry.edge)) {
+                DF_WARN("core", "config hotspots \"%s\" edge unknown, keeping default",
+                        entry.id.c_str());
+                dirty = true;
+            }
+        }
+        const auto corner_it = item.find("corner");
+        if (corner_it != item.end() && !corner_it->is_null()) {
+            if (corner_it->is_string()) {
+                if (!ParseHotspotCorner(corner_it->get<std::string>(), entry.corner)) {
+                    DF_WARN("core", "config hotspots \"%s\" corner unknown, treating as null",
+                            entry.id.c_str());
+                    entry.corner = HotspotCorner::None;
+                    dirty = true;
+                }
+            } else {
+                DF_WARN("core", "config hotspots \"%s\" corner has non-string type, treating "
+                                "as null",
+                        entry.id.c_str());
+                dirty = true;
+            }
+        }
+        if (item.contains("size_px") && item.at("size_px").is_number()) {
+            const int raw = static_cast<int>(item.at("size_px").get<double>());
+            entry.size_px = std::clamp(raw, HotspotSizeRange().min, HotspotSizeRange().max);
+            if (entry.size_px != raw) {
+                DF_WARN("core", "config hotspots \"%s\" size_px=%d out of [%d,%d], clamped",
+                        entry.id.c_str(), raw, HotspotSizeRange().min, HotspotSizeRange().max);
+                dirty = true;
+            }
+        }
+        if (item.contains("action") && item.at("action").is_string()) {
+            entry.action = item.at("action").get<std::string>();
+        }
+        if (item.contains("enabled") && item.at("enabled").is_boolean()) {
+            entry.enabled = item.at("enabled").get<bool>();
+        }
+        parsed.push_back(std::move(entry));
+    }
+    out = std::move(parsed);
+    return dirty;
+}
+
 int ClampInt(int value, IntRange range, const char* name) {
     const int clamped = std::clamp(value, range.min, range.max);
     if (clamped != value) {
@@ -308,9 +492,10 @@ json StripUnknownKeys(const json& source) {
         PreserveUnknown(source[section], section_out, owned);
         if (!section_out.empty()) result[section] = section_out;
     }
-    // Top-level unknown keys.
+    // Top-level unknown keys. "hotkeys"/"hotspots" (T-069) are owned by the
+    // schema now, so they must NOT be double-preserved here.
     static const std::unordered_set<std::string> kTopKeys = {
-        "dock", "appearance", "behavior", "launchpad", "integrations"};
+        "dock", "appearance", "behavior", "launchpad", "integrations", "hotkeys", "hotspots"};
     PreserveUnknown(source, result, kTopKeys);
     return result;
 }
@@ -411,6 +596,7 @@ FloatRange FalloffSharpnessRange() { return {0.5f, 4.0f}; }
 IntRange LaunchpadColumnsRange() { return {0, 12}; }
 IntRange LaunchpadIconSizeRange() { return {48, 192}; }
 IntRange LaunchpadPageSizeRange() { return {10, 70}; }
+IntRange HotspotSizeRange() { return {1, 256}; }
 
 const char* ToString(FalloffCurve value) {
     switch (value) {
@@ -459,6 +645,44 @@ bool ParseMaterial(const std::string& text, MaterialLevel& out) {
     if (text == "acrylic") { out = MaterialLevel::Acrylic; return true; }
     if (text == "blur") { out = MaterialLevel::Blur; return true; }
     if (text == "solid") { out = MaterialLevel::Solid; return true; }
+    return false;
+}
+
+const char* ToString(HotspotEdge value) {
+    switch (value) {
+        case HotspotEdge::Top: return "top";
+        case HotspotEdge::Bottom: return "bottom";
+        case HotspotEdge::Left: return "left";
+        case HotspotEdge::Right: return "right";
+    }
+    return "top";
+}
+
+const char* ToString(HotspotCorner value) {
+    switch (value) {
+        case HotspotCorner::None: return "null";
+        case HotspotCorner::TopLeft: return "tl";
+        case HotspotCorner::TopRight: return "tr";
+        case HotspotCorner::BottomLeft: return "bl";
+        case HotspotCorner::BottomRight: return "br";
+    }
+    return "null";
+}
+
+bool ParseHotspotEdge(const std::string& text, HotspotEdge& out) {
+    if (text == "top") { out = HotspotEdge::Top; return true; }
+    if (text == "bottom") { out = HotspotEdge::Bottom; return true; }
+    if (text == "left") { out = HotspotEdge::Left; return true; }
+    if (text == "right") { out = HotspotEdge::Right; return true; }
+    return false;
+}
+
+bool ParseHotspotCorner(const std::string& text, HotspotCorner& out) {
+    if (text == "null") { out = HotspotCorner::None; return true; }
+    if (text == "tl") { out = HotspotCorner::TopLeft; return true; }
+    if (text == "tr") { out = HotspotCorner::TopRight; return true; }
+    if (text == "bl") { out = HotspotCorner::BottomLeft; return true; }
+    if (text == "br") { out = HotspotCorner::BottomRight; return true; }
     return false;
 }
 
@@ -520,6 +744,21 @@ bool ClampConfig(Config& config) {
         DF_WARN("core", "config launchpad.folders has %zu entries, keeping the first %zu",
                 launchpad.folders.size(), kMaxFolders);
         launchpad.folders.resize(kMaxFolders);
+        changed = true;
+    }
+
+    // T-069: same ceiling treatment for the shortcut lists (the readers also
+    // bound them; this covers in-memory edits like an import merge).
+    if (config.hotkeys.size() > kMaxHotkeys) {
+        DF_WARN("core", "config hotkeys has %zu entries, keeping the first %zu",
+                config.hotkeys.size(), kMaxHotkeys);
+        config.hotkeys.resize(kMaxHotkeys);
+        changed = true;
+    }
+    if (config.hotspots.size() > kMaxHotspots) {
+        DF_WARN("core", "config hotspots has %zu entries, keeping the first %zu",
+                config.hotspots.size(), kMaxHotspots);
+        config.hotspots.resize(kMaxHotspots);
         changed = true;
     }
     return changed;
@@ -607,6 +846,11 @@ bool ParseConfig(const std::string& json_text, Config& out, std::string* error) 
             }
         }
     }
+    // T-069 (C-24): the two shortcut arrays. Lenient parse - see ReadHotkeys.
+    const std::size_t hotkeys_raw = parsed.hotkeys.size();
+    bad_value |= ReadHotkeys(document, parsed.hotkeys);
+    const std::size_t hotspots_raw = parsed.hotspots.size();
+    bad_value |= ReadHotspots(document, parsed.hotspots);
     parsed.unknown_keys_json = StripUnknownKeys(document).dump();
 
     // Snapshot the raw parsed values so we can tell whether clamping actually
@@ -629,7 +873,9 @@ bool ParseConfig(const std::string& json_text, Config& out, std::string* error) 
         raw_launchpad.icon_size != parsed.launchpad.icon_size ||
         raw_launchpad.page_size != parsed.launchpad.page_size ||
         raw_launchpad.extra_paths != parsed.launchpad.extra_paths ||
-        raw_launchpad.folders.size() != parsed.launchpad.folders.size();
+        raw_launchpad.folders.size() != parsed.launchpad.folders.size() ||
+        hotkeys_raw != parsed.hotkeys.size() ||
+        hotspots_raw != parsed.hotspots.size();
 
     out = std::move(parsed);
     return true;
@@ -686,6 +932,37 @@ std::string SerializeConfig(const Config& config) {
             mc[id] = enabled;
         }
         document["integrations"] = {{"message_counts", mc}};
+    }
+    // T-069 (C-24): written only when present, same quiet-default rule. The
+    // corner field serialises as JSON null for whole-edge hotspots, matching
+    // the C-24 shape. `modifiers` is masked to the C-24 bits so a value that
+    // leaked in from an import can never persist stray MOD_NOREPEAT bits.
+    if (!config.hotkeys.empty()) {
+        json array = json::array();
+        for (const HotkeyConfig& entry : config.hotkeys) {
+            array.push_back(json{
+                {"id", entry.id},
+                {"modifiers", entry.modifiers & 0xF},
+                {"vk", entry.vk},
+                {"action", entry.action},
+                {"enabled", entry.enabled},
+            });
+        }
+        document["hotkeys"] = std::move(array);
+    }
+    if (!config.hotspots.empty()) {
+        json array = json::array();
+        for (const HotspotConfig& entry : config.hotspots) {
+            array.push_back(json{
+                {"id", entry.id},
+                {"edge", ToString(entry.edge)},
+                {"corner", entry.corner == HotspotCorner::None ? json() : json(ToString(entry.corner))},
+                {"size_px", entry.size_px},
+                {"action", entry.action},
+                {"enabled", entry.enabled},
+            });
+        }
+        document["hotspots"] = std::move(array);
     }
 
     // Re-attach unknown keys captured at load time.

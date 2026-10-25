@@ -9,6 +9,7 @@
 #include "core/crash_dump.h"
 #include "core/config.h"
 #include "core/config_reload.h"
+#include "core/hotkeys.h"
 #include "core/theme.h"
 #include "core/event_bus.h"
 #include "core/frame_clock.h"
@@ -744,7 +745,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     }
     apply_dpi_override(target_display);
 
-    const platform::DockEdge edge = ToDockEdge(config.dock.position);
+    // Mutable since T-069: the cycle_dock_side action (and a settings edit to
+    // dock.position) moves the dock to another edge at runtime, and
+    // apply_placement re-reads the config here on every placement.
+    platform::DockEdge edge = ToDockEdge(config.dock.position);
     // Set once the drop target exists. Placement is where the geometry is recomputed,
     // and the drop target resolves insertion slots against that geometry, so the two
     // have to be updated together - but the target is created after this lambda
@@ -761,6 +765,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
 
     auto apply_placement = [&]() {
         if (!have_target) return;
+        // Re-read the edge from the live config (T-069): the dock can move to
+        // another edge at runtime through a hotkey/hotspot action or settings.
+        edge = ToDockEdge(config.dock.position);
         // Recompute geometry here, not once at startup: the window DPI is only
         // readable after Create(), and WM_DPICHANGED lands here too. Sizing the
         // window from a stale scale would clip the row at 150%/200%.
@@ -1677,6 +1684,184 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     };
     apply_region();
 
+    // ---- user shortcuts (T-069, C-24) ----------------------------------
+    // Config-driven hotkeys on top of the two built-ins above. Everything
+    // defaults to disabled, so a fresh install registers nothing here. The
+    // destructor unregisters every held id - the no-residue exit guarantee.
+    core::HotkeyHost hotkey_host(window.Handle());
+    core::HotspotTracker hotspot_tracker;
+    bool hotspots_active = false;
+
+    // Dispatch for both engines (four categories, see core::kActions). Runs on
+    // the main thread only: WM_HOTKEY arrives on the registering thread and the
+    // hotspot poll lives inside the tick.
+    auto RunShortcutAction = [&](const std::string& action) -> bool {
+        const core::ActionInfo* info = core::FindAction(action);
+        if (info == nullptr) {
+            DF_WARN("hotkeys", "action '%s' is not in the table, ignored", action.c_str());
+            return false;
+        }
+        DF_INFO("hotkeys", "action %s (%d) fired", action.c_str(),
+                static_cast<int>(info->category));
+        switch (info->category) {
+            case core::HotkeyCategory::ComponentToggle:
+                if (action == "toggle_dock") {
+                    ShowWindow(window.Handle(),
+                               IsWindowVisible(window.Handle()) ? SW_HIDE : SW_SHOW);
+                    return true;
+                }
+                if (action == "toggle_launchpad") {
+                    if (!launchpad_ready) {
+                        DF_WARN("hotkeys", "launchpad not ready; toggle_launchpad no-op");
+                        return false;
+                    }
+                    if (launchpad.Visible()) {
+                        launchpad.Close();
+                    } else {
+                        launchpad.Open(config);
+                    }
+                    return true;
+                }
+                if (action == "toggle_settings") {
+                    if (!settings_ready) {
+                        DF_WARN("hotkeys", "settings window unavailable (DOCKFORGE_SETTINGS?)");
+                        return false;
+                    }
+                    if (settings.Visible()) {
+                        settings.Hide();
+                    } else {
+                        settings.Show();  // re-shows after a hide
+                    }
+                    return true;
+                }
+                return false;
+            case core::HotkeyCategory::SystemControl:
+                if (action == "toggle_taskbar") {
+                    core::Config updated = config;
+                    updated.behavior.hide_taskbar = !config.behavior.hide_taskbar;
+                    if (core::SaveConfig(updated)) {
+                        config = updated;
+                        bus.Publish(core::ConfigChanged{config});
+                        return true;
+                    }
+                    DF_WARN("hotkeys", "toggle_taskbar could not persist config");
+                    return false;
+                }
+                if (action == "restore_taskbar") {
+                    // Same body as the built-in Ctrl+Alt+T arm: force-show and
+                    // persist hide_taskbar=false so the recovery survives a
+                    // restart.
+                    std::string detail;
+                    const bool ok = core::RestoreTaskbarSystem(&detail);
+                    if (config.behavior.hide_taskbar) {
+                        core::Config updated = config;
+                        updated.behavior.hide_taskbar = false;
+                        if (core::SaveConfig(updated)) {
+                            config = updated;
+                            last_hide_taskbar = false;
+                            bus.Publish(core::ConfigChanged{config});
+                        }
+                    }
+                    publish_taskbar_state(true);
+                    return ok;
+                }
+                return false;
+            case core::HotkeyCategory::DisplayMode:
+                if (action == "cycle_dock_side") {
+                    core::Config updated = config;
+                    switch (config.dock.position) {
+                        case core::DockPosition::Bottom:
+                            updated.dock.position = core::DockPosition::Left;
+                            break;
+                        case core::DockPosition::Left:
+                            updated.dock.position = core::DockPosition::Right;
+                            break;
+                        case core::DockPosition::Right:
+                            updated.dock.position = core::DockPosition::Bottom;
+                            break;
+                    }
+                    if (core::SaveConfig(updated)) {
+                        config = updated;
+                        // apply_placement re-reads the edge from the config it
+                        // captures, so the move itself is one call.
+                        apply_placement();
+                        apply_region();
+                        bus.Publish(core::ConfigChanged{config});
+                        return true;
+                    }
+                    return false;
+                }
+                if (action == "toggle_magnify") {
+                    core::Config updated = config;
+                    // 1.8f is the C-01 default; the toggle is between "off"
+                    // (1.0) and that default, not between 1.0 and whatever a
+                    // theme lens last applied.
+                    updated.dock.magnification =
+                        config.dock.magnification > 1.0f ? 1.0f : 1.8f;
+                    if (core::SaveConfig(updated)) {
+                        config = updated;
+                        apply_region();
+                        bus.Publish(core::ConfigChanged{config});
+                        return true;
+                    }
+                    return false;
+                }
+                return false;
+            case core::HotkeyCategory::WindowManagement:
+                if (action == "minimize_all") {
+                    core::MinimizeAllWindows(window.Handle(), nullptr);
+                    return true;
+                }
+                if (action == "minimize_foreground") {
+                    const HWND foreground = GetForegroundWindow();
+                    if (foreground != nullptr && foreground != window.Handle()) {
+                        ShowWindow(foreground, SW_MINIMIZE);
+                        return true;
+                    }
+                    return false;
+                }
+                return false;
+        }
+        return false;
+    };
+
+    // One place applies the shortcut config: startup and every ConfigChanged
+    // where the lists moved. `applied_*` snapshots what the engines actually
+    // hold - the comparison CANNOT be against `config`, because the hot-reload
+    // path adopts the new snapshot into `config` BEFORE publishing it (the
+    // event then equals the local copy and a diff against it is always empty).
+    std::vector<core::HotkeyConfig> applied_hotkeys;
+    std::vector<core::HotspotConfig> applied_hotspots;
+    auto ApplyShortcuts = [&]() {
+        const std::vector<core::HotkeyHost::Result> results = hotkey_host.Apply(config.hotkeys);
+        bool any_enabled_hotspot = false;
+        for (const core::HotspotConfig& hotspot : config.hotspots) {
+            if (hotspot.enabled) any_enabled_hotspot = true;
+        }
+        hotspots_active = any_enabled_hotspot;
+        if (!hotspots_active) hotspot_tracker.Reset();
+        applied_hotkeys = config.hotkeys;
+        applied_hotspots = config.hotspots;
+
+        // Conflict surface for the settings window (DoD: 提示"已被其他程序占用").
+        // The window may not exist yet/any more - SetShortcutsStatus keeps the
+        // text for the next CreateControls.
+        std::string status;
+        for (const core::HotkeyHost::Result& result : results) {
+            if (result.ok) continue;
+            if (result.already_registered) {
+                if (!status.empty()) status += "\n";
+                status += "Hotkey '" + result.id + "': 已被其他程序占用 (err=1409)";
+            } else {
+                if (!status.empty()) status += "\n";
+                status += "Hotkey '" + result.id + "': registration failed (err=" +
+                          std::to_string(result.error) + ")";
+            }
+        }
+        if (settings_ready) settings.SetShortcutsStatus(status);
+    };
+    ApplyShortcuts();
+
     // Dock refresh on ConfigChanged (T-051/T-052): the settings window's flush
     // and the hot reload both publish synchronously inside the tick, so this
     // handler runs on the frame path. It re-applies the theme lens (the event
@@ -1695,6 +1880,21 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         ApplyMessageCountConfig(event.config, message_counters);
         apply_message_counts();
         apply_region();
+    });
+
+    // T-069: shortcut re-apply. The settings flush and the hot reload both
+    // publish the full snapshot; only a real change against what the engines
+    // already hold does any work. The main-thread `config` copy adopts the
+    // lists here so the poll and the dispatch read the fresh entries on the
+    // next frame.
+    bus.Subscribe<core::ConfigChanged>([&](const core::ConfigChanged& event) {
+        if (core::SameHotkeys(applied_hotkeys, event.config.hotkeys) &&
+            core::SameHotspots(applied_hotspots, event.config.hotspots)) {
+            return;
+        }
+        config.hotkeys = event.config.hotkeys;
+        config.hotspots = event.config.hotspots;
+        ApplyShortcuts();
     });
 
     // ---- OLE drop target (T-014) ----------------------------------------
@@ -2028,6 +2228,30 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         if (hw_panel_ready) {
             hw_panel.Tick(delta_ms);
             read_hw_command(delta_ms);
+        }
+        // Screen hotspots (T-069, C-24): GetCursorPos polling throttled to
+        // 10Hz inside the frame tick - the C-24 ceiling, and the spike
+        // measured this exact loop shape at 0 us of process CPU over 5s.
+        // `hotspots_active` is false on a default config, so the whole block
+        // costs one bool test per frame until the user enables one.
+        if (hotspots_active && hotspot_tracker.ShouldPoll(delta_ms)) {
+            POINT cursor{};
+            if (GetCursorPos(&cursor)) {
+                // Hotspots live on the dock's display (primary unless pinned by
+                // DOCKFORGE_TARGET_DISPLAY), in virtual-screen coordinates -
+                // the same frame GetCursorPos reports. The monitor rect is
+                // DPI-independent, so reading the placement state is safe.
+                const RECT display_rect = target_display.monitor;
+                const int fired =
+                    hotspot_tracker.Poll(cursor, config.hotspots, display_rect);
+                if (fired >= 0) {
+                    DF_INFO("hotkeys", "hotspot '%s' entered -> %s",
+                            config.hotspots[static_cast<std::size_t>(fired)].id.c_str(),
+                            config.hotspots[static_cast<std::size_t>(fired)].action.c_str());
+                    RunShortcutAction(
+                        config.hotspots[static_cast<std::size_t>(fired)].action);
+                }
+            }
         }
         if (running_tracker.Update(delta_ms)) {
             running_tracker.ApplyToTiles(tiles);
@@ -2641,6 +2865,16 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                     out = 0;
                     return true;
                 }
+                // T-069: config-driven hotkeys. FindByWParam matches only the
+                // ids HotkeyHost handed out (0x4800+), so the two built-ins
+                // above keep their own arms and their own semantics.
+                if (const core::HotkeyConfig* config_hotkey = hotkey_host.FindByWParam(wp)) {
+                    DF_INFO("hotkeys", "hotkey '%s' -> %s", config_hotkey->id.c_str(),
+                            config_hotkey->action.c_str());
+                    RunShortcutAction(config_hotkey->action);
+                    out = 0;
+                    return true;
+                }
                 return false;
             case WM_KEYDOWN:
                 if (wp == 'Q' && (GetKeyState(VK_CONTROL) & 0x8000)) {
@@ -2729,6 +2963,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     // a live composition target on a destroyed HWND is a shutdown hang, not a leak.
     if (launchpad_hotkey) UnregisterHotKey(window.Handle(), kLaunchpadHotkeyId);
     if (taskbar_hotkey) UnregisterHotKey(window.Handle(), kTaskbarRestoreHotkeyId);
+    // T-069: every config-driven hotkey goes too - the DoD's "no system-level
+    // residue" guarantee. The host's destructor would do the same; doing it
+    // here keeps all three unregisters on the same lines of the shutdown path.
+    hotkey_host.UnregisterAll();
     launchpad.Shutdown();
     capture.Stop();
     plate.Reset();

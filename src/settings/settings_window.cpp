@@ -1,5 +1,6 @@
 #include "settings/settings_window.h"
 
+#include "core/hotkeys.h"
 #include "core/theme.h"
 
 #include "core/log.h"
@@ -35,15 +36,15 @@ constexpr int kRowH = 34;
 constexpr int kPaneX = kNavW + 24;
 constexpr int kPaneY = 28;
 
-// Section order is the T-050 DoD order. The probe references sections by the
-// same lowercase names.
+// Section order is the T-050 DoD order (T-069 appended "Shortcuts" before
+// "About"). The probe references sections by the same lowercase names.
 constexpr const wchar_t* kSectionNames[] = {
-    L"Dock", L"Launchpad", L"Appearance", L"Behavior", L"About",
+    L"Dock", L"Launchpad", L"Appearance", L"Behavior", L"Shortcuts", L"About",
 };
 constexpr const char* kSectionKeys[] = {
-    "dock", "launchpad", "appearance", "behavior", "about",
+    "dock", "launchpad", "appearance", "behavior", "shortcuts", "about",
 };
-constexpr int kSectionCount = 5;
+constexpr int kSectionCount = 6;
 
 constexpr int kCtrlFirst = 100;
 
@@ -56,6 +57,8 @@ struct ControlRow {
     // Combo choices, comma-separated via separate entries; null for non-combos.
     const wchar_t* const* choices;
     int choice_count;
+    // T-062/T-069 action button discriminator for Kind::Action rows.
+    enum class ActionTag { None, OpenLogs, ExportShortcuts, ImportShortcuts } action;
 };
 
 // The choices are the canonical strings config.json serialises (C-01), so the
@@ -97,6 +100,44 @@ constexpr ControlRow kBehaviorRows[] = {
      ControlRow::Kind::Check, nullptr, 0},
 };
 
+// T-069 (C-24): the shortcut catalog as checkbox rows. A fresh config has no
+// hotkeys/hotspots at all - flipping a checkbox on writes the catalog entry
+// into config.hotkeys/hotspots through SettingsModel. The combo in the label
+// is the catalog default; the two built-ins (Ctrl+Alt+Space Launchpad,
+// Ctrl+Alt+T taskbar restore) are always on and not listed.
+constexpr ControlRow kShortcutsRows[] = {
+    {"", L"Everything here is OFF until you enable it (C-24).",
+     ControlRow::Kind::Label, nullptr, 0},
+    {"hotkeys.toggle_dock.enabled", L"Hotkey: toggle Dock (Ctrl+Alt+D)",
+     ControlRow::Kind::Check, nullptr, 0},
+    {"hotkeys.toggle_launchpad.enabled", L"Hotkey: toggle Launchpad (Ctrl+Alt+L)",
+     ControlRow::Kind::Check, nullptr, 0},
+    {"hotkeys.toggle_taskbar.enabled", L"Hotkey: toggle taskbar (Ctrl+Alt+B)",
+     ControlRow::Kind::Check, nullptr, 0},
+    {"hotkeys.cycle_dock_side.enabled", L"Hotkey: cycle Dock side (Ctrl+Alt+P)",
+     ControlRow::Kind::Check, nullptr, 0},
+    {"hotkeys.toggle_magnify.enabled", L"Hotkey: toggle magnify (Ctrl+Alt+G)",
+     ControlRow::Kind::Check, nullptr, 0},
+    {"hotkeys.minimize_all.enabled", L"Hotkey: minimize all windows (Ctrl+Alt+M)",
+     ControlRow::Kind::Check, nullptr, 0},
+    {"hotspots.corner_tl.enabled", L"Hot corner: top-left opens Launchpad",
+     ControlRow::Kind::Check, nullptr, 0},
+    {"hotspots.corner_br.enabled", L"Hot corner: bottom-right minimizes all",
+     ControlRow::Kind::Check, nullptr, 0},
+    {"hotspots.edge_top.enabled", L"Hot edge: top edge toggles Dock",
+     ControlRow::Kind::Check, nullptr, 0},
+    {"hotspots.corner_tl.size_px", L"Top-left corner size (1-256)",
+     ControlRow::Kind::Edit, nullptr, 0},
+    {"hotspots.corner_br.size_px", L"Bottom-right corner size (1-256)",
+     ControlRow::Kind::Edit, nullptr, 0},
+    {"hotspots.edge_top.size_px", L"Top edge height (1-256)",
+     ControlRow::Kind::Edit, nullptr, 0},
+    {"", L"Export shortcuts", ControlRow::Kind::Action, nullptr, 0,
+     ControlRow::ActionTag::ExportShortcuts},
+    {"", L"Import shortcuts", ControlRow::Kind::Action, nullptr, 0,
+     ControlRow::ActionTag::ImportShortcuts},
+};
+
 constexpr ControlRow kAboutRows[] = {
     {"", L"DockForge - a macOS-style dock and desktop", ControlRow::Kind::Label, nullptr, 0},
     {"", L"enhancement for Windows. Settings edit", ControlRow::Kind::Label, nullptr, 0},
@@ -108,13 +149,14 @@ constexpr ControlRow kAboutRows[] = {
 };
 
 constexpr const ControlRow* kSectionRows[] = {
-    kDockRows, kLaunchpadRows, kAppearanceRows, kBehaviorRows, kAboutRows,
+    kDockRows, kLaunchpadRows, kAppearanceRows, kBehaviorRows, kShortcutsRows, kAboutRows,
 };
 constexpr int kSectionRowCount[] = {
     static_cast<int>(std::size(kDockRows)),
     static_cast<int>(std::size(kLaunchpadRows)),
     static_cast<int>(std::size(kAppearanceRows)),
     static_cast<int>(std::size(kBehaviorRows)),
+    static_cast<int>(std::size(kShortcutsRows)),
     static_cast<int>(std::size(kAboutRows)),
 };
 
@@ -289,11 +331,21 @@ LRESULT SettingsWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wparam, LPARAM
             const int id = LOWORD(wparam);
             const int code = HIWORD(wparam);
             if (updating_controls_) break;
-            // T-062 action buttons carry no config field; match them first so
-            // the field sweep below cannot misread them.
-            if (id == open_logs_id_ && code == BN_CLICKED) {
-                OpenLogsDirectory();
-                return 0;
+            // T-062/T-069 action buttons carry no config field; match them
+            // first so the field sweep below cannot misread them.
+            if (code == BN_CLICKED) {
+                if (id == open_logs_id_ && open_logs_id_ != 0) {
+                    OpenLogsDirectory();
+                    return 0;
+                }
+                if (id == export_shortcuts_id_ && export_shortcuts_id_ != 0) {
+                    ExportShortcuts();
+                    return 0;
+                }
+                if (id == import_shortcuts_id_ && import_shortcuts_id_ != 0) {
+                    ImportShortcuts();
+                    return 0;
+                }
             }
             // EN_CHANGE fires while the user types; combos and checks report on
             // commit. All of them funnel into RecordEdit, which is also what the
@@ -418,8 +470,9 @@ void SettingsWindow::CreateControls() {
                     break;
                 case ControlRow::Kind::Action:
                     // A push button bound to a local action, not to C-01. The
-                    // dedicated id lives in open_logs_id_; the label column is
-                    // hidden like the checkbox case does.
+                    // dedicated id lives in a member (About: open_logs_id_;
+                    // Shortcuts: export_/import_shortcuts_id_); the label column
+                    // is hidden like the checkbox case does.
                     ShowWindow(label, SW_HIDE);
                     control = CreateWindowExW(0, L"BUTTON", row.label,
                                               WS_CHILD | WS_VISIBLE | WS_TABSTOP |
@@ -428,7 +481,13 @@ void SettingsWindow::CreateControls() {
                                               reinterpret_cast<HMENU>(
                                                   static_cast<INT_PTR>(next_id)),
                                               instance_, nullptr);
-                    open_logs_id_ = next_id;
+                    if (row.action == ControlRow::ActionTag::OpenLogs) {
+                        open_logs_id_ = next_id;
+                    } else if (row.action == ControlRow::ActionTag::ExportShortcuts) {
+                        export_shortcuts_id_ = next_id;
+                    } else if (row.action == ControlRow::ActionTag::ImportShortcuts) {
+                        import_shortcuts_id_ = next_id;
+                    }
                     SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(ui_font_),
                                  TRUE);
                     break;
@@ -443,6 +502,21 @@ void SettingsWindow::CreateControls() {
                 ++next_id;
             }
         }
+        // T-069: the conflict/status line for the Shortcuts section. It is not
+        // a ControlRow - it has no field and its text comes from the owner
+        // (SetShortcutsStatus), not from the model - so it gets its own HWND
+        // anchored below the rows.
+        if (section_panes_.size() > 4 && section_panes_[4] != nullptr) {
+            HWND pane = section_panes_[4];
+            const int status_y = 8 + kSectionRowCount[4] * kRowH + 4;
+            shortcuts_status_ = CreateWindowExW(
+                0, L"STATIC", L"", WS_CHILD | SS_LEFT, dip(8), dip(status_y),
+                rc.right - dip(kPaneX + 32), dip(40), pane, nullptr, instance_, nullptr);
+            all_controls_.push_back(shortcuts_status_);
+            SendMessageW(shortcuts_status_, WM_SETFONT, reinterpret_cast<WPARAM>(ui_font_),
+                         TRUE);
+            SetShortcutsStatus(shortcuts_status_text_);
+        }
     }
     ApplySectionVisibility();
     EchoValues(std::vector<std::string>());
@@ -456,6 +530,10 @@ void SettingsWindow::DestroyControls() {
     all_controls_.clear();
     field_controls_.clear();
     section_panes_.clear();
+    shortcuts_status_ = nullptr;
+    open_logs_id_ = 0;
+    export_shortcuts_id_ = 0;
+    import_shortcuts_id_ = 0;
     if (nav_ && IsWindow(nav_)) DestroyWindow(nav_);
     nav_ = nullptr;
 }
@@ -552,6 +630,97 @@ void SettingsWindow::OpenLogsDirectory() {
     } else {
         DF_WARN(kLogModule, "open log folder failed, ShellExecuteW=%zd dir=%s", err,
                 core::WideToUtf8(dir).c_str());
+    }
+}
+
+// T-069: the import/export file lives next to config.json so a user can copy
+// shortcuts between machines with one file (C-24 import/export).
+static std::wstring ShortcutsFilePath() {
+    return core::ConfigDir() + L"\\shortcuts.json";
+}
+
+void SettingsWindow::SetShortcutsStatus(const std::string& text) {
+    shortcuts_status_text_ = text;
+    if (shortcuts_status_ && IsWindow(shortcuts_status_)) {
+        SetWindowTextW(shortcuts_status_, core::Utf8ToWide(text).c_str());
+    }
+}
+
+void SettingsWindow::ExportShortcuts() {
+    core::EnsureDirectory(core::ConfigDir());
+    const std::wstring path = ShortcutsFilePath();
+    const std::string text = core::ExportShortcutsJson(config_);
+
+    // Same write shape as config.cpp's temp+rename, minus the atomic swap:
+    // shortcuts.json is a copy source, not the live config, so a torn file
+    // costs a refused import rather than a bad startup.
+    HANDLE handle = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                                FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) {
+        const std::string message = "Export failed: cannot write shortcuts.json (err=" +
+                                    std::to_string(GetLastError()) + ")";
+        DF_WARN(kLogModule, "%s", message.c_str());
+        SetShortcutsStatus(message);
+        return;
+    }
+    DWORD written = 0;
+    const BOOL ok = WriteFile(handle, text.data(), static_cast<DWORD>(text.size()), &written,
+                              nullptr);
+    CloseHandle(handle);
+    if (!ok || written != text.size()) {
+        SetShortcutsStatus("Export failed: short write to shortcuts.json");
+        return;
+    }
+    char line[160]{};
+    std::snprintf(line, sizeof(line),
+                  "Exported %zu hotkey(s), %zu hotspot(s) to shortcuts.json",
+                  config_.hotkeys.size(), config_.hotspots.size());
+    DF_INFO(kLogModule, "%s", line);
+    SetShortcutsStatus(line);
+}
+
+void SettingsWindow::ImportShortcuts() {
+    const std::wstring path = ShortcutsFilePath();
+    HANDLE handle = CreateFileW(path.c_str(), GENERIC_READ,
+                                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) {
+        SetShortcutsStatus("Import failed: shortcuts.json not found next to config.json");
+        return;
+    }
+    std::string text;
+    LARGE_INTEGER size{};
+    if (GetFileSizeEx(handle, &size) && size.QuadPart > 0 &&
+        size.QuadPart < 4 * 1024 * 1024) {
+        text.resize(static_cast<size_t>(size.QuadPart));
+        DWORD got = 0;
+        if (!ReadFile(handle, text.data(), static_cast<DWORD>(text.size()), &got, nullptr)) {
+            text.clear();
+        }
+        text.resize(got);
+    }
+    CloseHandle(handle);
+
+    std::string error;
+    if (!core::ImportShortcutsJson(config_, text, &error)) {
+        const std::string message = "Import failed: " + error;
+        DF_WARN(kLogModule, "%s", message.c_str());
+        SetShortcutsStatus(message);
+        return;
+    }
+    // The merge changed config_: persist, re-seed the controls, publish. Same
+    // order as FlushPending so the C-20 echo rule holds.
+    const bool saved = core::SaveConfig(config_);
+    DF_INFO(kLogModule, "shortcuts import: %zu hotkey(s), %zu hotspot(s), saved=%d",
+            config_.hotkeys.size(), config_.hotspots.size(), saved ? 1 : 0);
+    EchoValues(std::vector<std::string>());
+    char line[160]{};
+    std::snprintf(line, sizeof(line), "Imported %zu hotkey(s), %zu hotspot(s) from "
+                                      "shortcuts.json (saved=%d)",
+                  config_.hotkeys.size(), config_.hotspots.size(), saved ? 1 : 0);
+    SetShortcutsStatus(line);
+    if (bus_ != nullptr) {
+        bus_->Publish(core::ConfigChanged{config_});
     }
 }
 

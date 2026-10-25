@@ -1,0 +1,12 @@
+[  1%] Built target hw_sidecar
+[  3%] Built target message_badge_probe_app
+[ 59%] Built target dockforge_lib
+[ 61%] Built target autostart_probe
+[ 63%] Built target DockForge
+[ 65%] Built target layout_bench
+[ 68%] Built target log_probe
+[100%] Built target dockforge_tests
+Randomness seeded to: 39350155
+===============================================================================
+All tests passed (4262 assertions in 387 test cases)
+

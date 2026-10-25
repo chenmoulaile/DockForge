@@ -52,6 +52,9 @@ class SettingsWindow {
     bool IsValid() const { return hwnd_ != nullptr; }
     void Show();
     void Hide();
+    // True when the HWND exists and is on screen (T-069: the toggle_settings
+    // action decides between Show and Hide with it).
+    bool Visible() const { return hwnd_ != nullptr && IsWindowVisible(hwnd_) != FALSE; }
 
     // Records an edit exactly as if the user had typed it. Shared by the native
     // controls' EN_CHANGE path and the probe channel, so a probe PASS proves the
@@ -59,11 +62,17 @@ class SettingsWindow {
     void RecordEdit(const std::string& field, const std::string& text);
 
     // Switches the visible section ("dock", "launchpad", "appearance",
-    // "behavior", "about"). Unknown names are ignored.
+    // "behavior", "shortcuts", "about"). Unknown names are ignored.
     void ShowSection(const std::string& name);
 
     // Re-seeds the controls from `config` without publishing anything.
     void ReloadConfig(const core::Config& config);
+
+    // T-069: conflict/status text for the Shortcuts section, set by the owner
+    // after every hotkey re-apply (e.g. "Hotkey 'toggle_dock': 已被其他程序占用
+    // (err=1409)"). Empty clears it. Kept even when the window is gone, so the
+    // next CreateControls seeds the same text.
+    void SetShortcutsStatus(const std::string& text);
 
   private:
     static LRESULT CALLBACK NavWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam);
@@ -78,6 +87,8 @@ class SettingsWindow {
     void PaintNav();
     void RestartDebounceTimer();
     void OpenLogsDirectory();     // T-062 About-page action button
+    void ExportShortcuts();       // T-069 Shortcuts-page action button
+    void ImportShortcuts();       // T-069 Shortcuts-page action button
     static void SubclassPane(HWND pane, HWND owner);  // forwards child WM_COMMAND to owner
 
     HWND hwnd_ = nullptr;
@@ -90,11 +101,15 @@ class SettingsWindow {
     bool updating_controls_ = false;  // suppresses EN_CHANGE while echoing
     HFONT ui_font_ = nullptr;
     int open_logs_id_ = 0;  // control id of the About-page action button (T-062)
+    int export_shortcuts_id_ = 0;  // T-069 Shortcuts-page action buttons
+    int import_shortcuts_id_ = 0;
+    HWND shortcuts_status_ = nullptr;  // T-069 conflict line (STATIC)
+    std::string shortcuts_status_text_;
 
     // One HWND per bound field, keyed by the dotted C-01 name. Static labels are
     // not in here - they carry no state.
     std::vector<std::pair<std::string, HWND>> field_controls_;
-    std::vector<HWND> section_panes_;   // one container per section, 5 entries
+    std::vector<HWND> section_panes_;   // one container per section, 6 entries
     std::vector<HWND> all_controls_;    // everything DestroyControls must drop
 };
 
