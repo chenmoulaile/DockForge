@@ -55,48 +55,48 @@ ComPtr<IWICImagingFactory> CreateWicFactory() {
     return factory;
 }
 
+}  // namespace
+
 // Copies an HBITMAP into a tightly packed, top-down BGRA buffer.
-bool BitmapToPixels(HBITMAP bitmap, IconBitmap& out) {
+//
+// The row-order trap that bit us (user-visible: every shell icon drawn upside down):
+// IShellItemImageFactory::GetImage hands back a 32bpp BOTTOM-UP DIB section (measured
+// with spikes/icon_flip_probe.cpp: dsBmih.biHeight=+192 for cmd.exe). The tempting
+// shortcut of memcpy-ing bmBits rows in stored order bakes the flip in - and
+// SaveToDisk then persists it into the PNG cache, making it permanent. The repair
+// deliberately does NOT branch on bmBits either: GetObjectW's DIBSECTION header
+// reported a negative-height section with a positive biHeight on this machine (the
+// top-down flip unit test caught that double flip), so the sign cannot be trusted
+// from there. GetDIBits with a negative height is the one path whose output order is
+// guaranteed by the API contract regardless of the source's row order; its copy cost
+// (~0.1ms) is noise next to the ~25ms shell extraction around it.
+bool IconBitmapFromHBitmap(HBITMAP bitmap, IconBitmap& out) {
     if (!bitmap) return false;
-    BITMAP bm{};
-    if (GetObjectW(bitmap, sizeof(bm), &bm) != sizeof(bm)) return false;
-    if (bm.bmWidth <= 0 || bm.bmHeight <= 0) return false;
+    BITMAP plain{};
+    if (GetObjectW(bitmap, sizeof(plain), &plain) != sizeof(plain)) return false;
+    if (plain.bmWidth <= 0 || plain.bmHeight <= 0) return false;
 
-    const std::size_t stride = static_cast<std::size_t>(bm.bmWidth) * 4;
-    out.width = bm.bmWidth;
-    out.height = bm.bmHeight;
-    out.pixels.assign(stride * static_cast<std::size_t>(bm.bmHeight), 0);
-
-    // GetImage usually hands back a DIB section, in which case bmBits already
-    // points at the pixels and GetDIBits would be a pointless copy.
-    if (bm.bmBits != nullptr) {
-        const auto* src = static_cast<const std::uint8_t*>(bm.bmBits);
-        const std::size_t src_stride =
-            bm.bmWidthBytes > 0 ? static_cast<std::size_t>(bm.bmWidthBytes) : stride;
-        for (int y = 0; y < bm.bmHeight; ++y) {
-            std::copy_n(src + y * src_stride, stride, out.pixels.data() + y * stride);
-        }
-        return true;
-    }
+    const std::size_t stride = static_cast<std::size_t>(plain.bmWidth) * 4;
+    out.width = plain.bmWidth;
+    out.height = plain.bmHeight;
+    out.pixels.assign(stride * static_cast<std::size_t>(plain.bmHeight), 0);
 
     BITMAPINFO info{};
     info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    info.bmiHeader.biWidth = bm.bmWidth;
+    info.bmiHeader.biWidth = plain.bmWidth;
     // Negative height requests top-down rows, matching every D2D bitmap we create.
-    info.bmiHeader.biHeight = -bm.bmHeight;
+    info.bmiHeader.biHeight = -plain.bmHeight;
     info.bmiHeader.biPlanes = 1;
     info.bmiHeader.biBitCount = 32;
     info.bmiHeader.biCompression = BI_RGB;
 
     HDC dc = GetDC(nullptr);
     if (!dc) return false;
-    const int rows = GetDIBits(dc, bitmap, 0, static_cast<UINT>(bm.bmHeight),
+    const int rows = GetDIBits(dc, bitmap, 0, static_cast<UINT>(plain.bmHeight),
                                out.pixels.data(), &info, DIB_RGB_COLORS);
     ReleaseDC(nullptr, dc);
-    return rows == bm.bmHeight;
+    return rows == plain.bmHeight;
 }
-
-}  // namespace
 
 std::size_t IconCache::KeyHash::operator()(const Key& key) const {
     // FNV-1a over the UTF-16 code units plus the size, so two sources that differ
@@ -112,6 +112,13 @@ std::size_t IconCache::KeyHash::operator()(const Key& key) const {
 }
 
 std::wstring IconCache::CacheKey(const std::wstring& source, int size_px) {
+    // Cache format version: the pre-fix extraction copied bmBits rows without checking
+    // the DIB section's bottom-up row order, so every v1 file (bare name, no prefix)
+    // stores a vertically flipped icon (evidence/T-200/icon_flip_spike.txt). The
+    // version lives in the literal on purpose: a wide swprintf with %s reads the wide
+    // argument as narrow and truncates at its first NUL byte, which silently produced
+    // "v_" instead of "v2_" on the first attempt of this fix.
+    constexpr wchar_t kKeyFormat[] = L"v2_%016llx_%d.png";
     std::uint64_t hash = 1469598103934665603ull;
     for (const wchar_t ch : source) {
         hash ^= static_cast<std::uint64_t>(ch);
@@ -120,8 +127,8 @@ std::wstring IconCache::CacheKey(const std::wstring& source, int size_px) {
     hash ^= static_cast<std::uint64_t>(size_px);
     hash *= 1099511628211ull;
 
-    wchar_t buffer[32]{};
-    std::swprintf(buffer, ARRAYSIZE(buffer), L"%016llx_%d.png",
+    wchar_t buffer[48]{};
+    std::swprintf(buffer, ARRAYSIZE(buffer), kKeyFormat,
                   static_cast<unsigned long long>(hash), size_px);
     return buffer;
 }
@@ -175,7 +182,7 @@ bool IconCache::ExtractDirect(const std::wstring& source, int size_px, IconBitma
         return false;
     }
 
-    const bool ok = BitmapToPixels(bitmap, out);
+    const bool ok = IconBitmapFromHBitmap(bitmap, out);
     DeleteObject(bitmap);
 
     ++stats_.extractions;

@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <string>
+#include <windows.h>
 #include <unordered_map>
 #include <vector>
 
@@ -23,6 +24,13 @@ struct IconBitmap {
     bool valid() const { return width > 0 && height > 0 && !pixels.empty(); }
     std::size_t ByteSize() const { return pixels.size(); }
 };
+
+// Copies an HBITMAP into a top-down BGRA IconBitmap, normalising the row order of
+// bottom-up DIB sections. IShellItemImageFactory::GetImage hands back a BOTTOM-UP
+// DIB section (measured with spikes/icon_flip_probe.cpp), so the row order must be
+// read from DIBSECTION, not assumed - copying bmBits 0..h-1 as if it were top-down
+// draws every shell icon upside down. Exposed for the orientation unit tests.
+bool IconBitmapFromHBitmap(HBITMAP bitmap, IconBitmap& out);
 
 struct IconCacheStats {
     std::uint64_t memory_hits = 0;

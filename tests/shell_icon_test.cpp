@@ -192,3 +192,101 @@ TEST_CASE("ClearMemory forces a disk or extraction path again") {
     REQUIRE(cache.Get(notepad, 32, bitmap));
     CHECK(cache.Stats().disk_hits + cache.Stats().memory_hits >= 1);
 }
+
+// ------------------------------------------------------- row order (icon flip)
+
+TEST_CASE("A bottom-up DIB section comes out top-down", "[shell][icons][flip]") {
+    // IShellItemImageFactory::GetImage hands back a BOTTOM-UP DIB section (measured,
+    // spikes/icon_flip_probe.cpp). Reading bmBits 0..h-1 as if it were top-down drew
+    // every shell icon upside down and baked the flip into the disk cache. This case
+    // pins the normalisation: the visually top row of the section must land at output
+    // row 0.
+    const int width = 8;
+    const int height = 4;
+    BITMAPV5HEADER info{};
+    info.bV5Size = sizeof(info);
+    info.bV5Width = width;
+    // Positive height: the section's memory row 0 is the visually BOTTOM row.
+    info.bV5Height = height;
+    info.bV5Planes = 1;
+    info.bV5BitCount = 32;
+    info.bV5Compression = BI_BITFIELDS;
+    info.bV5RedMask = 0x00FF0000;
+    info.bV5GreenMask = 0x0000FF00;
+    info.bV5BlueMask = 0x000000FF;
+    info.bV5AlphaMask = 0xFF000000;
+    void* bits = nullptr;
+    HDC dc = GetDC(nullptr);
+    REQUIRE(dc != nullptr);
+    HBITMAP section = CreateDIBSection(dc, reinterpret_cast<BITMAPINFO*>(&info),
+                                       DIB_RGB_COLORS, &bits, nullptr, 0);
+    ReleaseDC(nullptr, dc);
+    REQUIRE(section != nullptr);
+    REQUIRE(bits != nullptr);
+
+    // Paint the visually-bottom row (memory row 0) opaque red, everything else clear.
+    auto* pixels = static_cast<std::uint32_t*>(bits);
+    for (int x = 0; x < width; ++x) pixels[x] = 0xFFFF0000;  // BGRA(0,0,255,255): opaque red, little-endian
+
+    IconBitmap out;
+    REQUIRE(IconBitmapFromHBitmap(section, out));
+    REQUIRE(out.width == width);
+    REQUIRE(out.height == height);
+    REQUIRE(out.pixels.size() == static_cast<std::size_t>(width) * height * 4);
+
+    // Output row 0 is the visually TOP row: transparent here.
+    for (int x = 0; x < width; ++x) {
+        const std::uint8_t* px = out.pixels.data() + x * 4;
+        INFO("top row, x=" << x);
+        CHECK(px[3] == 0);
+    }
+    // Output row height-1 is the visually BOTTOM row: opaque red.
+    for (int x = 0; x < width; ++x) {
+        const std::uint8_t* px =
+            out.pixels.data() + (static_cast<std::size_t>(height - 1) * width + x) * 4;
+        INFO("bottom row, x=" << x);
+        CHECK(px[3] == 0xFF);
+        CHECK(px[2] == 0xFF);  // red channel in BGRA
+    }
+    DeleteObject(section);
+}
+
+TEST_CASE("A top-down DIB section is not flipped twice", "[shell][icons][flip]") {
+    const int width = 8;
+    const int height = 4;
+    BITMAPV5HEADER info{};
+    info.bV5Size = sizeof(info);
+    info.bV5Width = width;
+    info.bV5Height = -height;  // negative: memory row 0 is the visually TOP row
+    info.bV5Planes = 1;
+    info.bV5BitCount = 32;
+    info.bV5Compression = BI_BITFIELDS;
+    info.bV5RedMask = 0x00FF0000;
+    info.bV5GreenMask = 0x0000FF00;
+    info.bV5BlueMask = 0x000000FF;
+    info.bV5AlphaMask = 0xFF000000;
+    void* bits = nullptr;
+    HDC dc = GetDC(nullptr);
+    REQUIRE(dc != nullptr);
+    HBITMAP section = CreateDIBSection(dc, reinterpret_cast<BITMAPINFO*>(&info),
+                                       DIB_RGB_COLORS, &bits, nullptr, 0);
+    ReleaseDC(nullptr, dc);
+    REQUIRE(section != nullptr);
+    REQUIRE(bits != nullptr);
+
+    auto* pixels = static_cast<std::uint32_t*>(bits);
+    for (int x = 0; x < width; ++x) pixels[x] = 0xFFFF0000;
+
+    IconBitmap out;
+    REQUIRE(IconBitmapFromHBitmap(section, out));
+    REQUIRE(out.height == height);
+    for (int x = 0; x < width; ++x) {
+        const std::uint8_t* px = out.pixels.data() + x * 4;
+        CHECK(px[3] == 0xFF);
+        CHECK(px[2] == 0xFF);
+    }
+    const std::uint8_t* last = out.pixels.data() +
+                               (static_cast<std::size_t>(height - 1) * width) * 4;
+    CHECK(last[3] == 0);
+    DeleteObject(section);
+}
