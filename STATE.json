@@ -2,13 +2,13 @@
     "project": "DockForge",
     "schema": 1,
     "milestone": "M5",
-    "last_task": "T-061",
-    "last_commit": "c3346f1",
+    "last_task": "T-062",
+    "last_commit": "9ab73d5",
     "current_module": "core",
-    "current_task": "T-061",
+    "current_task": "T-062",
     "counters": {
-        "total": 25,
-        "done": 25,
+        "total": 26,
+        "done": 26,
         "partial": 0,
         "blocked": 0
     },
@@ -132,7 +132,13 @@
         "PowerShell function 参数名 $Args 与自动变量同名会被吞：实测 [string[]]$Args 绑定恒为 count=0，schtasks /tn 静默丢失退化成整库查询 rc=0；参数必须改名（T-060 探针 9 个假阴性全部源于此）",
         "schtasks /create /sc onlogon 非提升必拒（Access denied，/rl limited 与 /ru 变体同拒）；COM ITaskFolder::RegisterTaskDefinition + LogonTrigger + TASK_LOGON_INTERACTIVE_TOKEN 非提升可注册（T-060 spike 实测，注册成员在 ITaskFolder 不在 ITaskService，MinGW 成员名 get_Xml/GetTask）",
         "PowerShell P/Invoke FindWindowExW 必须标 CharSet=Unicode：缺省按 ANSI 编组进 W 函数使类名恒找不到，显/隐断言两个方向同时说谎（T-061 探针第一版 9 个假结果全部源于此，应用侧日志零缺陷）",
-        "隐藏 Shell_TrayWnd 不改变工作区：SPI_GETWORKAREA 隐藏前后实测全等（T-061 spike），Dock 无需随任务栏隐藏挪位；显隐必须 ShowWindowAsync + IsWindowVisible 轮询收敛（~16ms），同步 ShowWindow 阻塞在 explorer 消息泵上"
+        "隐藏 Shell_TrayWnd 不改变工作区：SPI_GETWORKAREA 隐藏前后实测全等（T-061 spike），Dock 无需随任务栏隐藏挪位；显隐必须 ShowWindowAsync + IsWindowVisible 轮询收敛（~16ms），同步 ShowWindow 阻塞在 explorer 消息泵上",
+        "PowerShell 5.1 把 P/Invoke string 参数的 $null 编组成 \"\"（非 NULL）：FindWindowW(cls,$null) 只匹配空标题窗口，FindWindowExW(..,$null,..) 直接 ERROR_INVALID_NAME(123)；必须 [NullString]::Value（T-062 探针）",
+        "P/Invoke W 函数缺 CharSet.Unicode 会把字符串按 ANSI 编组：GetClassNameW 收 W 版缓冲写 UTF-16，读回按 ANSI 只剩首字符（Button→B）；T-061 FindWindowExW 同款陷阱第二次发作，涉及字符串的 W 函数一律显式 CharSet.Unicode（T-062）",
+        "STATIC 容器吞子控件 WM_COMMAND：BUTTON/EDIT/COMBOBOX 通知只发直接 parent，系统 STATIC 过程不向上转发——设置窗口控件 parent 是 pane(STATIC)，真用户点击任何设置控件自 T-050 起从未生效，此前探针全走 RecordEdit 文件通道掩盖了它；修复=pane 子类化转发 WM_COMMAND（settings_window.cpp SubclassPane + SetPropW 存原过程）（T-062）",
+        "MiniDumpWriteDump 无超时参数，2 秒预算靠 MiniDumpNormal + 实测背书（MinGW g++ 15.2 下 62-171ms）；SetUnhandledExceptionFilter 的 prev 过滤器只能在安装时经返回值捕获（无读回 API），后装的过滤器先跑并负责转发（T-062 spike）",
+        "Explorer 目录窗口标题带本地化后缀（'logs-e - 文件资源管理器'），窗口断言必须 CONTAINS 而非精确匹配（T-062）",
+        "探针抓自身窗口用 PrintWindow(PW_RENDERFULLCONTENT)：SetForegroundWindow 从后台探针进程被拒，CopyFromScreen 抓到的是遮挡窗口（两次抓到浏览器）；PrintWindow 与遮挡无关（T-062）"
     ],
-    "updated_at": "2026-10-25T12:40:00+08:00"
+    "updated_at": "2026-10-25T13:15:00+08:00"
 }

@@ -10,7 +10,8 @@ cmake 4.4.2 (MinGW Makefiles), 本机单屏 2880x1920 @192 DPI
     命令: powershell -NoProfile -ExecutionPolicy Bypass -File tools/gate.ps1 -Action all
     退出码: 0
     输出尾部: All tests passed (3755 assertions in 319 test cases)
-    全文见 build_test.log。新增 tests/log_rotation_test.cpp 15 用例（82 断言）。
+    归档: build.log（gate -Action build 输出）+ test.log（dockforge_tests.exe 输出），
+    同一工作树、同一二进制。新增 tests/log_rotation_test.cpp 15 用例（82 断言）。
     T-061 基线 3485 断言 / 304 用例 -> 3755 / 319，仅增不减。
 
 [2] spike（实现前实测，spikes/t062_dump/）
