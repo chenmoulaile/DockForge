@@ -581,5 +581,6 @@ config=false 不动任务——不主动清除用户手工创建的同名任务�
   有效数据、geocode 缓存、settings 模型钳制/回显/落盘 round-trip。
 - 诚实边界（evidence/T-075/verify.txt）：amap provider 只有入口没有实现（读 Key 后明确失败，
   不伪造请求）；真实网络下的 dock 渲染与弹窗未实机截图（本机 UI 会话外运行）；设置窗口三行控件
-  未实机点击（与 T-062/T-069 同一 WM_COMMAND 转发路径 + 模型层 6 单测）。
+  未实机点击（与 T-062/T-069 同一 WM_COMMAND 转发路径 + 模型层 6 单测）；未做实机探针脚本
+  （evidence/T-075/ 无 probe.txt）。
 - 下轮开始于：T-076 macOS 风格通知中心（P1）

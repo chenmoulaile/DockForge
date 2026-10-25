@@ -13,10 +13,10 @@
 | M1 | Dock 核心 | 可用的 Dock 栏（放大、启动、指示、拖拽、缩略图） | DONE（T-009..T-016 全部 DONE） |
 | M2 | Finder Bar | 顶部栏 | TODO |
 | M3 | Launchpad | 全屏网格启动器 | DONE (T-040/T-041/T-042 全部完成) |
-| M4 | 配置与主题 | 热重载 + 主题包 | TODO |
+| M4 | 配置与主题 | 热重载 + 主题包 | DONE（T-050/T-051/T-052 全部 DONE；T-085 主题分发属 P1.5 队列） |
 | M5 | 系统集成 | 自启、隐藏任务栏、转储、日志轮转 | DONE（T-060/T-061/T-062 全部 DONE） |
-| M6 | Stage Manager | 窗口分组与切换 | TODO |
-| M7 | 质量加固与分发 | 冒烟测试、性能基准、安装包 | TODO |
+| M6 | Stage Manager | 窗口分组与切换 | TODO（T-070/T-071） |
+| M7 | 质量加固与分发 | 冒烟测试、性能基准、安装包 | TODO（T-079..T-084） |
 
 ---
 
@@ -658,7 +658,7 @@
   - [x] 网络请求异步，失败显示占位图标，不阻塞渲染 —— `weather::Host` 单 worker 线程 + mutex，UI 线程只 `Tick` 拷快照（C-04b 无指针跨线程）；失败发布保留上一次有效数据，snapshot.failed 走占位渲染
   - [x] 刷新间隔默认 30 分钟可配置，支持手动刷新 —— `weather.refresh_minutes` 5..360 走 core 范围钳制 + 设置窗口编辑框；tile 点击 = `RequestRefresh`（worker 立即重取，不打断间隔时钟）
   - [x] 图标素材自绘或 CC0，登记 `ASSETS.md` —— 见 ASSETS.md"图标与字体"表新增行（自绘 · T-075 天气符号）
-- 证据: `evidence/T-075/`（spike_weather.log Q1..Q4；build.log gate exit 0；test.log 416 用例 4381 断言全过；probe.txt 25 ok 0 fail；verify.txt 汇总与诚实边界）
+- 证据: `evidence/T-075/`（spike_weather.log Q1..Q4；build.log gate exit 0；test.log 416 用例 4381 断言全过；verify.txt 汇总与诚实边界；未做实机探针脚本，无 probe.txt）
 
 ### T-076 · macOS 风格通知中心（P1 · 中风险）
 
