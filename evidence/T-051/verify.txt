@@ -1,0 +1,45 @@
+﻿DockForge T-051 · 配置热重载与事件总线 — 验证报告
+=====================================================
+日期: 2026-10-25  环境: 2880x1920@192 DPI, MinGW-w64 (ADR-0002)
+
+一、产物
+--------
+- src/core/config_reload.{h,cpp}: ReloadConfigFromDisk 纯决策函数——
+  采纳 / 未变 / 拒绝 三分支；拒绝不 rename 用户文件（LoadConfig 的 .bad 归档副作用
+  对"写入方尚未 flush 完毕"的瞬时坏读是数据损失）；内容等价短路（序列化后比较，
+  杀掉自保存回环：设置窗口保存 → watcher 看到 config.json 变化 → 不再重复发布）；
+  越界值与启动路径同规则钳制
+- main.cpp 接线: 复用已验证的 shell::LaunchpadWatcher 指向 ConfigPath 的真实父目录
+  （而非 ConfigDir——路径覆盖时二者不同，实测后者静默看错目录），300ms 防抖（C-20）；
+  tick 内 ConsumeChanged → 决策 → 采纳则替换 config + bus.Publish(ConfigChanged) +
+  dirty；拒绝则保留运行中配置并 WARN
+- 防抖合并由 DebounceGate 承担（T-040 已有单测覆盖防抖三例），本轮不重复实现
+- tests/config_reload_test.cpp: 6 例（真实变更采纳、内容等价未变、非法 JSON 拒绝且
+  文件原样保留、越界钳制采纳、部分字段补默认、文件缺失未变）
+
+二、实际执行的命令与结果
+------------------------
+1) 构建: cmake --build build -j 8 → exit=0, warning=0
+2) 测试: dockforge_tests.exe → All tests passed (3395 assertions in 276 test cases)
+3) 实机探针: tools/config_reload_probe.ps1（隔离 config）
+   verdict=PASS：
+   - 外部改 icon_size 48→64 → "config reloaded ... publishing ConfigChanged"
+     + "config published icon_size=64"
+   - 写入截断 JSON → "config reload rejected"，进程存活，文件未被改动/归档
+
+三、过程中修复的缺陷
+--------------------
+1. watcher 初版监视 ConfigDir() 而非 ConfigPath 的父目录——路径覆盖（测试/探针）
+   时静默看错目录，永不触发（探针第一轮 FAIL 的根因）。
+2. find_last_of 字符类再次踩单反斜杠转义陷阱（与 T-050 的 SaveConfig 同类，
+   已用字节级写入修正）。
+3. 探针自身的存活断言放在 Kill 之后（必然 FAIL），修正断言时序。
+
+四、诚实边界
+------------
+- ConfigChanged 的订阅方目前是：设置窗口日志订阅（T-050）、main 的 reload 发布、
+  dock 的即时生效（config 变量被替换，下一帧布局读取新值）。Launchpad 的索引
+  重建（360-1045ms）不放进订阅回调——同步发布在 tick 里执行，会卡帧；它按既有
+  设计在下次 Open(config) 时用新值。订阅侧的完整 UI 重建（dock tiles 增删）
+  属 T-052/Dock 重构，本任务的 DoD"各自订阅刷新"以事件到达 + 日志为证。
+- DebounceGate 防抖合并复用 T-040 已验证实现，本轮未重复造轮子。

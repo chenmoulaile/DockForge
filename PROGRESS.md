@@ -297,3 +297,20 @@ T-050 的防抖保存模式）。
 T-050（设置窗口骨架，0817250）与 T-300（审计）；P5 实现任务排在 P1/P1.5/P2/P4 之后执行。
 
 - 下轮开始于：T-051 配置热重载与事件总线（M4 · P1）
+
+## 2026-10-25T10:40:00+08:00 | T-051 | DONE
+
+**产物**：`src/core/config_reload.{h,cpp}`（ReloadConfigFromDisk：采纳/未变/拒绝，拒绝不
+归档用户文件，内容等价短路杀自保存回环，越界钳制与启动同规则）；main.cpp 复用
+LaunchpadWatcher 指向 ConfigPath 真实父目录（300ms 防抖）；tests/config_reload_test.cpp 6 例。
+
+**实测**：构建 0 警告；单测 3395 断言 / 276 用例全绿；探针 verdict=PASS——外部编辑
+48→64 触发 reload + ConfigChanged 发布，截断 JSON 被拒绝且进程存活、文件原样保留。
+
+**修复**：watcher 初版监视 ConfigDir()（路径覆盖时看错目录）；find_last_of 单反斜杠
+转义陷阱（第二次踩，字节级写入修正）；探针存活断言时序。
+
+**诚实边界**：Launchpad 索引重建不进订阅回调（360-1045ms 会卡帧），按既有设计在下次
+Open 用新值；dock tiles 的增删重建属 T-052/Dock 重构。
+
+- 下轮开始于：T-052 主题包加载与切换

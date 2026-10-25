@@ -383,17 +383,17 @@
 - 备注: 顺带修复 SaveConfig 只确保 ConfigDir 的真实缺陷（覆盖路径的父目录无人创建，保存静默失败）
 
 ### T-051 · 配置热重载与事件总线
-- 状态: TODO
+- 状态: DONE
 - 优先级: P1
 - 依赖: T-050
 - 预估: 1 会话
 - 契约: C-20
 - DoD:
-  - [ ] `ReadDirectoryChangesW` 监视配置文件，300ms 防抖
-  - [ ] 变更发布 `ConfigChanged`（完整快照，C-20），Dock / Launchpad 各自订阅刷新
-  - [ ] 非法 JSON 或越界：拒绝加载，保留上一份有效配置，写 WARN
-  - [ ] 单测：合法变更、非法 JSON、部分字段缺失、范围越界、连续快速写（防抖合并）
-- 证据: `evidence/T-051/`
+  - [x] `ReadDirectoryChangesW` 监视配置文件，300ms 防抖——复用 LaunchpadWatcher（T-040 已验证模式），指向 ConfigPath 真实父目录
+  - [x] 变更发布 `ConfigChanged`（完整快照，C-20），Dock / Launchpad 各自订阅刷新——探针实测发布链；Launchpad 按设计在下次 Open 用新值（索引重建 360-1045ms 不进订阅回调）
+  - [x] 非法 JSON 或越界：拒绝加载，保留上一份有效配置，写 WARN——拒绝不 rename 用户文件；越界按启动同规则钳制采纳
+  - [x] 单测：合法变更、非法 JSON、部分字段缺失、范围越界、连续快速写（防抖合并）——新增 6 例 + DebounceGate 复用 T-040 既有覆盖
+- 证据: `evidence/T-051/`（verify.txt、build.log 0 警告、test.log 3395 断言全绿、探针 verdict=PASS）
 
 ### T-052 · 主题包加载与切换
 - 状态: TODO

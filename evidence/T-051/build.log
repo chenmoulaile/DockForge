@@ -1,0 +1,36 @@
+-- GLOB mismatch!
+The following files were added:
+  +D:/MacDock/src/core/config_reload.cpp
+-- GLOB mismatch!
+The following files were added:
+  +D:/MacDock/tests/config_reload_test.cpp
+-- Configuring done (0.4s)
+-- Generating done (0.3s)
+-- Build files have been written to: D:/MacDock/build
+[  1%] Building CXX object CMakeFiles/dockforge_lib.dir/src/core/config_reload.cpp.obj
+[  2%] Linking CXX static library libdockforge_lib.a
+[ 61%] Built target dockforge_lib
+[ 62%] Building CXX object CMakeFiles/dockforge_tests.dir/tests/config_reload_test.cpp.obj
+[ 64%] Linking CXX executable bin\layout_bench.exe
+[ 65%] Building CXX object CMakeFiles/DockForge.dir/src/main.cpp.obj
+[ 67%] Built target layout_bench
+[ 68%] Linking CXX executable bin\dockforge_tests.exe
+[ 98%] Built target dockforge_tests
+[100%] Linking CXX executable bin\DockForge.exe
+[100%] Built target DockForge
+[ 61%] Built target dockforge_lib
+[ 64%] Built target layout_bench
+[ 65%] Building CXX object CMakeFiles/DockForge.dir/src/main.cpp.obj
+[ 98%] Built target dockforge_tests
+D:\MacDock\src\main.cpp: In lambda function:
+D:\MacDock\src\main.cpp:740:53: warning: unknown escape sequence: '\/'
+  740 |         const std::size_t slash = path.find_last_of(L"\/");
+      |                                                     ^~~~~
+[100%] Linking CXX executable bin\DockForge.exe
+[100%] Built target DockForge
+[ 61%] Built target dockforge_lib
+[ 65%] Built target layout_bench
+[ 65%] Building CXX object CMakeFiles/DockForge.dir/src/main.cpp.obj
+[ 98%] Built target dockforge_tests
+[100%] Linking CXX executable bin\DockForge.exe
+[100%] Built target DockForge

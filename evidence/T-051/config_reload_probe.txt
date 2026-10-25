@@ -1,0 +1,4 @@
+﻿edit_adopted=True published=True
+adopted_line=2026-10-25T10:36:23.005+08:00 INFO [core] config reloaded (); publishing ConfigChanged
+invalid_rejected=True alive=True
+verdict=PASS

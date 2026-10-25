@@ -6,6 +6,7 @@
 // T-009 real dock tile row (dock/dock_view.*).
 #include "core/app_loop.h"
 #include "core/config.h"
+#include "core/config_reload.h"
 #include "core/event_bus.h"
 #include "core/frame_clock.h"
 #include "core/log.h"
@@ -725,6 +726,25 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     // subscription here is the C-20 proof for the probe: a `set` command has to
     // produce one "config published" line per flush, after the save.
     core::EventBus bus;  // declared before every subscriber it serves
+
+    // Config hot reload (T-051). The watcher is the proven LaunchpadWatcher
+    // pattern pointed at the config directory with the C-20 debounce; the
+    // decision logic lives in core::ReloadConfigFromDisk (unit-tested).
+    shell::LaunchpadWatcher config_watcher;
+    const bool config_watcher_running = [&] {
+        // Watch the config FILE's parent, not ConfigDir(): the path override
+        // (tests, evidence probes) can point anywhere, and watching ConfigDir
+        // would silently watch the wrong directory (measured - the probe's
+        // temp config never fired).
+        const std::wstring path = core::ConfigPath();
+        const std::size_t slash = path.find_last_of(L"\\/");
+        std::vector<std::wstring> roots;
+        if (slash != std::wstring::npos && slash > 0) roots.push_back(path.substr(0, slash));
+        const bool ok = config_watcher.Start(roots, 300.0);
+        if (!ok) DF_WARN("core", "config watcher could not start; no hot reload this run");
+        return ok;
+    }();
+    std::string last_reload_reason;
     settings::SettingsWindow settings;
     bool settings_ready = false;
     const bool settings_enabled = ReadEnvFlag(L"DOCKFORGE_SETTINGS", false);
@@ -1524,6 +1544,29 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         // Launchpad channel is unused (measured - it sat inside this if and
         // never fired without DOCKFORGE_LAUNCHPAD_CMD_FILE).
         read_settings_command(delta_ms);
+
+        // Config hot reload (T-051): the watcher raises at most once per settled
+        // 300ms burst; the reload decision rejects invalid JSON, short-circuits
+        // content-identical files (our own saves echo through the watcher), and
+        // otherwise adopts + publishes the C-20 snapshot.
+        if (config_watcher_running && config_watcher.ConsumeChanged(static_cast<double>(GetTickCount64()))) {
+            core::Config next;
+            std::string reason;
+            const core::ReloadVerdict verdict = core::ReloadConfigFromDisk(config, next, &reason);
+            if (verdict == core::ReloadVerdict::Adopted) {
+                config = std::move(next);
+                DF_INFO("core", "config reloaded (%s); publishing ConfigChanged", reason.c_str());
+                bus.Publish(core::ConfigChanged{config});
+                dirty = true;
+            } else if (verdict == core::ReloadVerdict::Rejected) {
+                // Keep the running config; the reason was already WARN-logged
+                // inside the reload decision.
+                DF_WARN("core", "config reload rejected; keeping the running config");
+            } else if (reason != last_reload_reason) {
+                DF_DEBUG("core", "config reload skipped (%s)", reason.c_str());
+            }
+            last_reload_reason = reason;
+        }
         if (launchpad_ready && launchpad.Tick(delta_ms, config)) {
             dirty = true;
         }
