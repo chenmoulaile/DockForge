@@ -112,4 +112,43 @@ if(DOCKFORGE_BUILD_BENCH)
     target_link_options(message_badge_probe_app PRIVATE -municode -mwindows
                         -static-libgcc -static-libstdc++)
   endif()
+
+  # T-068 hardware sidecar: GSMTC media control + Windows.Devices.Radios cannot
+  # be driven from the MinGW process (WinRT async never completes there;
+  # spikes/T-068_hw_probe), so a .NET Framework exe speaks a line protocol
+  # over pipes. Built by the stock Windows csc (no SDK needed); when csc is
+  # missing the target degrades to a message and the panel reports media/radio
+  # as unavailable at runtime instead of failing the build.
+  set(DOCKFORGE_CSC "" CACHE FILEPATH "Path to csc.exe for the hw_sidecar build")
+  if(NOT DOCKFORGE_CSC)
+    foreach(_csc_candidate
+        "C:/Windows/Microsoft.NET/Framework64/v4.0.30319/csc.exe"
+        "C:/Windows/Microsoft.NET/Framework/v4.0.30319/csc.exe")
+      if(EXISTS "${_csc_candidate}")
+        set(DOCKFORGE_CSC "${_csc_candidate}")
+        break()
+      endif()
+    endforeach()
+  endif()
+  if(DOCKFORGE_CSC)
+    add_custom_command(OUTPUT "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/hw_sidecar.exe"
+      COMMAND "${CMAKE_COMMAND}" -E make_directory
+              "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
+      COMMAND "${DOCKFORGE_CSC}" -nologo -target:exe
+              "-out:${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/hw_sidecar.exe"
+              -r:System.Runtime.WindowsRuntime.dll
+              -r:System.Runtime.InteropServices.WindowsRuntime.dll
+              -r:"C:/Windows/Microsoft.NET/Framework64/v4.0.30319/System.Runtime.dll"
+              -r:C:/Windows/System32/WinMetadata/Windows.Foundation.winmd
+              -r:C:/Windows/System32/WinMetadata/Windows.Media.winmd
+              -r:C:/Windows/System32/WinMetadata/Windows.Devices.winmd
+              "${CMAKE_CURRENT_SOURCE_DIR}/tools/hw_sidecar.cs"
+      DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tools/hw_sidecar.cs
+      COMMENT "csc: hw_sidecar.exe (T-068 media/radio bridge)"
+      VERBATIM)
+    add_custom_target(hw_sidecar ALL
+      SOURCES "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/hw_sidecar.exe")
+  else()
+    message(STATUS "hw_sidecar: csc.exe not found - media/radio controls will be unavailable")
+  endif()
 endif()

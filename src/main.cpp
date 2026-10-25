@@ -23,6 +23,10 @@
 #include "dock/launchpad.h"
 #include "dock/running_tracker.h"
 #include "dock/tile_order.h"
+#include "finderbar/audio_hardware.h"
+#include "finderbar/hardware_panel.h"
+#include "finderbar/media_sidecar.h"
+#include "finderbar/system_stats.h"
 #include "settings/settings_window.h"
 #include "platform/composition.h"
 #include "platform/display.h"
@@ -1378,6 +1382,140 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         }
     };
 
+    // ---- hardware control panel (T-068, C-23) ----------------------------
+    // The Finder Bar itself is M2/TODO, so the panel is a top-anchored popup
+    // gated behind DOCKFORGE_HW_PANEL (default off, same rule as every
+    // system-visible feature). Audio goes direct COM (Core Audio, spike
+    // audio_spike.cpp); media + radios go through the .NET sidecar exe
+    // (MinGW cannot complete WinRT async, spike winrt_mingw.cpp). The sidecar
+    // lives exactly as long as the panel is open.
+    const bool hw_panel_enabled = ReadEnvFlag(L"DOCKFORGE_HW_PANEL", false);
+    finderbar::AudioHardware hw_audio([&](const finderbar::VolumeChanged& e) {
+        bus.Publish(e);
+    });
+    finderbar::MediaSidecarBridge hw_sidecar;
+    finderbar::SystemStatsSampler hw_stats;
+    finderbar::HardwarePanel hw_panel(&hw_audio, &hw_sidecar,
+                                      [&] { return hw_stats.Update(); });
+    bool hw_panel_ready = false;
+    if (hw_panel_enabled) {
+        if (finderbar::HardwarePanel::RegisterWindowClass(instance)) {
+            if (hw_panel.Create(instance)) {
+                hw_panel_ready = true;
+                if (ReadEnvFlag(L"DOCKFORGE_HW_PANEL_SHOW", false)) {
+                    hw_sidecar.Start();
+                    hw_panel.Open();
+                }
+                DF_INFO("finderbar", "hardware panel ready (window deferred until show)");
+            } else {
+                DF_WARN("finderbar", "hardware panel window creation failed");
+            }
+        } else {
+            DF_WARN("finderbar", "hardware panel class registration failed");
+        }
+    }
+    // C-23 event visibility: every hardware event lands in the log, which is
+    // what the evidence probe asserts on (the same pattern the settings window
+    // uses for ConfigChanged). The second subscription refreshes the panel -
+    // synchronous dispatch means the repaint happens before Publish returns.
+    bus.Subscribe<finderbar::VolumeChanged>([](const finderbar::VolumeChanged& e) {
+        DF_INFO("finderbar", "VolumeChanged session=%s level=%.3f muted=%d",
+                core::WideToUtf8(e.session_id).c_str(), static_cast<double>(e.level),
+                e.muted ? 1 : 0);
+    });
+    bus.Subscribe<finderbar::VolumeChanged>([&](const finderbar::VolumeChanged&) {
+        hw_panel.OnAudioChanged();
+    });
+
+    // Probe channel (settings/folder pattern). Commands: show, hide, media
+    // <action>, volume <0..100>, mute <0|1>, radio <kind> <0|1>, session
+    // <index> <0..100>, state (writes DOCKFORGE_HW_PANEL_STATE_FILE).
+    std::wstring hw_cmd_file;
+    std::wstring hw_state_file;
+    if (hw_panel_ready) {
+        wchar_t buffer[MAX_PATH]{};
+        DWORD n = GetEnvironmentVariableW(L"DOCKFORGE_HW_PANEL_CMD_FILE", buffer,
+                                          ARRAYSIZE(buffer));
+        if (n > 0 && n < ARRAYSIZE(buffer)) hw_cmd_file.assign(buffer, n);
+        n = GetEnvironmentVariableW(L"DOCKFORGE_HW_PANEL_STATE_FILE", buffer,
+                                    ARRAYSIZE(buffer));
+        if (n > 0 && n < ARRAYSIZE(buffer)) hw_state_file.assign(buffer, n);
+        DF_INFO("finderbar", "probe cmd=%s state=%s",
+                hw_cmd_file.empty() ? "<none>" : core::WideToUtf8(hw_cmd_file).c_str(),
+                hw_state_file.empty() ? "<none>" : core::WideToUtf8(hw_state_file).c_str());
+    }
+    auto write_hw_state_file = [&]() {
+        if (hw_state_file.empty()) return;
+        const std::string json = hw_panel.SnapshotJson() + "\n";
+        HANDLE h = CreateFileW(hw_state_file.c_str(), GENERIC_WRITE,
+                               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                               nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (h == INVALID_HANDLE_VALUE) return;
+        DWORD written = 0;
+        WriteFile(h, json.data(), static_cast<DWORD>(json.size()), &written, nullptr);
+        CloseHandle(h);
+    };
+    std::string hw_last_command;
+    double hw_cmd_since_read_ms = 1e9;
+    auto read_hw_command = [&](double delta_ms) {
+        hw_cmd_since_read_ms += delta_ms;
+        if (hw_cmd_since_read_ms < 50.0) return;
+        hw_cmd_since_read_ms = 0.0;
+        if (hw_cmd_file.empty()) return;
+        HANDLE h = CreateFileW(hw_cmd_file.c_str(), GENERIC_READ,
+                               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                               nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (h == INVALID_HANDLE_VALUE) return;
+        char raw[256]{};
+        DWORD got = 0;
+        const BOOL read_ok = ReadFile(h, raw, sizeof(raw) - 1, &got, nullptr);
+        CloseHandle(h);
+        if (!read_ok || got == 0) return;
+        raw[got] = '\0';
+        std::string command(raw);
+        while (!command.empty() &&
+               (command.back() == '\n' || command.back() == '\r' || command.back() == ' ')) {
+            command.pop_back();
+        }
+        if (command.empty() || command == hw_last_command) return;
+        hw_last_command = command;
+        DF_INFO("finderbar", "probe command=%s", command.c_str());
+        auto report = [&](const finderbar::HardwareControlError& err) {
+            if (!err.ok()) {
+                DF_WARN("finderbar", "control failed: %s hr=0x%08lX",
+                        core::WideToUtf8(err.message).c_str(), err.hresult);
+            }
+        };
+        if (command == "show") {
+            if (!hw_sidecar.running()) hw_sidecar.Start();
+            hw_panel.Open();
+        } else if (command == "hide") {
+            hw_panel.Close();
+            hw_sidecar.Stop();
+        } else if (command == "state") {
+            write_hw_state_file();
+        } else if (command.rfind("media ", 0) == 0) {
+            report(hw_panel.MediaCommand(command.c_str() + 6));
+        } else if (command.rfind("volume ", 0) == 0) {
+            const int pct = atoi(command.c_str() + 7);
+            report(hw_panel.SetMasterVolume(static_cast<float>(pct) / 100.0f));
+        } else if (command.rfind("mute ", 0) == 0) {
+            report(hw_panel.ToggleMasterMute());
+        } else if (command.rfind("radio ", 0) == 0) {
+            int kind = 0, on = 0;
+            if (sscanf(command.c_str() + 6, "%d %d", &kind, &on) == 2) {
+                report(hw_panel.SetRadio(kind, on != 0));
+            }
+        } else if (command.rfind("session ", 0) == 0) {
+            int index = 0, pct = 0;
+            if (sscanf(command.c_str() + 8, "%d %d", &index, &pct) == 2) {
+                report(hw_panel.SetSessionVolume(index,
+                                                 static_cast<float>(pct) / 100.0f));
+            }
+        }
+        write_hw_state_file();
+    };
+
     auto repaint = [&] {
         const float dpi = static_cast<float>(window.Dpi());
         const std::int64_t paint_start = core::QueryPerformanceTicks();
@@ -1861,6 +1999,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
             const int index = folder_probe_tile_click;
             folder_probe_tile_click = -1;
             ActivateTile(index);
+        }
+        // Hardware panel (T-068): the panel self-throttles its 2s sampling
+        // inside Tick; hidden costs nothing. The probe reader piggybacks the
+        // same 50ms cadence as every other file channel.
+        if (hw_panel_ready) {
+            hw_panel.Tick(delta_ms);
+            read_hw_command(delta_ms);
         }
         if (running_tracker.Update(delta_ms)) {
             running_tracker.ApplyToTiles(tiles);
