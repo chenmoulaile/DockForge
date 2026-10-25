@@ -1074,3 +1074,47 @@ icon_mask.apply_to_system_icons: bool = false
 dock.hide_mode: enum{normal, auto_hide, smart_hide, hotkey_only, always_visible, always_hidden} = normal
 per_app_hide_overrides: [{ app_id, hide_mode }]
 ```
+
+## C-31 Finder 栏布局配置（P5 冻结，即 P5 提示词的 C-18 顺延）
+
+```
+finderbar.enabled: bool = true
+finderbar.height: int = 28 (px@100%DPI)
+finderbar.position: enum{top, bottom} = top
+finderbar.left: enum{system_menu, app_name, app_name_with_menu} = app_name_with_menu
+finderbar.widgets: [{ type: enum{cpu, memory, disk, network, temperature, weather, media, calendar_brief}, order: int }]
+finderbar.right: [{ type: enum{tray_mirror, control_center, notification_center, ime, battery, network, clock, weather_brief}, order: int }]
+finderbar.tray_order: [string]  // 托盘图标标识列表，按渲染顺序
+finderbar.hide_mode: enum{normal, auto_hide, smart_hide, always_visible} = normal
+```
+
+## C-32 应用菜单读取与转发（P5 冻结，即 P5 提示词的 C-19 顺延）
+
+```
+读取: GetMenu(hwnd) → GetMenuItemCount → GetMenuItemInfo
+渲染: Finder 栏内菜单项，最多 6 项 + "更多"
+转发: PostMessage(hwnd, WM_COMMAND, MAKEWPARAM(item_id, 0), 0)
+降级: 读取失败时只显示应用名，不崩溃
+禁止: 注入目标进程、hook 全局菜单消息
+```
+
+## C-33 托盘镜像渲染（P5 冻结，即 P5 提示词的 C-20 顺延）
+
+```
+枚举路径: FindWindow("Shell_TrayWnd") → FindWindowEx(..., "TrayNotifyWnd") → 子窗口
+渲染: Finder 栏右侧镜像渲染，不移动原图标
+点击: SendMessage 转发到原托盘窗口对应区域
+排序: finderbar.tray_order 持久化，默认按原顺序
+降级: 枚举失败时显示占位图标
+禁止: hook explorer、替换系统托盘窗口
+```
+
+## C-34 控制中心面板（P5 冻结，即 P5 提示词的 C-21 顺延）
+
+```
+触发: Finder 栏控制中心按钮
+面板: 独立无边框窗口，材质跟随 ADR-0008
+内容: 音量、亮度（若支持）、WiFi、蓝牙、勿扰、夜览、媒体控制
+关闭: 点击外部或 Esc
+禁止: 接管系统原生 OSD
+```

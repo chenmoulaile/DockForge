@@ -2,7 +2,7 @@
     "project": "DockForge",
     "schema": 1,
     "milestone": "M3",
-    "last_task": "T-050",
+    "last_task": "T-300",
     "last_commit": "e5913c6",
     "current_module": "settings",
     "current_task": "T-050",
@@ -130,5 +130,5 @@
         "FrameClock 是 1000 样本滚动窗，p99 必须在 frames>=1000 之后读，否则仍含启动首帧（实测 frames=377 时 19.6ms，frames=1000 后 16.5ms）",
         "TASKS.md / CONTRACTS.md 在 HEAD 中是 UTF-8 无 BOM + LF；用 WriteAllText 写中文后必须把 CRLF 归一化成 LF，否则 git diff 会把整文件标成改动"
     ],
-    "updated_at": "2026-10-25T10:25:00+08:00"
+    "updated_at": "2026-10-25T10:30:00+08:00"
 }
