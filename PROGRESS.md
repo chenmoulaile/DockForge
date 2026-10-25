@@ -505,3 +505,34 @@ config=false 不动任务——不主动清除用户手工创建的同名任务�
 - 附带修复（跨任务）：BadgeAccentColor 自 T-065 起只读 HKCU\...\Explorer\AccentColor，该值在默认配置机器不存在（本机实测 null）——一直走 fallback 红。改为 Win10 AccentColor → Win11 Accent\AccentColorMenu 两级读取（本机 0xFFB16300=#0063B1）。badge 与进度条共用，均受益。
 - 诚实边界（evidence/T-067/verify.txt）：Chrome 下载白名单未覆盖（需另起 spike）；Paused/Error 无法程序化触发 explorer 对话框，以常量级单测锁定；8 小时句柄长跑未执行（单会话不可行，tools/progress_handles.ps1 已就绪只需时长）。
 - 下轮开始于：T-068 或 T-067 补 8 小时长跑
+
+## 2026-10-25T18:15:00+08:00 | T-068 | PARTIAL
+- 做了什么：MyFinder 硬件控制面板（C-23）。spike 三连实测定调：Core Audio
+  MinGW 直连全绿（7 会话枚举+端点读写+回调到达）；GSMTC/Radios 的 WinRT
+  async 在 MinGW 进程 15s 不完成（handler 永不触发，与 T-065 边界一致，
+  BLOCKERS B-007）→ .NET sidecar（tools/hw_sidecar.cs，系统自带 csc 编译，
+  stdin/stdout 行协议，事件推送节流 250ms，随面板开/关起/停）；.NET 投影
+  对照探针拿全 ABI 声明序+全链路可用性。产品层：src/finderbar/
+  audio_hardware（端点+会话+事件）、system_stats（纯函数 CPU% 数学）、
+  media_sidecar（进程桥+行协议解析）、hardware_panel（GDI 弹出面板，
+  folder_panel 模式）、hardware_types（C-23 四事件+错误形状）。
+- 实测：gate -Action all 退出 0（371 用例 4048 断言，新增 hardware_test
+  13 用例）；实机探针 tools/hw_panel_probe.ps1 A..G 全 PASS（A sidecar+
+  radios=2+sessions=4；B 音量 0.33 三重验证——状态文件+audio_spike 独立读
+  level=0.330+VolumeChanged 事件日志；C session 0→0.5；D CPU 15.4%/内存
+  97.4%；E 无媒体会话时错误不静默；G hide 后 sidecar 进程消失）；面板截图
+  视觉模型读出全部区块（⏮▶⏭、主音量 90%、麦克风 100%、WLAN/蓝牙 On、
+  CPU/内存条、红色错误条"媒体控制失败：no media session"）；空闲 CPU 面板
+  开 40s 稳态 0.23-0.26% < 0.3% 预算（基线 0.23%）。
+- 探针迭代教训（两项都是真产品缺陷，非环境）：① IAudioEndpointVolumeCallback
+  ::OnNotify 在 audio 服务线程到达，回调内做 COM/EventBus/GDI 会间歇性死锁
+  audio 线程（同一探针一次 PASS 一次 FAIL）→ 回调体只 PostMessage（wparam
+  编码 capture/mute、lparam 编码 level×10000），主线程 WndProc 走完整 C-23
+  链；② Paint() 双缓冲漏了最终 BitBlt(mem→dc)，窗口从未真正绘制（截图只
+  有窗口 rect 没有面板像素）——证据截图先于结论的重要性。
+- 诚实边界（evidence/T-068/verify.txt）：媒体播放/暂停/切歌与 WiFi/蓝牙
+  翻转的**写路径未实机正向验证**——本机无可控 SMTC 媒体源（Chrome autoplay
+  被策略阻止）、翻转真实蓝牙/WiFi 硬件需人工确认（probe F 设计为
+  -RadioRoundTrip 显式 opt-in）；读链路全部实证。sidecar 的 push 事件推送
+  未在无媒体会话环境观察到。多显示器 DPI 位置未验证。
+- 下轮开始于：T-069 热区与全局热键系统（P1）
