@@ -18,13 +18,17 @@ TEST_CASE("config: defaults match CONTRACTS.md C-01", "[config]") {
     REQUIRE(config.appearance.corner_radius == 22);
     REQUIRE(config.behavior.autostart == false);
     REQUIRE(config.behavior.hide_taskbar == false);
+    // T-302c: the dock is on screen until the user says otherwise. A default of false
+    // would mean a fresh install launches with no dock at all, which is the opposite of
+    // what the product is.
+    REQUIRE(config.behavior.dock_visible == true);
 }
 
 TEST_CASE("config: serialized defaults contain every schema key", "[config]") {
     const std::string text = SerializeConfig(Config{});
     for (const char* key : {"icon_size", "gap", "magnification", "hover_falloff",
                             "influence_radius", "falloff_sharpness", "position", "material",
-                            "corner_radius", "autostart", "hide_taskbar"}) {
+                            "corner_radius", "autostart", "hide_taskbar", "dock_visible"}) {
         INFO("missing key: " << key);
         REQUIRE(text.find(key) != std::string::npos);
     }
@@ -160,4 +164,39 @@ TEST_CASE("config: needs_rewrite flags exactly the repaired files", "[config]") 
     REQUIRE(ParseConfig(R"({"behavior":{"autostart":"yes"}})", bad_type, nullptr));
     REQUIRE(bad_type.needs_rewrite);
     REQUIRE(bad_type.behavior.autostart == false);
+}
+
+TEST_CASE("config: the dock can be hidden and the choice survives a round trip", "[config]") {
+    // T-302c. The whole point of the flag is that a hide survives a restart, so the
+    // assertion has to be a save/load round trip, not just a field assignment.
+    Config hidden;
+    hidden.behavior.dock_visible = false;
+    const std::string text = SerializeConfig(hidden);
+    REQUIRE(text.find("dock_visible") != std::string::npos);
+
+    Config reloaded;
+    REQUIRE(ParseConfig(text, reloaded, nullptr));
+    REQUIRE(reloaded.behavior.dock_visible == false);
+    // Not a repair: the file said exactly what the user meant.
+    REQUIRE_FALSE(reloaded.needs_rewrite);
+}
+
+TEST_CASE("config: the behavior section always carries dock_visible", "[config]") {
+    // Unlike the finderbar section, `behavior` writes all of its keys unconditionally -
+    // autostart and hide_taskbar have always been there, and a section that sometimes
+    // omits a key is harder to read than one that states the value. The assertion is
+    // therefore the opposite of the finderbar one below: presence, not absence.
+    const std::string text = SerializeConfig(Config{});
+    REQUIRE(text.find("dock_visible") != std::string::npos);
+}
+
+TEST_CASE("config: the finder bar pins itself by default", "[config]") {
+    // T-302b: the bar used to auto-hide because the work area could not be reserved.
+    // The AppBar protocol changed that, so the default is now "pinned" and auto-hide is
+    // the fallback. This test exists to make a silent flip back to auto-hide loud.
+    Config config;
+    REQUIRE(config.finderbar.auto_hide == false);
+    REQUIRE(config.finderbar.enabled == true);
+    const std::string text = SerializeConfig(config);
+    REQUIRE(text.find("auto_hide") == std::string::npos);
 }

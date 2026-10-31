@@ -89,6 +89,7 @@ constexpr ControlRow kAppearanceRows[] = {
 
 constexpr ControlRow kBehaviorRows[] = {
     {"behavior.autostart", L"Start with Windows", ControlRow::Kind::Check, nullptr, 0},
+    {"behavior.dock_visible", L"Show the dock", ControlRow::Kind::Check, nullptr, 0},
     {"behavior.hide_taskbar", L"Hide the taskbar", ControlRow::Kind::Check, nullptr, 0},
     // T-075: the weather tile. Off by default (C-01 default), so the dock keeps
     // its shape until the user asks for the tile; the city is required because

@@ -829,3 +829,25 @@ P1/P2 阶段的任务书假设本项目是 WinUI 3 + Windows App SDK 应用，�
 - **已否决的替代路径**：MSAA `OBJID_MENU`（10 个 child 的 name 全空）、UIA `MenuBar`（子项 `CurrentName` 与 `LegacyIAccessible.CurrentName` 全空）、点击应用自己的菜单栏等系统弹出（前台归属不成立时弹不出 `#32768`）。这三条都实测过，不再尝试。
 - **安全边界**：只读、只读同完整性级别的进程、失败即降级，不注入、不写对方内存。
 - **命令 id 0 合法**：`ForwardMenuItem` 只拒绝 `(UINT)-1`。Sublime 的 `File > New File` 命令 id 正是 0，旧代码把它当"无命令"丢弃，导致真实菜单项点了没反应。
+
+## ADR-0050 · 顶栏用 AppBar 协议预留，推翻 Q8 的自动隐藏结论（T-302b 实测）
+- **决策**：Finder 栏默认常驻，用 `SHAppBarMessage(ABM_NEW/ABM_QUERYPOS/ABM_SETPOS)` 向 shell 预留顶条带；`FinderBarConfig::auto_hide` 默认从 `true` 改为 `false`，降为「预留被拒绝时的安全回退」。
+- **为什么与 ADR-0042 相反**：ADR-0042 当时测的是 `SPI_SETWORKAREA`，它返回 1 但 explorer 立即覆盖，工作区不变。本任务测的是任务栏自身用的 AppBar 协议：工作区 `0,0,2880,1824` → `0,56,2880,1824`，最大化窗口顶部 `-13` → `43`（正好下移 56px），`ABM_REMOVE` 精确还原。结论不是「工作区不能改」，是「用错了 API」。ADR-0042 保留不删，作为「这条路已试过」的记录。
+- **不可信值**：`ABM_SETPOS` 返回的是我们请求的 rect，不是 shell 实际给的。只有它之后回读的 `SPI_GETWORKAREA` 能用。
+- **`ABM_REMOVE` 的假失败**：返回 1 但 `GetLastError()==87`（`ERROR_INVALID_PARAMETER`），是 shell 噪声。`ReleaseTopStrip` 明确不把它当错误，否则会误判成「释放失败」并把工作区错归因到别处。
+- **三条常驻必备不可少**：① 关闭栏时先 `ABM_REMOVE` 再隐藏（否则每个最大化窗口凭空短 28dip，屏幕上没有任何东西能解释）；② `auto_hide` 为真时不预留任何条带（收起的栏不能占它不用的空间）；③ `ABN_FULLSCREENAPP` 时必须让开。
+- **预留失败的回退方向**：失败时自动启用 auto_hide（`auto_hide_fallback_`），而不是硬常驻。覆盖所有窗口标题栏比自己隐藏更糟。
+
+## ADR-0051 · 托盘图标运行时绘制，存在性用 Shell_NotifyIconGetRect 证明（T-302c 实测）
+- **决策**：`src/tray/tray_icon.{h,cpp}` 自有窗口类 `DockForgeTrayWindow`；图标用 `RenderIcon` 运行时画（premultiplied BGRA + `CreateIconIndirect`）；存在性断言用 `Shell_NotifyIconGetRect`。
+- **为什么不能用 `platform::Window`**：它的 `WM_DESTROY` 会 `PostQuitMessage`，会结束整个 dock 消息循环。这是 T-015/T-041/T-076 反复踩过的坑。
+- **为什么运行时画**：仓库没有 `.rc`，也没有 `.ico`；`ASSETS.md` 又禁止 Apple 商标。为一个 32px 字形往仓库里放二进制块不值，而且运行时画的东西可以被单测断言像素（`CountCoverage`）。字形用「圆角板 + 三个圆点」，与 Finder 栏系统菜单图标同一个标记，两个入口读起来是同一个产品。
+- **为什么不能用按钮计数**：Win11 的通知区已经是 XAML island，`Shell_TrayWnd` 下只有 `Windows.UI.Composition.DesktopWindowContentBridge` 与 `TrayNotifyWnd`，没有 `SysPager`、没有 `ToolbarWindow32`，`TB_BUTTONCOUNT` 恒为 -1。`Shell_NotifyIconGetRect` 回答的是「这个图标在不在」，不是「某个窗口里有没有它」，所以它是唯一诚实的存在性证据。
+- **`NIM_ADD` 不幂等**：对已存在的图标返回 0，必须回落 `NIM_MODIFY`。`TaskbarCreated` 重注册时必须先 `added_=false`，否则也会走到一个假成功分支。
+- **菜单关闭不能依赖前台赋权**：`SetForegroundWindow=0` 时菜单不进菜单模式，外部点击无效且卡 17 秒后返回默认项。自救路径：`WM_TIMER(60ms)` 里 `FindWindowW(L"#32768")` + `GetAsyncKeyState(VK_LBUTTON) & 0x8000`（无前台权限也能读物理按键）+ 光标在弹窗外则 `EndMenu()`，实测 1406ms 退出。
+
+## ADR-0052 · 变更检测比较「已应用状态」而非 `config`（T-302c 实测）
+- **决策**：`ConfigChanged` 订阅者的「是否真的变了」判定，必须比较它自己上次应用的值（`dock_visible_applied`、`finderbar_applied`），不能比较 `config.behavior.x` / `config.finderbar`。
+- **原因**：这个仓库里所有发布者都先把新值写进 `config` 再 `bus.Publish(core::ConfigChanged{config})`（热重载是 `config = std::move(next)`，托盘处理器与热键分支是 `config = updated`）。所以订阅者里写 `if (config.x == event.config.x) return;` 永远命中，改动被静默丢弃。
+- **真实后果**：第一版就是这么写的，结果「config 说 hidden 而 dock 仍在屏幕上」，且「热重载后 auto_hide 被接受但永远到不了栏」。两个都是探针抓出来的，不是看出来的。
+- **同类陷阱**：「先清标志再读标志」（T-301 的 `foreground_dirty_`）。两者都属于「状态写在读之前」，都是静默失效，都只能靠端到端探针发现。

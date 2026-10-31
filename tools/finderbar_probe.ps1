@@ -214,33 +214,28 @@ Check ($s.height_dip -eq 28) 'height is 28 dip'
 Check ($s.dpi -eq 192) 'dpi is 192'
 Check ([math]::Abs($s.width_dip - ($barW / 2.0)) -lt 1.0) 'width_dip matches the window width in dip'
 
-# ---- B: auto-hide --------------------------------------------------------------
-Write-Host '--- B: auto-hide'
-Check ([bool]$s.auto_hide) 'auto_hide is on by default'
-# Park the pointer well away from the top edge first: the bar's state depends on where
-# the physical cursor is, and a probe must not inherit whatever the previous run left.
+# ---- B: pinned by default ------------------------------------------------------
+# T-302b changed the default. The bar used to retract to a hairline because the work area
+# could not be reserved; the AppBar protocol does reserve it (spike Q10..Q13), so the bar
+# is now pinned and full height from the start. The retract path still exists and is
+# covered by tools\appbar_probe.ps1 with auto_hide turned on - keeping it here as well
+# would mean two launches in one script for no extra coverage.
+Write-Host '--- B: pinned by default'
+# Park the pointer away from the top edge so the state cannot be inherited from whatever
+# the previous run left behind.
 [T301Probe]::SetCursorPos([int]($barW / 2), 900) | Out-Null
 Start-Sleep -Milliseconds 700
 Send-Cmd 'state'
 $s = Get-State
-Write-Host ("  retracted: progress={0} offset={1} interactive={2}" -f $s.progress, $s.offset_dip, $s.interactive)
-Check ([math]::Abs($s.offset_dip - (-24.0)) -lt 0.01) 'retracted bar is offset by -(28-4) dip'
-Check ([bool]$s.interactive -eq $false) 'retracted bar is not interactive'
+Write-Host ("  pinned: auto_hide={0} auto_hiding={1} progress={2} offset={3} interactive={4} reserved={5}px" -f `
+        $s.auto_hide, $s.auto_hiding, $s.progress, $s.offset_dip, $s.interactive, $s.reserved_strip_px)
+Check ([bool]$s.auto_hide -eq $false) 'auto_hide is off by default (the bar is pinned)'
+Check ([bool]$s.auto_hiding -eq $false) 'the bar is not retracting'
+Check ([math]::Abs($s.offset_dip) -lt 0.01) 'a pinned bar has zero offset even with the pointer away'
+Check ([bool]$s.interactive) 'a pinned bar is interactive'
+Check ([int]$s.reserved_strip_px -gt 0) 'the shell is holding a strip for the bar'
 $hit = [T301Probe]::At([int]($barW / 2), 28)
-Check ($hit -ne $barHwnd) 'retracted bar does not capture clicks (empty window region)'
-Save-Shot 'bar_retracted.png' 0 0 $barW 56
-
-# Pointer to the very top edge: the trigger band is 3 dip tall.
-[T301Probe]::SetCursorPos([int]($barW / 2), 1) | Out-Null
-Start-Sleep -Milliseconds 700
-Send-Cmd 'state'
-$s = Get-State
-Write-Host ("  after pointer at top: progress={0} offset={1} interactive={2}" -f $s.progress, $s.offset_dip, $s.interactive)
-Check ([double]$s.progress -ge 0.99) 'pointer at the top edge fully expands the bar'
-Check ([math]::Abs($s.offset_dip) -lt 0.01) 'expanded bar has zero offset'
-Check ([bool]$s.interactive) 'expanded bar is interactive'
-$hit = [T301Probe]::At([int]($barW / 2), 28)
-Check ($hit -eq $barHwnd) 'expanded bar captures clicks'
+Check ($hit -eq $barHwnd) 'the pinned bar captures clicks'
 Save-Shot 'bar_expanded.png' 0 0 $barW 56
 
 # The bar must be *visible* - a DComp surface with WDA_EXCLUDEFROMCAPTURE renders nothing
@@ -339,15 +334,17 @@ Write-Host ("  after cancel: menu_open={0} paints={1}" -f $s.menu_open, $s.paint
 Check ([bool]$s.menu_open -eq $false) 'WM_CANCELMODE dismisses the popup'
 Check ([int]$s.paints -ge [int]$beforePaints) 'the bar kept painting across the popup'
 
-# ---- G: retraction after the pointer leaves -------------------------------------
-Write-Host '--- G: retract again'
+# ---- G: still pinned after the pointer leaves -----------------------------------
+Write-Host '--- G: stays pinned'
 [T301Probe]::SetCursorPos([int]($barW / 2), 900) | Out-Null
 Start-Sleep -Milliseconds 700
 Send-Cmd 'state'
 $s = Get-State
-Write-Host ("  after pointer leaves: progress={0} interactive={1}" -f $s.progress, $s.interactive)
-Check ([double]$s.progress -le 0.01) 'the bar retracts once the pointer leaves'
-Check ([bool]$s.interactive -eq $false) 'the retracted bar stops being interactive'
+Write-Host ("  after pointer leaves: progress={0} interactive={1} reserved={2}px" -f `
+        $s.progress, $s.interactive, $s.reserved_strip_px)
+Check ([double]$s.progress -ge 0.99) 'the pinned bar does not retract when the pointer leaves'
+Check ([bool]$s.interactive) 'the pinned bar stays interactive'
+Check ([int]$s.reserved_strip_px -gt 0) 'the reservation survives the pointer leaving'
 
 # ---- verdict --------------------------------------------------------------------
 Get-Process -Name menu_target -ErrorAction SilentlyContinue | Stop-Process -Force

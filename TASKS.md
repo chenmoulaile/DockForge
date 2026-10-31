@@ -11,7 +11,7 @@
 |---|---|---|---|
 | M0 | 骨架与验证 | 构建链路、窗口、渲染、配置、图标、布局数学全部跑通 | DONE（T-006a 帧尾延迟仍 TODO P1） |
 | M1 | Dock 核心 | 可用的 Dock 栏（放大、启动、指示、拖拽、缩略图） | DONE（T-009..T-016 全部 DONE） |
-| M2 | Finder Bar | 顶部栏 | IN PROGRESS（左区 T-301 DONE；中区 T-302 / 右区 T-303..T-307 TODO） |
+| M2 | Finder Bar | 顶部栏 | IN PROGRESS（左区 T-301 DONE、常驻与预留 T-302b DONE；中区 T-302 / 右区 T-303..T-307 TODO） |
 | M3 | Launchpad | 全屏网格启动器 | DONE (T-040/T-041/T-042 全部完成) |
 | M4 | 配置与主题 | 热重载 + 主题包 | DONE（T-050/T-051/T-052 全部 DONE；T-085 主题分发属 P1.5 队列） |
 | M5 | 系统集成 | 自启、隐藏任务栏、转储、日志轮转 | DONE（T-060/T-061/T-062 全部 DONE） |
@@ -1204,6 +1204,33 @@ GitHub: 已 push 至 <url> | 最新 commit <sha> | tag: <无/xxx>
   - [x] 自动隐藏（Q8 硬约束的必然结果）—— `AdvanceAutoHide` 180ms smoothstep，收起态只留 4dip hairline 且 `SetWindowRgn` 把点击目标一起收掉；探针实测展开 `progress=1.0 interactive=True`、收起 `progress=0.0 interactive=False` 且 `WindowFromPoint` 不再命中栏
 - 证据: `evidence/T-301/`（`probe.txt` verdict 五项 PASS、`owner_probe.txt` 十三项 PASS、`bar_retracted.png`/`bar_expanded.png`/`bar_with_menu.png`/`menu_open.png`、`dockforge-*.log`、`target-state.txt`、`menu_spike13.txt`、`alpha.txt`/`interp.txt`/`icon_fill.txt`、`dock_after_alpha.png`+`slots_after_alpha.txt`）
 - 备注: 三个不可绕过的实测约束已写成 ADR-0042..0045，图标与自绘菜单的四个决策写成 ADR-0046..0049。①**工作区预留不可行**：`SPI_SETWORKAREA` 返回成功但 explorer 立即覆盖，新最大化窗口仍压在栏下 → 只能自动隐藏。②**点击穿透与 DComp 材质互斥**：`WS_EX_LAYERED|WS_EX_TRANSPARENT`+`SetLayeredWindowAttributes` 能穿透，但不能配 `WS_EX_NOREDIRECTIONBITMAP`，故栏走 `SetWindowRgn` 路线。③**菜单必须在工作线程弹出**：`GetMenuItemRect` 只能在拥有菜单的线程调用（主线程调用在 192DPI 下返回双倍坐标），且菜单线程 `SetForegroundWindow` 成功后 Escape/外部点击才由系统原生关闭，失败回落 `WM_CANCELMODE`。另有两条截图侧教训：`WDA_EXCLUDEFROMCAPTURE` 会让栏对所有截图工具隐形（改为按 `style_.use_capture` 条件设置），`SetWindowRgn` 同时是绘制裁剪（零面积 region 会把 hairline 一起裁掉）。材质固定走 Solid 档（Blur 必须配 capture 排除 → 对截图隐形；Mica/Acrylic 忽略 region → 收起态仍填满 28dip）。**自绘菜单栏**：MSAA `OBJID_MENU` 与 UIA `MenuBar` 的子项名称全为空，唯一可行路径是 `dwItemData` + `ReadProcessMemory`（只读、同完整性、失败即降级）。
+
+### T-302b · Finder 栏常驻：AppBar 预留顶条带（用户点名需求）
+- 状态: DONE / 优先级: P5 / 依赖: T-301、ADR-0042 / 预估: 1 会话
+- DoD:
+  - [x] 顶栏默认常驻，不再收成 4dip 细线 —— `FinderBarConfig::auto_hide` 默认从 `true` 改为 `false`；`AutoHideActive()` 将「用户设置」与「预留失败回退」合并成单一判定，`ApplyRegion`/`OffsetDip`/`Tick`/`SnapshotJson` 全部改用它
+  - [x] 顶条带真正预留，最大化窗口不再钻到栏下 —— 新增 `src/finderbar/appbar.{h,cpp}`：`ABM_NEW`→`ABM_QUERYPOS`→`ABM_SETPOS`，回读 `SPI_GETWORKAREA` 作为唯一可信值；`ABM_REMOVE` 退出时精确还原
+  - [x] 栏关闭时释放预留 —— `SetEnabled(false)` 先 `ReleaseTopStrip()`，否则每个最大化窗口凭空短 28dip 且屏幕上没有任何东西能解释
+  - [x] 热重载后预留状态跟随 `auto_hide` 变化 —— `ReloadConfig` 末尾按「实际持有量」而非「旧配置值」判断，避免「栏在收起却仍占着 28dip」
+  - [x] 全屏应用时让开 —— `WndProc` 处理 `appbar::kAppBarCallbackMessage`，`ABN_FULLSCREENAPP` 时 `ShowWindow(SW_HIDE)`，退出全屏恢复
+  - [x] 证据 `evidence/T-302/appbar_probe.txt`：Q34..Q37 四项 PASS
+- 证据: `evidence/T-302/appbar_probe.txt`、`evidence/T-302/bar_pinned.png`、`evidence/T-302/px_pinned.txt`、`evidence/T-302/finderbar_regression.txt`
+- 备注: **Q8 的结论被推翻**。T-301 时代测得 `SPI_SETWORKAREA` 返回 1 但工作区不变，得出「顶栏只能靠自动隐藏」。本任务实测 `SHAppBarMessage`（任务栏自身就靠它）真能预留：工作区 `0,0,2880,1824` → `0,56,2880,1824`，最大化窗口顶部 `-13` → `43`（正好下移 56px），`ABM_REMOVE` 精确还原。所以常驻不再是「遮住别人标题栏」的代价，`auto_hide` 降为安全回退（预留被拒绝时自动启用）。另一个实测：`ABM_REMOVE` 返回 1 但 `GetLastError()==87`（`ERROR_INVALID_PARAMETER`）是 shell 噪声，不是失败，`ReleaseTopStrip` 明确不把它当错误。
+
+### T-302c · 系统托盘图标与退出入口（用户点名需求）
+- 状态: DONE / 优先级: P5 / 依赖: T-301 / 预估: 1 会话
+- DoD:
+  - [x] 托盘图标存在且可被 shell 识别 —— 新增 `src/tray/tray_icon.{h,cpp}`：自有窗口类 `DockForgeTrayWindow`（不能复用 `platform::Window`，它的 `WM_DESTROY` 会 `PostQuitMessage`），`NIM_ADD` 失败回落 `NIM_MODIFY`，`NIM_SETVERSION(4)`
+  - [x] 图标运行时绘制 —— 仓库没有 `.rc`/`.ico`（`ASSETS.md` 也禁止 Apple 商标），`RenderIcon` 画圆角板 + 三个圆点（与 Finder 栏系统菜单图标同一个标记），走 premultiplied BGRA + `CreateIconIndirect`
+  - [x] 菜单含 Dock 切换、Finder 栏切换、设置、配置目录、日志目录、退出 —— `BuildMenu` 是纯函数，顺序与 macOS 形状一致（两个可见性开关 → 三个目的地 → Quit 放最后）；Quit 永远 `enabled` 且永远不是默认项
+  - [x] **不需要任务管理器就能退出** —— Quit 走 `PostMessage(WM_CLOSE)`，`WM_CLOSE` 分支先 `tray_icon.Remove()` 再 `DestroyWindow`，避免主窗口消失后图标变成 ghost 直到 shell 下次 hover
+  - [x] 菜单关闭不依赖前台赋权 —— `WM_TIMER` 自救：`FindWindowW(L"#32768")` 找弹窗 + `GetAsyncKeyState(VK_LBUTTON)` 读物理按键 + 光标在弹窗外则 `EndMenu()`（spike Q7 实测 1406ms 退出，否则卡 17 秒）
+  - [x] Dock 可隐藏且跨重启保持 —— 新增 `BehaviorConfig::dock_visible`（默认 `true`，与 `DockConfig::hidden` 语义不同：后者是「哪些图标被移除」），走 C-01 三处 parse/clamp/serialize + settings 字段 `behavior.dock_visible`
+  - [x] 隐藏不被任何布局重算复活 —— `apply_placement` 的 `SWP_SHOWWINDOW` 改为条件式；否则设置变更、显示器变更、托盘菜单关闭都会把用户隐藏的 dock 拉回来
+  - [x] 热键 `toggle_dock` 与托盘菜单行为一致 —— 两者都先 `SaveConfig` 再 `Publish`，不再出现「热键能隐藏但重启就回来」
+  - [x] 证据 `evidence/T-302/tray_probe.txt`：Q30..Q33 四项 PASS
+- 证据: `evidence/T-302/tray_probe.txt`
+- 备注: 三条不可绕过的实测事实。① **Win11 通知区已是 XAML island**：`Shell_TrayWnd` 下只有 `Windows.UI.Composition.DesktopWindowContentBridge` 与 `TrayNotifyWnd`，没有 `SysPager`、没有 `ToolbarWindow32`，`TB_BUTTONCOUNT` 恒为 -1，所以存在性只能用 `Shell_NotifyIconGetRect` 证明。② **`NIM_ADD` 对已存在图标返回 0**，重注册必须回落 `NIM_MODIFY`。③ **菜单能否被外部点击/Escape 关闭取决于 owner 是否拿到前台**：`SetForegroundWindow=0` 时菜单不进菜单模式，外部点击无效且卡 17 秒后返回默认项。
 
 ### T-302 · Finder 栏中间：常驻小组件区
 - 状态: TODO / 优先级: P5 / 依赖: T-300 / 预估: 1–2 会话

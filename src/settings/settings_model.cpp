@@ -39,6 +39,9 @@ constexpr FieldSpec kFields[] = {
     {"appearance.corner_radius", FieldSpec::Kind::Int},
     {"behavior.autostart", FieldSpec::Kind::Bool},
     {"behavior.hide_taskbar", FieldSpec::Kind::Bool},
+    // T-302c: the dock's own visibility. Persisted so a hide survives a restart,
+    // and exposed here because the tray menu is not the only place a user looks.
+    {"behavior.dock_visible", FieldSpec::Kind::Bool},
     // T-075: the weather tile config. SameWeather() is the owner's change
     // detector, so an edit that lands on the stored value moves nothing.
     {"weather.enabled", FieldSpec::Kind::Bool},
@@ -184,6 +187,7 @@ std::string SettingsModel::CurrentValueText(const core::Config& config,
         case FieldSpec::Kind::Bool:
             if (field == "behavior.autostart") return config.behavior.autostart ? "1" : "0";
             if (field == "behavior.hide_taskbar") return config.behavior.hide_taskbar ? "1" : "0";
+            if (field == "behavior.dock_visible") return config.behavior.dock_visible ? "1" : "0";
             if (field == "weather.enabled") return config.weather.enabled ? "1" : "0";
             // T-076: the three notification switches. The banner and pulse
             // defaults are ON so a user who only flips `enabled` gets the whole
@@ -362,6 +366,9 @@ int SettingsModel::Apply(core::Config& config, std::vector<std::string>* changed
                 } else if (edit.field == "behavior.hide_taskbar") {
                     moved = value != config.behavior.hide_taskbar;
                     config.behavior.hide_taskbar = value;
+                } else if (edit.field == "behavior.dock_visible") {
+                    moved = value != config.behavior.dock_visible;
+                    config.behavior.dock_visible = value;
                 } else if (edit.field == "weather.enabled") {
                     moved = value != config.weather.enabled;
                     config.weather.enabled = value;

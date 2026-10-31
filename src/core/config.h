@@ -52,6 +52,14 @@ struct AppearanceConfig {
 struct BehaviorConfig {
     bool autostart = false;
     bool hide_taskbar = false;
+    // T-302c: whether the dock is on screen. Persisted rather than transient because
+    // the user asked for a dock that can be hidden - a hide that a restart silently
+    // undoes is not a setting, it is a bug. Default true: the dock is the product.
+    //
+    // Distinct from DockConfig::hidden, which lists tile identities the user removed
+    // from the dock. That one is about which apps are in the dock; this one is about
+    // whether the dock is on screen at all.
+    bool dock_visible = true;
 };
 
 // One Launchpad folder (CONTRACTS.md C-18).
@@ -170,12 +178,18 @@ struct FinderBarConfig {
     // entry that opens a popup listing them.
     int max_menu_items = 6;
     // Q8 in spikes/T-301_finderbar_menu proved SPI_SETWORKAREA is a no-op on
-    // Windows 11 (explorer rewrites the work area immediately), so the bar cannot
-    // reserve space and a maximized window's title bar sits under it. Auto-hide
-    // is therefore the default: the bar retracts to a hairline and slides down
-    // when the pointer reaches the top edge. Users who want it pinned set this
-    // false.
-    bool auto_hide = true;
+    // Windows 11 (explorer rewrites the work area immediately), and that finding used
+    // to make auto-hide the only option. T-302b superseded it: the shell AppBar
+    // protocol (SHAppBarMessage ABM_SETPOS) does reserve the strip - the work area
+    // really moves and a maximized window really moves down by the reserved height
+    // (spikes/T-302_tray/appbar_spike.cpp, Q10..Q13). So the bar can now be pinned
+    // without covering anything, which is the macOS behaviour and what the user asked
+    // for.
+    //
+    // Auto-hide stays available and is still the safe fallback: if the reservation
+    // fails at runtime (another appbar owns the edge, the shell refuses), the bar sets
+    // this true on itself rather than sitting on top of every title bar.
+    bool auto_hide = false;
 };
 
 bool SameFinderBar(const FinderBarConfig& a, const FinderBarConfig& b);

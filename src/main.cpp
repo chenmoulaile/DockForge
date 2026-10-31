@@ -60,6 +60,7 @@
 #include "shell/window_actions.h"
 #include "shell/window_list.h"
 #include "shell/window_registry.h"
+#include "tray/tray_icon.h"
 
 #include <d2d1helper.h>
 #include <dwmapi.h>
@@ -833,9 +834,16 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                     core::WideToUtf8(target_display.device).c_str(),
                     target_display.WorkWidth(), target_display.WorkHeight());
         }
+        // T-302c: a hidden dock must stay hidden. SWP_SHOWWINDOW here used to map the
+        // window unconditionally, which resurrected a dock the user had hidden as soon
+        // as any placement ran - a settings change, a display change, or the tray's own
+        // menu closing. Visibility is the user's decision, so it is read from config and
+        // this path only ever hides; showing is the explicit ShowWindow further down.
+        const UINT position_flags =
+            SWP_NOACTIVATE | (config.behavior.dock_visible ? SWP_SHOWWINDOW : 0);
         SetWindowPos(window.Handle(), HWND_TOPMOST, placement.rect.left, placement.rect.top,
-                     placement.width_px, placement.height_px,
-                     SWP_NOACTIVATE | SWP_SHOWWINDOW);
+                     placement.width_px, placement.height_px, position_flags);
+        if (!config.behavior.dock_visible) ShowWindow(window.Handle(), SW_HIDE);
         surface.Resize(placement.width_px, placement.height_px);
         if (capture_active) {
             capture.SetRegion(placement.rect.left, placement.rect.top, placement.width_px,
@@ -2072,6 +2080,175 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         write_finderbar_state_file();
     };
 
+    // ---- system tray (T-302c) --------------------------------------------
+    // Before this, the only way out of DockForge was Task Manager: the dock has no
+    // title bar, no taskbar button and no window of its own to close. A tray icon with
+    // a Quit entry is the minimum an always-running desktop app owes its user.
+    //
+    // The icon is drawn at runtime rather than shipped as an .ico because the project
+    // has no resource script and no icon file - adding one for a 32px glyph would put a
+    // binary blob in the repo for something sixteen lines of drawing can do.
+    tray::TrayIcon tray_icon;
+    bool tray_ready = false;
+    if (tray::TrayIcon::RegisterWindowClass(instance)) {
+        if (tray_icon.Initialize(instance, window.Handle())) {
+            tray_icon.SetMenuStateProvider([&] {
+                tray::MenuState state;
+                state.dock_visible = config.behavior.dock_visible;
+                state.finder_bar_enabled = config.finderbar.enabled;
+                state.settings_available = settings_ready;
+                return state;
+            });
+            tray_icon.SetCommandHandler([&](tray::Command command) {
+                switch (command) {
+                    case tray::Command::ToggleDock: {
+                        // Same persistence rule as the hotkey: the tray and the shortcut
+                        // must not disagree about whether hiding is a setting.
+                        core::Config updated = config;
+                        updated.behavior.dock_visible = !config.behavior.dock_visible;
+                        if (core::SaveConfig(updated)) {
+                            config = updated;
+                            bus.Publish(core::ConfigChanged{config});
+                        } else {
+                            DF_WARN("tray", "could not persist dock visibility");
+                        }
+                        break;
+                    }
+                    case tray::Command::ShowDock:
+                    case tray::Command::HideDock: {
+                        const bool want = command == tray::Command::ShowDock;
+                        if (config.behavior.dock_visible == want) break;
+                        core::Config updated = config;
+                        updated.behavior.dock_visible = want;
+                        if (core::SaveConfig(updated)) {
+                            config = updated;
+                            bus.Publish(core::ConfigChanged{config});
+                        }
+                        break;
+                    }
+                    case tray::Command::ToggleFinderBar: {
+                        core::Config updated = config;
+                        updated.finderbar.enabled = !config.finderbar.enabled;
+                        if (core::SaveConfig(updated)) {
+                            config = updated;
+                            bus.Publish(core::ConfigChanged{config});
+                        } else {
+                            DF_WARN("tray", "could not persist the finder bar switch");
+                        }
+                        break;
+                    }
+                    case tray::Command::OpenSettings:
+                        if (settings_ready) {
+                            settings.Show();
+                        } else {
+                            DF_WARN("tray", "settings window unavailable this run");
+                        }
+                        break;
+                    case tray::Command::OpenConfigFolder:
+                    case tray::Command::OpenLogs: {
+                        const std::wstring dir = command == tray::Command::OpenLogs
+                                                     ? core::LogsDir()
+                                                     : core::ConfigDir();
+                        const HINSTANCE result = ShellExecuteW(nullptr, L"open", dir.c_str(),
+                                                               nullptr, nullptr, SW_SHOWNORMAL);
+                        DF_INFO("tray", "opening %s -> %s", core::WideToUtf8(dir).c_str(),
+                                reinterpret_cast<std::intptr_t>(result) > 32 ? "ok" : "FAILED");
+                        break;
+                    }
+                    case tray::Command::Quit:
+                        DF_INFO("tray", "quit requested");
+                        PostMessageW(window.Handle(), WM_CLOSE, 0, 0);
+                        break;
+                    default:
+                        break;
+                }
+            });
+            tray_ready = tray_icon.Add();
+            if (tray_ready) {
+                DF_INFO("tray", "tray icon added hwnd=%p", static_cast<void*>(tray_icon.Handle()));
+            } else {
+                DF_WARN("tray", "Shell_NotifyIcon NIM_ADD failed");
+            }
+        } else {
+            DF_WARN("tray", "tray window creation failed");
+        }
+    } else {
+        DF_WARN("tray", "tray window class registration failed");
+    }
+
+    // Probe channel: `state` writes the snapshot, `menu` opens the real context menu,
+    // `quit` raises the Quit command. The menu path is worth probing because spike Q3
+    // measured that an unowned popup can hang for 17 seconds - the watch timer that
+    // rescues it needs to be exercised by something other than a human.
+    std::wstring tray_cmd_file;
+    std::wstring tray_state_file;
+    if (tray_ready) {
+        wchar_t buffer[MAX_PATH]{};
+        DWORD n = GetEnvironmentVariableW(L"DOCKFORGE_TRAY_CMD_FILE", buffer, ARRAYSIZE(buffer));
+        if (n > 0 && n < ARRAYSIZE(buffer)) tray_cmd_file.assign(buffer, n);
+        n = GetEnvironmentVariableW(L"DOCKFORGE_TRAY_STATE_FILE", buffer, ARRAYSIZE(buffer));
+        if (n > 0 && n < ARRAYSIZE(buffer)) tray_state_file.assign(buffer, n);
+        DF_INFO("tray", "probe cmd=%s state=%s",
+                tray_cmd_file.empty() ? "<none>" : core::WideToUtf8(tray_cmd_file).c_str(),
+                tray_state_file.empty() ? "<none>" : core::WideToUtf8(tray_state_file).c_str());
+    }
+    auto write_tray_state_file = [&]() {
+        if (tray_state_file.empty()) return;
+        const std::string json = tray_icon.SnapshotJson() + "\n";
+        HANDLE h = CreateFileW(tray_state_file.c_str(), GENERIC_WRITE,
+                               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                               nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (h == INVALID_HANDLE_VALUE) return;
+        DWORD written = 0;
+        WriteFile(h, json.data(), static_cast<DWORD>(json.size()), &written, nullptr);
+        CloseHandle(h);
+    };
+    core::ProbeCommandGate tray_gate;
+    tray_gate.Prime(core::ReadProbeFileContent(tray_cmd_file));
+    double tray_cmd_since_read_ms = 1e9;
+    auto read_tray_command = [&](double delta_ms) {
+        tray_cmd_since_read_ms += delta_ms;
+        if (tray_cmd_since_read_ms < 50.0) return;
+        tray_cmd_since_read_ms = 0.0;
+        if (tray_cmd_file.empty()) return;
+        const std::string content = core::ReadProbeFileContent(tray_cmd_file);
+        if (!tray_gate.Accept(content)) return;
+        const std::string command = core::ProbeCommandOf(content);
+        if (command.empty()) return;
+        DF_INFO("tray", "probe command=%s", command.c_str());
+        if (command == "menu") {
+            tray_icon.ShowMenu();
+        } else if (command == "cancel") {
+            const HWND popup = FindWindowW(L"#32768", nullptr);
+            if (popup != nullptr) PostMessageW(popup, WM_CANCELMODE, 0, 0);
+            DF_INFO("tray", "probe cancel popup=%p", static_cast<void*>(popup));
+        } else if (command == "quit") {
+            // Goes through the real handler rather than posting WM_CLOSE directly: the
+            // DoD is "the tray menu can quit", and the handler is the thing that also
+            // removes the icon. A probe that skipped it would test a different path than
+            // the one a user takes.
+            tray_icon.InvokeCommand(tray::Command::Quit);
+        } else if (command.rfind("invoke ", 0) == 0) {
+            // Runs a menu command without opening the menu. A probe cannot use `menu` for
+            // this: TrackPopupMenu is modal, so the probe would block until a human
+            // clicked. This goes through the same Dispatch the popup uses.
+            tray::Command picked = tray::Command::None;
+            const std::string name = command.substr(7);
+            if (tray::ParseCommandName(name, picked)) {
+                tray_icon.InvokeCommand(picked);
+                DF_INFO("tray", "probe invoke %s", name.c_str());
+            } else {
+                DF_WARN("tray", "probe invoke: unknown command '%s'", name.c_str());
+            }
+        } else if (command.rfind("pick ", 0) == 0) {
+            const int id = atoi(command.c_str() + 5);
+            if (id > 0) PostMessageW(tray_icon.Handle(), tray::TrayIcon::kCallbackMessage,
+                                     MAKEWPARAM(0, 0), MAKELPARAM(NIN_SELECT, 0));
+            DF_INFO("tray", "probe pick id=%d", id);
+        }
+        write_tray_state_file();
+    };
+
     auto repaint = [&] {
         const float dpi = static_cast<float>(window.Dpi());
         const std::int64_t paint_start = core::QueryPerformanceTicks();
@@ -2237,8 +2414,18 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         switch (info->category) {
             case core::HotkeyCategory::ComponentToggle:
                 if (action == "toggle_dock") {
-                    ShowWindow(window.Handle(),
-                               IsWindowVisible(window.Handle()) ? SW_HIDE : SW_SHOW);
+                    // T-302c: persist the new visibility instead of only calling
+                    // ShowWindow. The old body hid the window but left config saying the
+                    // dock was visible, so the next restart (or any apply_placement)
+                    // brought it back - a hide that does not survive is not a setting.
+                    core::Config updated = config;
+                    updated.behavior.dock_visible = !config.behavior.dock_visible;
+                    if (!core::SaveConfig(updated)) {
+                        DF_WARN("hotkeys", "toggle_dock could not persist config");
+                        return false;
+                    }
+                    config = updated;
+                    bus.Publish(core::ConfigChanged{config});
                     return true;
                 }
                 if (action == "toggle_launchpad") {
@@ -2498,15 +2685,25 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                 config.notifications.poll_seconds);
     });
 
-    // T-301: Finder Bar re-apply. Same rule as weather and notifications - only a
-    // real change against the running config acts, so a hot reload that touches an
-    // unrelated section does not re-read the foreground menu. The env switch keeps
-    // winning: a probe that forced the bar on is not turned off by a publish that
-    // carries the file's value.
+    // T-301: Finder Bar re-apply. The env switch keeps winning: a probe that forced the
+    // bar on is not turned off by a publish that carries the file's value.
+    //
+    // The comparison is against the config the bar is actually running, not against
+    // `config.finderbar`. Two publishers assign `config` before publishing - the hot
+    // reload above (`config = std::move(next)`) and every command handler in this file -
+    // so a "did config change" test can never fire. That bug shipped once already in the
+    // dock-visibility subscriber; here it meant a reloaded auto_hide was accepted into
+    // `config` and never reached the bar.
+    core::FinderBarConfig finderbar_applied = config.finderbar;
     bus.Subscribe<core::ConfigChanged>([&](const core::ConfigChanged& event) {
         if (!finder_bar_ready) return;
-        if (core::SameFinderBar(config.finderbar, event.config.finderbar)) return;
-        const bool was_enabled = config.finderbar.enabled;
+        if (core::SameFinderBar(finderbar_applied, event.config.finderbar)) return;
+        // Enabled is compared against what the bar was told last, not against `config`,
+        // for the same reason the change test above is: a publisher may have already
+        // written the new value into `config` before publishing, which would make the
+        // "did it flip" comparison always false and the bar would never turn on or off.
+        const bool was_enabled = finderbar_applied.enabled;
+        finderbar_applied = event.config.finderbar;
         config.finderbar = event.config.finderbar;
         const bool want = finderbar_forced_on || config.finderbar.enabled;
         if (want != was_enabled) finder_bar.SetEnabled(want);
@@ -2518,6 +2715,35 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                 config.finderbar.show_app_name ? 1 : 0,
                 config.finderbar.show_app_menu ? 1 : 0,
                 config.finderbar.max_menu_items, config.finderbar.auto_hide ? 1 : 0);
+    });
+
+    // T-302c: the dock's own visibility. Separate from the finderbar subscriber above
+    // because they answer different questions, and a publish that flips one must not be
+    // able to touch the other.
+    //
+    // The comparison is against what the window is actually showing, not against
+    // `config.behavior.dock_visible`. Every caller in this file assigns `config` before
+    // publishing (the tray handler, the hotkey arm), so a "did config change" test can
+    // never fire - it was written that way first and the dock stayed on screen while the
+    // config said hidden. Tracking the applied state is the only comparison that holds
+    // no matter who published.
+    bool dock_visible_applied = config.behavior.dock_visible;
+    bus.Subscribe<core::ConfigChanged>([&](const core::ConfigChanged& event) {
+        const bool want = event.config.behavior.dock_visible;
+        config.behavior.dock_visible = want;
+        if (want == dock_visible_applied) return;
+        dock_visible_applied = want;
+        DF_INFO("app", "dock visibility -> %d", want ? 1 : 0);
+        if (!want) {
+            // Hide first, then re-place: apply_placement no longer forces the window
+            // visible, so the order only matters for the frame the user sees.
+            ShowWindow(window.Handle(), SW_HIDE);
+            apply_placement();
+            return;
+        }
+        apply_placement();
+        ShowWindow(window.Handle(), SW_SHOWNOACTIVATE);
+        UpdateWindow(window.Handle());
     });
 
     // ---- OLE drop target (T-014) ----------------------------------------
@@ -2871,6 +3097,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         if (finder_bar_ready) {
             finder_bar.Tick(delta_ms, config);
             read_finderbar_command(delta_ms);
+        }
+        // System tray (T-302c). Only the probe reader runs per frame; the icon itself is
+        // event driven, so a quiet tray costs one 50ms timer check and nothing else.
+        if (tray_ready) {
+            read_tray_command(delta_ms);
         }
         // Weather (T-075): the countdown to the next automatic refresh runs
         // here, and a published snapshot is adopted at most once per frame.
@@ -3715,7 +3946,20 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                     return true;
                 }
                 return false;
+            case tray::TrayIcon::kCallbackMessage:
+                // The tray owns its own window and window procedure, so the shell talks
+                // to it directly and this arm should never fire. Kept as a no-op so a
+                // stray callback cannot fall into DefWindowProc and beep.
+                out = 0;
+                return true;
             case WM_CLOSE:
+                // T-302c: take the icon down before the window dies. A tray icon whose
+                // owner window is gone is left in the notification area until the shell
+                // notices on hover - the "ghost icon" every tray app has shipped once.
+                if (tray_ready) {
+                    tray_icon.Remove();
+                    tray_ready = false;
+                }
                 DestroyWindow(hwnd);
                 loop.Quit(0);
                 out = 0;
@@ -3729,8 +3973,15 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         }
     });
 
-    ShowWindow(window.Handle(), SW_SHOWNOACTIVATE);
-    UpdateWindow(window.Handle());
+    // T-302c: honour the persisted visibility instead of always showing. The dock is
+    // created visible because the window style says so; a user who hid it last session
+    // gets it back hidden, which is the whole point of persisting the flag.
+    if (config.behavior.dock_visible) {
+        ShowWindow(window.Handle(), SW_SHOWNOACTIVATE);
+        UpdateWindow(window.Handle());
+    } else {
+        DF_INFO("app", "dock starts hidden (behavior.dock_visible=false)");
+    }
 
     // Re-run placement now that the window is mapped: the first pass happened
     // before ShowWindow, so the work area is re-read in case the taskbar changed
@@ -3805,6 +4056,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     // residue" guarantee. The host's destructor would do the same; doing it
     // here keeps all three unregisters on the same lines of the shutdown path.
     hotkey_host.UnregisterAll();
+    // T-302c: the tray goes before the bar and the dock. Removing the icon is a shell
+    // round trip on a live window; doing it after DestroyWindow leaves a ghost icon in
+    // the notification area until the shell next hovers it.
+    if (tray_ready) {
+        tray_icon.Remove();
+        tray_ready = false;
+    }
     // T-301: the bar owns a window, a DComp surface and a possibly blocked menu
     // thread, so it goes before the dock's own surface for the same reason the
     // Launchpad does - a live composition target on a destroyed HWND is a shutdown

@@ -663,3 +663,24 @@ config=false 不动任务——不主动清除用户手工创建的同名任务�
 - 诚实边界：① 探针不读应用内部状态（按用户要求"别动我 sublime"），只断言"读到了标题 + 消息发出去了 + 分隔符被拒"，因此"Sublime 真的执行了那条命令"这一步没有仪器证据，只有 `PostMessage` 返回值与日志。② 图标视觉归一化按实测否决（ADR-0048），不是没做而是不该做；如果用户仍觉得小，需要改的是 dock 槽位占比（`dock_view.cpp` 的 slot 计算），属 T-202 蒙版任务的范畴。③ 本机未安装 VS Code，自绘菜单栏只在 Sublime Text 上验证过。
 - 证据：`evidence/T-301/`（`alpha.txt`、`interp.txt`、`icon_fill.txt`、`menu_spike13.txt`、`owner_probe.txt`、`dock_after_alpha.png`、`slots_after_alpha.txt`）
 - 下轮开始于：T-302 Finder 栏中间常驻小组件区（P5）
+
+## 2026-11-01T04:20:00+08:00 | T-302b + T-302c | DONE
+- 做了什么：用户点名三件事全部落地。① **顶栏常驻**：新增 `src/finderbar/appbar.{h,cpp}`，用 shell AppBar 协议（`ABM_NEW`→`ABM_QUERYPOS`→`ABM_SETPOS`）预留顶条带，`FinderBarConfig::auto_hide` 默认从 `true` 翻成 `false`，降为预留失败时的回退；② **Dock 可隐藏**：新增 `BehaviorConfig::dock_visible`（C-01 三处 + settings 字段 `behavior.dock_visible`），`apply_placement` 的 `SWP_SHOWWINDOW` 改为条件式，热键与托盘菜单都持久化；③ **系统托盘图标**：新增 `src/tray/tray_icon.{h,cpp}`（自有窗口类、运行时绘制图标、六项菜单、Quit 走 `WM_CLOSE`），不再需要任务管理器。
+- 实测依据（全部本机跑过）：
+  - `spikes/T-302_tray/appbar_spike.cpp`：`[Q10] ABM_SETPOS -> 1`、`work area 0,0,2880,1824 → 0,56,2880,1824`、`maximized rect top -13 → 43`、`ABM_REMOVE → work area 回到 0,0,2880,1824`，`verdict: Q10..Q13 四项 PASS`。
+  - `spikes/T-302_tray/tray_tree.cpp`：Win11 通知区已是 XAML island（`TrayNotifyWnd` 下无 `SysPager`、无 `ToolbarWindow32`，所有 `buttons=0`）→ 存在性只能用 `Shell_NotifyIconGetRect`。
+  - `spikes/T-302_tray/tray_spike3.cpp`：`SetForegroundWindow=0` 时外部点击无效且卡 17 秒；`match=1` 时 Escape 140ms、紧贴右边缘外一点 172ms 均正常。
+  - `spikes/T-302_tray/tray_spike4.cpp`：`EndMenu()` 从模态循环的 `WM_TIMER` 调用能终止 `TrackPopupMenu`（1406ms）；`GetAsyncKeyState(VK_LBUTTON)` 无前台权限也能读物理按键。
+  - `evidence/T-302/appbar_probe.txt`：`Q34_strip_reserved=PASS Q35_maximize_respects=PASS Q36_release_restores=PASS Q37_autohide_reserves_none=PASS`（`reserved=56px`、`work area 0,56,2880,1824`、`maximized rect=-13,43`、`hide` 后 `reserved=0` 且工作区回到 `0,0`、`auto_hide=true` 时 `reserved=0`）。
+  - `evidence/T-302/tray_probe.txt`：`Q30_tray_icon=PASS Q31_tray_menu=PASS Q32_dock_toggle=PASS Q33_tray_quit=PASS`（`icon rect = 2122,1824,2186,1920 (64x96)`、菜单含 `Hide Dock`/`Quit DockForge`、Quit 在最后且不是默认项、`dock_visible` 往返都写盘、Quit 后进程退出且图标已移除）。
+  - 回归：`evidence/T-302/finderbar_regression.txt`（`Q19..Q23` 五项 PASS）、`evidence/T-302/owner_regression.txt`（`Q24/Q25` PASS）、`All tests passed (4922 assertions in 505 test cases)`。
+- 修掉的真实缺陷（全部是探针抓出来的）：
+  1. **变更检测永远不命中**：`ConfigChanged` 订阅者写的是 `if (config.x == event.config.x) return;`，而所有发布者都先把新值写进 `config` 再 publish。后果：「config 说 hidden 而 dock 仍在屏幕上」、「热重载后 `auto_hide` 被接受但永远到不了栏」。修法：比较它自己上次应用的值（`dock_visible_applied`、`finderbar_applied`）（ADR-0052）。
+  2. **`ReloadConfig` 不重算预留**：`auto_hide` 从 false 变 true 后栏仍拿着 56px 预留却在收起。修法：末尾按「实际持有量」而非「旧配置值」判断，该释放的释放、该重建的重建。
+  3. **`apply_placement` 强制显示**：`SWP_SHOWWINDOW` 硬编码，任何布局重算都会把用户隐藏的 dock 拉回来。修法：条件式。
+  4. **热键 `toggle_dock` 不持久化**：只 `ShowWindow` 不写 config，重启就回来。修法：与托盘菜单行为对齐，都先 `SaveConfig` 再 `Publish`。
+  5. **探针自身三个错**：`pick 1` 会在主线程弹模态菜单并卡死（改用新增的 `invoke <name>` 直接派发）；`quit` 直接 `PostMessage(WM_CLOSE)` 绕过了真实 handler（改为 `InvokeCommand(Quit)`）；`-not X -contains Y` 在 PowerShell 里解析成 `(-not X) -contains Y`（加括号）。
+- 诚实边界：① 预留在本机（单显示器 2880x1920@192dpi）实测成功，**多显示器未测**；`ABM_QUERYPOS` 在副屏上的行为需要后续验证。② 托盘菜单的「外部点击关闭」走的是 `EndMenu()` 自救，不是系统原生行为，因为前台赋权不可靠；真实点击路径未在真人手上测过。③ `dock_visible=false` 时 dock 窗口仍存在（只是 `SW_HIDE`），因为显示时需要原对象恢复；它不占 GPU/CPU，但会占一份窗口句柄。④ 托盘图标的字形是「圆角板 + 三个圆点」，不是 macOS 风格的任何具体形状（避 Apple 商标，ASSETS.md）。
+- 证据：`evidence/T-302/{appbar_probe.txt,tray_probe.txt,finderbar_regression.txt,owner_regression.txt,bar_pinned.png,menu_open.png,px_pinned.txt}`
+- 关键决策：ADR-0050（AppBar 预留推翻 Q8 的自动隐藏结论）、ADR-0051（托盘图标运行时绘制 + `Shell_NotifyIconGetRect` 证存在）、ADR-0052（变更检测比较已应用状态）。契约：C-31 的 `auto_hide` 默认值翻转、新增 C-35（托盘）与 C-36（Dock 可见性）。
+- 下轮开始于：T-302 Finder 栏中间常驻小组件区（P5）

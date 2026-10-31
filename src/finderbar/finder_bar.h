@@ -170,6 +170,14 @@ public:
     const AutoHideState& AutoHide() const { return auto_hide_; }
     bool MenuOpen() const { return menu_running_; }
 
+    // T-302b: how much of the screen the shell is holding for the bar, in physical
+    // pixels. Zero means no reservation, which is also what a probe asserts after the
+    // bar is turned off - a strip left behind with no bar on it is invisible damage.
+    int ReservedStripPx() const { return reserved_strip_px_; }
+    // True when the bar is retracting instead of pinning, either because the user asked
+    // for it or because the reservation was refused.
+    bool AutoHiding() const { return AutoHideActive(); }
+
     // Opens the menu belonging to box `index` exactly as a click would. Public so the
     // probe channel can exercise the real TrackPopupMenuEx path without a cursor: the
     // alternative is driving a system popup with synthetic mouse events, which is what
@@ -218,6 +226,10 @@ private:
     void OnMenuClosed();
     std::size_t BoxAtDip(float x_dip, float y_dip) const;
     float OffsetDip() const;
+    // Whether the bar is currently in auto-hide mode. True when the user asked for it, and
+    // also when the top-strip reservation failed: in that case the bar must retract rather
+    // than sit on top of every maximized window's title bar.
+    bool AutoHideActive() const { return config_.auto_hide || auto_hide_fallback_; }
     float Scale() const { return dpi_ > 0 ? static_cast<float>(dpi_) / 96.0f : 1.0f; }
 
     static LRESULT CALLBACK StaticWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam);
@@ -265,14 +277,20 @@ private:
     bool menu_running_ = false;
     HANDLE menu_thread_ = nullptr;
 
+    // T-302b: the reserved top strip. Non-zero while the shell is holding space for the
+    // bar, so a maximized window stops below it instead of sliding under it.
+    int reserved_strip_px_ = 0;
+    // Set when the reservation was refused. Forces auto-hide for the rest of the session;
+    // cleared on the next successful reservation.
+    bool auto_hide_fallback_ = false;
+
     // Probe-only: when non-null, the tracked application is this window regardless of
     // what GetForegroundWindow says. Never set by production code.
     HWND foreground_override_ = nullptr;
 
     HWINEVENTHOOK foreground_hook_ = nullptr;
     bool foreground_dirty_ = true;
-    std::uint64_t foreground_events_ = 0;
-    std::uint64_t paints_ = 0;
+    std::uint64_t foreground_events_ = 0;    std::uint64_t paints_ = 0;
     std::uint64_t menu_opens_ = 0;
     SystemCommandHandler system_command_;
 };

@@ -1,0 +1,71 @@
+[T-302b+T-302c] finderbar: pin the top bar with the AppBar protocol; tray: add the system tray icon and a Quit entry
+
+Three things the user named, all fixed.
+
+1. The Finder Bar is pinned instead of retracting.
+
+The old default (auto_hide=true, a 4dip hairline) existed because T-301 measured
+SPI_SETWORKAREA and found it reported success while changing nothing. That measurement
+was correct and the conclusion was wrong: the taskbar does not use SPI_SETWORKAREA, it
+uses the shell AppBar protocol. spikes/T-302_tray/appbar_spike.cpp proves ABM_NEW +
+ABM_QUERYPOS + ABM_SETPOS moves the work area from 0,0,2880,1824 to 0,56,2880,1824 and a
+maximized window's top from -13 to 43 - exactly the reserved 56px - and ABM_REMOVE
+restores it byte for byte. So a pinned bar no longer costs anyone their title bar.
+
+auto_hide is not deleted. It is now the fallback: if the reservation is refused the bar
+retracts rather than covering every title bar, and auto_hide=true reserves nothing at all
+because a retracted bar must not occupy space it is not using.
+
+2. The dock can be hidden, and the choice survives a restart.
+
+behavior.dock_visible (C-36) is a new C-01 key, wired through parse/clamp/serialize, the
+settings model and the Behavior page. apply_placement no longer carries SWP_SHOWWINDOW
+unconditionally - without that, every layout recompute (a settings change, a monitor
+change, closing the tray menu) resurrected a dock the user had hidden. The toggle_dock
+hotkey now persists too, so the hotkey and the menu cannot disagree about whether hiding
+is a setting.
+
+3. There is a system tray icon, and Quit is on it.
+
+Before this there was no way to close DockForge except Task Manager: the dock has no
+title bar, no taskbar button, no window to close. src/tray/ renders a 32px glyph at
+runtime (the repo has no .rc and no .ico, and ASSETS.md forbids Apple's marks), registers
+it with NIM_ADD falling back to NIM_MODIFY, and shows a six-entry menu with Quit last and
+never set as the default item.
+
+Four measured constraints shaped the tray module, all from spikes/T-302_tray:
+
+- The Windows 11 notification area is a XAML island. TrayNotifyWnd has no SysPager and no
+  ToolbarWindow32, so TB_BUTTONCOUNT is -1 forever. Existence is proven with
+  Shell_NotifyIconGetRect, which answers for the icon rather than for a window.
+- NIM_ADD returns 0 for an icon that already exists, so re-registration after
+  TaskbarCreated must fall back to NIM_MODIFY - and must clear added_ first, or the
+  fallback silently reports success without doing anything.
+- A popup menu can only be dismissed by outside click or Escape when its owner holds the
+  foreground. When SetForegroundWindow is refused the menu does not enter menu mode at
+  all: outside clicks are ignored and TrackPopupMenu sits for 17 seconds before returning
+  the default item. The module detects the click itself (WM_TIMER + FindWindowW("#32768")
+  + GetAsyncKeyState, which reads the physical button without foreground rights) and ends
+  the loop with EndMenu(); measured 1406ms.
+- TrackPopupMenu is modal, so a probe that drove the menu would block its own thread.
+  TrayIcon::InvokeCommand goes through the same Dispatch the popup uses, without a menu.
+
+Two bugs found by the probes, both of which were silently wrong rather than visibly
+broken:
+
+- Every ConfigChanged subscriber compared against `config`, but every publisher assigns
+  `config` before publishing. The comparison could never fire. The dock stayed on screen
+  while config said hidden, and a reloaded auto_hide reached `config` but never the bar.
+  Subscribers now compare against the value they last applied (ADR-0052).
+- ReloadConfig did not recompute the reservation, so flipping auto_hide on left the bar
+  retracting while still holding 28dip of every maximized window.
+
+Verified: All tests passed (4922 assertions in 505 test cases). evidence/T-302 has
+appbar_probe (Q34..Q37), tray_probe (Q30..Q33), the two T-301 regressions
+(Q19..Q25), and pixel samples. The finderbar_probe B/G groups were rewritten from
+"retracts by default" to "pinned by default" because the product changed on purpose, not
+because the assertions were inconvenient; the retract path is still covered by Q37.
+
+Honest limits: the reservation is only measured on one display; the tray menu's
+outside-click path is the module's own detection rather than native behaviour and has not
+been exercised by a human hand; a hidden dock still holds its window handle.

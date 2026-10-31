@@ -1,0 +1,164 @@
+DockForge T-302b + T-302c 验证报告
+=====================================
+
+任务：用户点名三件事（m01514 原话）
+  "顶栏要一直置顶，dock栏可以选择隐藏，然后现在没有系统托盘图标每次退出都需要打开
+   任务管理器才能退出，你修改一下，然后继续推进，我要的是极致还原mac os"
+
+  1. Finder 顶栏常驻置顶
+  2. Dock 栏可隐藏（且重启后保持）
+  3. 系统托盘图标，能退出（不再需要任务管理器）
+
+
+一、交付物
+----------
+src/finderbar/appbar.{h,cpp}   新增。shell AppBar 协议：ABM_NEW / ABM_QUERYPOS /
+                               ABM_SETPOS / ABM_REMOVE，一个进程一条 strip。
+src/tray/tray_icon.{h,cpp}     新增。自有窗口类 DockForgeTrayWindow，运行时绘制图标，
+                               六项菜单，Quit 走 WM_CLOSE。
+src/finderbar/finder_bar.cpp   接 AppBar：SetEnabled / ReloadConfig / WndProc 三处；
+                               SnapshotJson 暴露 auto_hiding / reserved_strip_px /
+                               auto_hide_fallback。
+src/main.cpp                   托盘装配 + 托盘探针通道 + dock 显隐订阅 + 启动可见性 +
+                               apply_placement 的 SWP_SHOWWINDOW 条件化 + 热键持久化。
+src/core/config.{h,cpp}        BehaviorConfig::dock_visible；FinderBarConfig::auto_hide
+                               默认 true -> false；C-01 三处接线。
+src/settings/                  字段 behavior.dock_visible（模型 + UI 行）。
+tests/config_test.cpp          三个新用例（dock 显隐往返、behavior 节恒写、栏默认常驻）。
+tests/tray_icon_test.cpp       新增，12 个用例（菜单顺序 / 文案 / 灰化 / 图标像素）。
+tests/finderbar_test.cpp       沿用 T-301 的 5 个用例，无回归。
+tools/tray_probe.ps1           新增，Q30..Q33。
+tools/appbar_probe.ps1         新增，Q34..Q37。
+tools/finderbar_probe.ps1      B/G 两组按新默认改写（原来断言"默认收起"，现在断言"默认常驻"）。
+
+
+二、构建与单测
+--------------
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\build.ps1 -Action all -Jobs 2
+
+  All tests passed (4922 assertions in 505 test cases)
+  OK: all
+
+基线（T-301b 收尾）是 490 用例 / 4846 断言。本任务净增 15 用例 / 76 断言，全部通过。
+
+
+三、端到端探针（全部由 app 自身日志 + 状态 JSON 判定，不看截图）
+--------------------------------------------------------------
+A. AppBar 预留 —— evidence/T-302/appbar_probe.txt
+
+  verdict: Q34_strip_reserved=PASS Q35_maximize_respects=PASS
+           Q36_release_restores=PASS Q37_autohide_reserves_none=PASS
+
+  关键行：
+    baseline work area = 0,0,2880,1824
+    snapshot: auto_hide=False auto_hiding=False reserved=56px height_dip=28.0 dpi=192
+    expected strip = 56px (28 dip at 192 dpi)
+    work area after = 0,56,2880,1824
+    maximized rect = -13,43,2893,1837
+    the maximized window stops below the reserved strip (top=43, strip ends at 56)
+    work area after release = 0,0,2880,1824
+    auto_hide=True auto_hiding=True reserved=0px progress=0.0
+
+  四条断言的含义：
+    Q34  工作区顶部下移量 == 栏高，且底边与右边未动
+    Q35  一个真正最大化的窗口顶部不低于预留线（判据是位移不是绝对位置，
+         因为最大化窗口会外扩 13px 阴影边框）
+    Q36  关掉栏之后工作区逐字段还原 —— 留着预留却不显示栏，会让每个最大化
+         窗口凭空短 28dip 且屏幕上没有任何东西能解释
+    Q37  auto_hide 为真时不预留任何条带 —— 收起的栏不能占它不用的空间
+
+B. 系统托盘 —— evidence/T-302/tray_probe.txt
+
+  verdict: Q30_tray_icon=PASS Q31_tray_menu=PASS Q32_dock_toggle=PASS
+           Q33_tray_quit=PASS
+
+  关键行：
+    icon rect = 2122,1824,2186,1920 (64x96)
+    the dock toggle reads 'Hide Dock' while the dock is visible
+    Quit is the last entry, so it is not the default item
+    dock_visible was persisted as false
+    the dock window is no longer visible
+    the dock toggle now reads 'Show dock' (got 'Show Dock')
+    dock_visible was persisted back to true
+    the dock window is visible again
+    the process exited after the Quit command
+    the log records the icon removal
+
+  存在性用 Shell_NotifyIconGetRect 证明，不是数按钮：Win11 的通知区已经是
+  XAML island，TrayNotifyWnd 下没有 SysPager、没有 ToolbarWindow32，
+  TB_BUTTONCOUNT 恒为 -1（spike 实测）。GetRect 回答的是"这个图标在不在"，
+  不是"某个窗口里有没有它"，是唯一诚实的存在性证据。
+
+C. 回归 —— evidence/T-302/finderbar_regression.txt 与 owner_regression.txt
+
+  Q19_bar_geometry=PASS Q20_auto_hide=PASS Q21_foreign_menu=PASS
+  Q22_forwarding=PASS Q23_menu_lifecycle=PASS
+  Q24_ownerdraw_titles=PASS Q25_ownerdraw_forwarding=PASS
+
+  finderbar_probe 的 B/G 两组按新默认改写了断言：原来测"默认收起、触顶展开、
+  离开收回"，现在测"默认常驻、指针离开也不收回、预留仍在"。这不是把测试改
+  宽，是把断言改到与产品意图一致 —— 旧断言在新默认下必然失败，而失败的原因
+  是产品按用户要求变了，不是坏了。收起路径本身仍被 Q37 覆盖。
+
+
+四、截图证据
+------------
+evidence/T-302/bar_pinned.png      2880x56，常驻栏
+evidence/T-302/menu_open.png       系统菜单弹出（420x380 裁切）
+evidence/T-302/px_pinned.txt       像素采样：
+    glyph  (60,28)  rgba=(240,242,247,255)   三条横线图标
+    name   (180,28) rgba=(245,247,250,255)   应用名
+    file   (320,28) rgba=(111,114,116,255)   菜单标题
+    empty  (1200,28) rgba=(13,15,18,255)     空白段是平的板
+    y1     (200,1)  rgba=(52,54,56,255)      顶边框
+    y55    (200,55) rgba=(52,54,56,255)      底边框
+
+注：本会话模型没有图像输入通道（read_image 返回 "model deepseek-v4.1-flash
+does not declare image input"），所以所有视觉结论都来自像素采样与几何断言，
+没有一条来自"看图"。
+
+
+五、本任务修掉的五个真实缺陷（全部是探针抓出来的，不是看出来的）
+--------------------------------------------------------------
+1. ConfigChanged 订阅者的变更检测永远不命中
+   写的是 if (config.behavior.dock_visible == event.config.behavior.dock_visible)
+   return; 但所有发布者都先把新值写进 config 再 publish。后果：config 说
+   hidden，dock 仍在屏幕上。同样的写法让"热重载的 auto_hide"被接受进 config
+   却永远到不了栏。
+   修法：比较订阅者自己上次应用的值（dock_visible_applied / finderbar_applied）。
+
+2. ReloadConfig 不重算预留
+   auto_hide 从 false 变 true 之后，栏仍在收起状态却仍占着 56px 工作区。
+   修法：ReloadConfig 末尾按"实际持有量"而非"旧配置值"判断，该释放的释放、
+   该重建的重建。
+
+3. apply_placement 强制显示
+   SWP_SHOWWINDOW 硬编码，任何布局重算（设置变更、显示器变更、托盘菜单关闭）
+   都会把用户隐藏的 dock 拉回来。
+   修法：条件化，并在隐藏时不带这个标志。
+
+4. 热键 toggle_dock 不持久化
+   只 ShowWindow 不写 config，重启就回来。
+   修法：与托盘菜单行为对齐，都先 SaveConfig 再 Publish。
+
+5. 探针自身的三个错（不是产品缺陷，但会伪造结论）
+   a) pick 1 在主线程弹模态菜单并卡死 —— 新增 invoke <name> 直接派发
+   b) quit 直接 PostMessage(WM_CLOSE)，绕过了真实 handler（因而测不到图标移除）
+      —— 改为 InvokeCommand(Quit)
+   c) -not X -contains Y 在 PowerShell 里解析成 (-not X) -contains Y，
+      断言静默通过 —— 加括号
+
+
+六、诚实边界
+------------
+1. 预留只在单显示器（2880x1920 @192dpi）上实测。ABM_QUERYPOS 在副屏上的行为
+   未验证，多显示器是后续任务。
+2. 托盘菜单的"外部点击关闭"走的是 EndMenu() 自救（WM_TIMER + GetAsyncKeyState），
+   不是系统原生行为 —— 因为 SetForegroundWindow 是否成功不可靠，失败时系统
+   根本不进菜单模式，会卡 17 秒。真人手上的点击路径未测。
+3. dock_visible=false 时 dock 窗口仍存在（只是 SW_HIDE），因为恢复时要用原对象。
+   它不占 GPU/CPU，但占一份窗口句柄。
+4. 托盘图标字形是"圆角板 + 三个圆点"，不是任何具体的 macOS 形状（避 Apple 商标，
+   ASSETS.md）。
+5. 本任务没有推进 T-302（Finder 栏中间常驻小组件区）本身，只解决了用户点名的
+   三件事。下一轮从 T-302 开始。

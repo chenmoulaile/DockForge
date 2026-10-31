@@ -25,7 +25,7 @@ const std::unordered_set<std::string> kDockKeys = {
     "icon_size", "gap", "magnification", "hover_falloff",
     "influence_radius", "falloff_sharpness", "position", "tiles", "hidden"};
 const std::unordered_set<std::string> kAppearanceKeys = {"material", "corner_radius", "theme"};
-const std::unordered_set<std::string> kBehaviorKeys = {"autostart", "hide_taskbar"};
+const std::unordered_set<std::string> kBehaviorKeys = {"autostart", "hide_taskbar", "dock_visible"};
 const std::unordered_set<std::string> kLaunchpadKeys = {"extra_paths", "columns", "icon_size",
                                                        "page_size", "folders"};
 // T-065: the whole message_counts object is parsed into the typed map (every
@@ -912,6 +912,7 @@ bool ParseConfig(const std::string& json_text, Config& out, std::string* error) 
         const auto& node = document["behavior"];
         bad_value |= ReadBool(node, "autostart", parsed.behavior.autostart);
         bad_value |= ReadBool(node, "hide_taskbar", parsed.behavior.hide_taskbar);
+        bad_value |= ReadBool(node, "dock_visible", parsed.behavior.dock_visible);
     }
     if (document.contains("launchpad") && document["launchpad"].is_object()) {
         const auto& node = document["launchpad"];
@@ -1086,6 +1087,7 @@ std::string SerializeConfig(const Config& config) {
     document["behavior"] = {
         {"autostart", config.behavior.autostart},
         {"hide_taskbar", config.behavior.hide_taskbar},
+        {"dock_visible", config.behavior.dock_visible},
     };
     document["launchpad"] = {
         {"columns", config.launchpad.columns},
@@ -1176,13 +1178,17 @@ std::string SerializeConfig(const Config& config) {
     // T-301: the same quiet-file rule. Every default is compared against the
     // documented value, so a file the user never touched carries no "finderbar"
     // key at all and a file where they only flipped "enabled" off records that one
-    // switch plus nothing else. `enabled` defaults to TRUE (C-31), so the test is
-    // the negated form - writing it whenever it is true would put the section in
-    // every file, which is exactly the noise C-01 forbids.
+    // switch plus nothing else.
+    //
+    // The negation direction follows each field's own default: `enabled` defaults to
+    // TRUE (C-31) so it is written when false, while `auto_hide` defaults to FALSE
+    // (T-302b: the AppBar reservation makes pinning safe) so it is written when true.
+    // Getting one of these backwards puts the whole section in every default file,
+    // which is the noise C-01 exists to prevent.
     if (!config.finderbar.enabled || config.finderbar.height != 28 ||
         !config.finderbar.show_system_menu || !config.finderbar.show_app_name ||
         !config.finderbar.show_app_menu || config.finderbar.max_menu_items != 6 ||
-        !config.finderbar.auto_hide) {
+        config.finderbar.auto_hide) {
         document["finderbar"] = {
             {"enabled", config.finderbar.enabled},
             {"height", config.finderbar.height},

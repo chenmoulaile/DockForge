@@ -1123,16 +1123,55 @@ finderbar.hide_mode: enum{normal, auto_hide, smart_hide, always_visible} = norma
 T-301 只落地了左侧区所需的最小键集合，其余键等对应任务（T-302/T-303/T-304）实现时再解冻：
 
 ```
-finderbar.enabled: bool = true            // 默认开启：栏不改变系统行为（不预留工作区、不 hook、不碰 taskbar）
+finderbar.enabled: bool = true            // 默认开启：栏不 hook、不碰 taskbar，只用 AppBar 协议预留自己的条带
 finderbar.height: int = 28                // 钳制 [18, 96]
 finderbar.show_system_menu: bool = true   // 对应 left=system_menu
 finderbar.show_app_name: bool = true      // 对应 left=app_name_with_menu
 finderbar.show_app_menu: bool = true      // 读 GetMenu 渲染菜单项
 finderbar.max_menu_items: int = 6         // 钳制 [2, 16]，超出折叠成 "…"
-finderbar.auto_hide: bool = true          // 收起态留 4dip hairline 且不吃点击
+finderbar.auto_hide: bool = false         // T-302b 翻转：默认常驻，靠 AppBar 预留而非靠隐藏
 ```
 
 三条逃生路径（PROMPT.md「用户可救」）：`DOCKFORGE_FINDERBAR=0` 单次关闭 / 配置 `finderbar.enabled=false` 永久关闭 / 栏内系统菜单「Quit DockForge」。
+
+### T-302b 常驻与顶条带预留（已冻结）
+
+`auto_hide` 的默认值在 T-302b 翻转，原因是实测结论变了，不是偏好变了：
+
+```
+预留方式: SHAppBarMessage(ABM_NEW) → ABM_QUERYPOS → ABM_SETPOS
+可信值:   只有 ABM_SETPOS 之后回读的 SPI_GETWORKAREA，ABM_SETPOS 返回的是请求值
+释放:     ABM_REMOVE；返回 1 但 GetLastError()==87 是 shell 噪声，不是失败
+失败回退: 预留被拒绝 → auto_hide_fallback_ = true，栏自动收起（覆盖所有标题栏比隐藏更糟）
+不占用时: auto_hide 为真 → 不预留任何条带（收起的栏不能占它不用的空间）
+全屏:     ABN_FULLSCREENAPP → ShowWindow(SW_HIDE)，退出全屏恢复
+关闭栏:  先 ABM_REMOVE 再隐藏，否则每个最大化窗口凭空短 28dip 且无人能解释
+```
+
+实测依据（`spikes/T-302_tray/appbar_spike.cpp` + `evidence/T-302/appbar_probe.txt`）：工作区 `0,0,2880,1824` → `0,56,2880,1824`；最大化窗口顶部 `-13` → `43`；`ABM_REMOVE` 后精确回到 `0,0,2880,1824`。T-301 时代 Q8 的 `SPI_SETWORKAREA` 结论（返回成功但无效）仍成立，它只是错的方法。
+
+## C-35 系统托盘图标（T-302c 冻结）
+
+```
+图标:   NIM_ADD(NIF_MESSAGE|NIF_ICON|NIF_TIP|NIF_SHOWTIP) → 失败回落 NIM_MODIFY → NIM_SETVERSION(4)
+图标源: 运行时画（premultiplied BGRA + CreateIconIndirect），仓库不存在 .rc/.ico
+存在性: Shell_NotifyIconGetRect（Win11 通知区是 XAML island，TB_BUTTONCOUNT 恒为 -1）
+重注册: TaskbarCreated → added_ = false → Add()（必须先清标志，否则 NIM_MODIFY 也说成功）
+菜单顺序: Dock 切换 → Finder 栏切换 → 分隔 → 设置/配置目录/日志 → 分隔 → Quit
+默认项:   永远不设。Quit 必须不能靠回车键误触
+关闭自救: WM_TIMER(60ms) + FindWindowW("#32768") + GetAsyncKeyState(VK_LBUTTON) → 点在弹窗外则 EndMenu()
+退出顺序: 先 Remove() 再 DestroyWindow，否则主窗口消失后图标变 ghost 直到 shell 下次 hover
+```
+
+三条实测事实（`spikes/T-302_tray/tray_spike*.cpp`）：① Win11 通知区已是 XAML island，`TrayNotifyWnd` 下无 `SysPager`/`ToolbarWindow32`；② `NIM_ADD` 对已存在图标返回 0；③ 菜单能否被外部点击/Escape 关闭取决于 owner 是否拿到前台，`SetForegroundWindow=0` 时卡 17 秒。
+
+## C-36 Dock 可见性（T-302c 冻结）
+
+```
+behavior.dock_visible: bool = true
+```
+
+与 `dock.hidden` 语义不同：`dock.hidden` 是「哪些图标被拖走」，`dock_visible` 是「dock 在不在屏幕上」。两条硬规则：① `apply_placement` 不得在 `dock_visible=false` 时带 `SWP_SHOWWINDOW`；② 变更检测必须比较「已应用状态」而非 `config`，因为每个发布者都先赋值 `config` 再 `Publish`。
 
 ## C-32 应用菜单读取与转发（P5 冻结，即 P5 提示词的 C-19 顺延）
 

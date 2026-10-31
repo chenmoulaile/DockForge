@@ -2,6 +2,7 @@
 
 #include "core/log.h"
 #include "core/paths.h"
+#include "finderbar/appbar.h"
 #include "platform/win_common.h"
 #include "platform/window.h"
 
@@ -627,6 +628,12 @@ void FinderBar::SetEnabled(bool enabled) {
     if (window_ == nullptr) return;
     if (!enabled) {
         capture_.Stop();
+        // Give the strip back before hiding. A reservation left behind after the bar
+        // is gone would keep every maximized window 28dip short of the top edge with
+        // nothing there to explain why - the exact class of invisible damage that makes
+        // people distrust a desktop tweak.
+        appbar::ReleaseTopStrip();
+        reserved_strip_px_ = 0;
         // A hidden window keeps its region, which would still be a hit target. Reset it to
         // empty before hiding so nothing is left behind if the window is shown again by
         // another path.
@@ -637,14 +644,39 @@ void FinderBar::SetEnabled(bool enabled) {
         return;
     }
 
+    // Reserve the top strip so a pinned bar does not cover a maximized window's title
+    // bar. T-302b measured that this works (the work area really moves and a maximized
+    // window really moves down by the reserved height) where SPI_SETWORKAREA silently
+    // did nothing.
+    //
+    // If the reservation fails the bar must not pin itself: covering every title bar is
+    // worse than hiding. So a failed reservation forces auto-hide for this session and
+    // the reason is logged, not swallowed.
+    if (!config_.auto_hide) {
+        const bool reserved = appbar::ReserveTopStrip(window_, height_px_);
+        reserved_strip_px_ = reserved ? height_px_ : 0;
+        if (!reserved) {
+            DF_WARN(kModule, "top strip reservation failed; falling back to auto-hide");
+            auto_hide_fallback_ = true;
+        } else {
+            auto_hide_fallback_ = false;
+        }
+    } else {
+        appbar::ReleaseTopStrip();
+        reserved_strip_px_ = 0;
+        auto_hide_fallback_ = false;
+    }
+
     SetWindowPos(window_, HWND_TOPMOST, display_.monitor.left, display_.monitor.top, width_px_,
                  height_px_, SWP_NOACTIVATE | SWP_SHOWWINDOW);
     capture_.Start(window_, display_.monitor.left, display_.monitor.top, width_px_, height_px_);
-    // auto_hide starts retracted so the bar never appears on top of a maximized window's
-    // title bar before the user asks for it; without auto_hide it is always out.
+    // A pinned bar is always out. The retracted start state only exists for the
+    // auto-hide mode, where the bar must not appear over a title bar before it is
+    // asked for.
+    const bool retracting = AutoHideActive();
     auto_hide_ = AutoHideState{};
-    auto_hide_.progress = config_.auto_hide ? 0.0f : 1.0f;
-    auto_hide_.shown = !config_.auto_hide;
+    auto_hide_.progress = retracting ? 0.0f : 1.0f;
+    auto_hide_.shown = !retracting;
     region_height_px_ = -1;
     ApplyRegion();
     Repaint();
@@ -671,6 +703,18 @@ void FinderBar::ReloadConfig(const core::Config& config) {
             surface_.Resize(width_px_, height_px_);
             capture_.SetRegion(display_.monitor.left, display_.monitor.top, width_px_, height_px_);
             region_height_px_ = -1;
+            // The reserved strip has to track the bar's height: a stale reservation would
+            // leave the work area short by the old height, and the bar would float above a
+            // gap. Re-reserve only when one is actually held.
+            if (reserved_strip_px_ > 0) {
+                appbar::ReleaseTopStrip();
+                if (appbar::ReserveTopStrip(window_, height_px_)) {
+                    reserved_strip_px_ = height_px_;
+                } else {
+                    reserved_strip_px_ = 0;
+                    auto_hide_fallback_ = true;
+                }
+            }
         }
     }
 
@@ -679,6 +723,29 @@ void FinderBar::ReloadConfig(const core::Config& config) {
         return;
     }
     if (!enabled_) return;
+
+    // A reload can flip auto_hide, which decides whether the strip is reserved at all.
+    // Without this the bar keeps holding 28dip of every maximized window while it is
+    // happily retracting to a hairline - the exact combination the reservation exists to
+    // avoid. Checked against what is actually held rather than against the previous
+    // config value, so a fallback reservation is released by the same code.
+    if (window_ != nullptr) {
+        const bool want_reserved = !AutoHideActive();
+        if (want_reserved && reserved_strip_px_ == 0) {
+            if (appbar::ReserveTopStrip(window_, height_px_)) {
+                reserved_strip_px_ = height_px_;
+                auto_hide_fallback_ = false;
+                DF_INFO(kModule, "reserved top strip height_px=%d", height_px_);
+            } else {
+                auto_hide_fallback_ = true;
+                DF_WARN(kModule, "could not reserve the top strip; falling back to auto-hide");
+            }
+        } else if (!want_reserved && reserved_strip_px_ > 0) {
+            appbar::ReleaseTopStrip();
+            reserved_strip_px_ = 0;
+            DF_INFO(kModule, "released the top strip (auto-hide is on)");
+        }
+    }
 
     // The menu list depends on max_menu_items, so a change there needs a fresh read.
     if (config_.show_app_menu) {
@@ -748,11 +815,11 @@ void FinderBar::ApplyRegion() {
     // to match the part of the plate the geometry leaves on screen - otherwise the
     // retracted bar's hairline is laid out, offset into view and then silently cut away.
     //
-    // A fully retracted bar keeps only the hairline: enough to see that the bar is there,
-    // not enough to steal a click aimed at a maximized window's title bar (spike Q7
-    // measured that a 28dip strip does steal it, and Q8 measured that reserving work area
-    // to avoid the overlap is not possible on this OS).
-    const bool interactive = !config_.auto_hide || AutoHideInteractive(auto_hide_);
+    // A pinned bar is always full height: the strip is reserved, so nothing is underneath
+    // it to protect. Only the auto-hide mode keeps the hairline, and only when the
+    // reservation could not be taken - there, a full-height bar would steal clicks aimed
+    // at a maximized window's title bar (spike Q7 measured exactly that).
+    const bool interactive = !AutoHideActive() || AutoHideInteractive(auto_hide_);
     const int wanted =
         interactive ? height_px_
                     : std::max(1, platform::DipToPixels(kAutoHideHairlineDip, dpi_));
@@ -769,7 +836,7 @@ void FinderBar::ApplyRegion() {
 }
 
 float FinderBar::OffsetDip() const {
-    if (!config_.auto_hide) return 0.0f;
+    if (!AutoHideActive()) return 0.0f;
     return AutoHideOffsetDip(auto_hide_, height_dip_);
 }
 
@@ -894,7 +961,7 @@ bool FinderBar::Tick(double delta_ms, const core::Config& config) {
                       cursor_x_dip >= 0.0f && cursor_x_dip <= width_dip_;
 
     const AutoHideState before = auto_hide_;
-    if (config_.auto_hide) {
+    if (AutoHideActive()) {
         // An open menu pins the bar out: retracting under a menu would move the click target
         // while the user is aiming at it.
         const bool pin = menu_running_;
@@ -1161,6 +1228,22 @@ LRESULT FinderBar::WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
             OnMenuClosed();
             return 0;
 
+        case appbar::kAppBarCallbackMessage: {
+            // The shell's appbar notifications arrive on this window because ABM_NEW
+            // registered it. ABN_FULLSCREENAPP matters: a fullscreen video must not have
+            // its top strip covered, so the bar hides while it is set.
+            appbar::HandleAppBarMessage(wparam, lparam);
+            if (wparam == ABN_FULLSCREENAPP) {
+                const bool fullscreen = appbar::GetAppBarStats().fullscreen_app;
+                if (fullscreen && enabled_) {
+                    ShowWindow(hwnd, SW_HIDE);
+                } else if (!fullscreen && enabled_) {
+                    ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+                }
+            }
+            return 0;
+        }
+
         case WM_DISPLAYCHANGE: {
             platform::DisplayInfo display;
             if (platform::PrimaryDisplay(display)) {
@@ -1214,9 +1297,15 @@ std::string FinderBar::SnapshotJson() const {
     j["enabled"] = enabled_;
     j["menu_open"] = menu_running_;
     j["auto_hide"] = config_.auto_hide;
+    // T-302b: auto_hide alone no longer says what the bar is doing. It may be retracting
+    // because the reservation was refused, and a probe that only reads `auto_hide` would
+    // report "pinned" while the bar hides itself. Both facts are published separately.
+    j["auto_hiding"] = AutoHideActive();
+    j["reserved_strip_px"] = reserved_strip_px_;
+    j["auto_hide_fallback"] = auto_hide_fallback_;
     j["progress"] = auto_hide_.progress;
     j["offset_dip"] = OffsetDip();
-    j["interactive"] = !config_.auto_hide || AutoHideInteractive(auto_hide_);
+    j["interactive"] = !AutoHideActive() || AutoHideInteractive(auto_hide_);
     j["width_dip"] = width_dip_;
     j["height_dip"] = height_dip_;
     j["dpi"] = dpi_;

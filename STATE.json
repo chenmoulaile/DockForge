@@ -2,13 +2,13 @@
  "project": "DockForge",
  "schema": 1,
  "milestone": "M2",
- "last_task": "T-301b",
+ "last_task": "T-302b+T-302c",
  "last_commit": "39e1301",
- "current_module": "finderbar",
+ "current_module": "finderbar+tray",
  "current_task": "T-302",
  "counters": {
-  "total": 34,
-  "done": 31,
+  "total": 36,
+  "done": 33,
   "partial": 3,
   "blocked": 0
  },
@@ -185,7 +185,20 @@
   "PowerShell 参数名与局部变量名大小写不敏感：param([string]$Sublime) 与 $sublime = Get-Process ... 是同一个变量，赋值会被类型约束转成字符串（T-301 owner 探针）",
   "MSAA OBJID_MENU 与 UIA MenuBar 都拿不到 owner-draw 菜单标题（10 个 child 的 name/CurrentName 全空），不要在这两条路上再花时间（T-301 menu_spike9/10）",
   "菜单 ID 与子菜单句柄在顶层项里会混在一起：GetMenuItemInfoW 对 MFT_OWNERDRAW 顶层项返回的 wID 是 HMENU 值，只有二级项才是真命令 id（T-301 menu_spike）",
-  "git push 弹账户选择是因为 credential.helper 链里有 git-credential-manager 且无可用登录态：清空 helper 链（cmd /c 'git config --global --add credential.helper \"\"'，PowerShell 传空串会报 wrong number of arguments）后改成 store，凭据填充从 6579ms 降到 169ms（T-301 推送免交互）"
+  "git push 弹账户选择是因为 credential.helper 链里有 git-credential-manager 且无可用登录态：清空 helper 链（cmd /c 'git config --global --add credential.helper \"\"'，PowerShell 传空串会报 wrong number of arguments）后改成 store，凭据填充从 6579ms 降到 169ms（T-301 推送免交互）",
+  "SPI_SETWORKAREA 在 Win11 返回 1 但工作区不变；预留顶条带必须用 SHAppBarMessage(ABM_NEW/ABM_QUERYPOS/ABM_SETPOS)，只有它之后回读的 SPI_GETWORKAREA 可信",
+  "ABM_REMOVE 返回 1 但 GetLastError()==87 (ERROR_INVALID_PARAMETER) 是 shell 噪声，不是失败；把它当错误会误判释放失败",
+  "ConfigChanged 订阅者里写 if (config.x == event.config.x) return; 永远命中——所有发布者都先把新值写进 config 再 publish；必须比较「自己上次应用的值」",
+  "Win11 通知区已是 XAML island：Shell_TrayWnd 下无 SysPager/ToolbarWindow32，TB_BUTTONCOUNT 恒为 -1；托盘图标存在性只能用 Shell_NotifyIconGetRect",
+  "NIM_ADD 对已存在的托盘图标返回 0，必须回落 NIM_MODIFY；TaskbarCreated 重注册前必须先 added_=false",
+  "TrackPopupMenu 是模态的：探针驱动它会阻塞自己的线程，必须提供不弹菜单的直接派发入口（TrayIcon::InvokeCommand）",
+  "SetForegroundWindow 失败时菜单不进菜单模式：外部点击无效且卡 17 秒后返回默认项；自救 = WM_TIMER + FindWindowW(\"#32768\") + GetAsyncKeyState(VK_LBUTTON) + EndMenu()",
+  "GetAsyncKeyState(VK_LBUTTON) 在无前台权限时仍能读到物理按键，是唯一可用的外部点击探测手段",
+  "apply_placement 的 SWP_SHOWWINDOW 必须条件化：否则设置变更、显示器变更、托盘菜单关闭都会把用户隐藏的 dock 拉回来",
+  "热键与托盘菜单对同一开关的处理必须一致：两者都要先 SaveConfig 再 Publish，否则「热键能隐藏但重启就回来」",
+  "PowerShell 的 -not X -contains Y 解析成 (-not X) -contains Y，断言会静默通过；必须写 -not (X -contains Y)",
+  "ld.exe: cannot open output file bin\\DockForge.exe: Permission denied 是上一次探针留下的进程还占着 exe，不是链接配置问题",
+  "运行时画的 HICON 要走 premultiplied BGRA + CreateIconIndirect；BITMAPV5HEADER 的 bV5Height 必须为负值（top-down）"
  ],
- "updated_at": "2026-11-01T00:20:00+08:00"
+ "updated_at": "2026-11-01T04:20:00+08:00"
 }
