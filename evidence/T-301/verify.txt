@@ -65,3 +65,79 @@ T-301 · Finder 栏左侧：系统菜单 + 前台应用菜单 · 验证报告
      （spike Q18 同一条规则）。该接口只替换输入源，其余全走生产路径。
   5. 未在真实第三方应用上跑端到端点击，只用 fixture 验证 C-32 全链路；本机 11 个可见窗口
      只有 2 个带 Win32 菜单（spike Q3），没有别的候选。
+七、T-301b 追加：图标保真 + 自绘菜单栏（用户点名缺陷）
+================================================================
+7.1 图标 alpha 布局（alpha.txt）
+  shell 交回的 HBITMAP 是直通 alpha，不是预乘：
+    notepad 256x256  alpha=0:26299  alpha=255:29810  partial:9427  violating(rgb>a):6215
+    px[6229] B=127 G=255 R=255 A=2      <- 预乘数据不可能出现颜色大于 alpha
+    px[5977] B=183 G=183 R=173 A=50
+  对照实验（同一 GetDIBits 路径）：
+    control rows=4 first B=0 G=0 R=255 A=64 (expect 0,0,255,64)
+    -> 复制过程不改写颜色，是 shell 给的就是直通
+  修复：IconBitmapFromHBitmap 入口 PremultiplyIfStraight（有证据才转，避免二次乘变暗）
+        缓存键 v2_ -> v3_（否则旧的双重错误 PNG 会被磁盘命中读回来）
+
+7.2 缩放滤波（interp.txt，interp_check2）
+  checkerboard 256->96（理想：平坦 127，零方差）
+    LINEAR               mean=127.78 stdev= 37.67 min= 71 max=184
+    MULTI_SAMPLE_LINEAR  mean=127.77 stdev= 19.19 min= 92 max=163
+    HIGH_QUALITY_CUBIC   mean=127.66 stdev=  0.48 min=123 max=132
+    ANISOTROPIC          mean=128.00 stdev=  0.01 min=127 max=128
+  notepad 256->96 对比参考（rms 越低越接近）
+    LINEAR               rms_shell96= 5.209 rms_box= 5.791
+    MULTI_SAMPLE_LINEAR  rms_shell96= 2.143 rms_box= 1.339
+    HIGH_QUALITY_CUBIC   rms_shell96= 2.403 rms_box= 1.813
+    ANISOTROPIC          rms_shell96= 6.353 rms_box= 5.587
+    reference agreement: rms_shell96_vs_box=1.469
+  选择 MULTI_SAMPLE_LINEAR：rms_box 1.339 比两个参考实现的互相吻合度 1.469 还好，
+  且把 LINEAR 的走样减半。CUBIC 在合成图上完美但真实图标偏软（1.813）。
+  方法论教训：detail（梯度均值）会奖励走样，LINEAR 在该指标上得分最高却最糊。
+
+7.3 否决 bbox 归一化（icon_fill.txt）
+  23 个真实图标 + 4 个 shell 项的 fill 分布 86.7%~100%，coverage 10.2%~100%
+  （notepad fill=96.5% coverage=58.4% offset=-3,+8；explorer fill=100% coverage=81.5%；
+    dxdiag coverage=10.4%）
+  归一化会把多数图标放大 15% 以上、少数放大近 4 倍。coverage 差异是图标设计本身。
+  -> ADR-0048 明确不做。
+
+7.4 自绘菜单栏（owner_probe.txt，真实 Sublime Text，13/13 PASS）
+  verdict: Q24_ownerdraw_titles=PASS Q25_ownerdraw_forwarding=PASS
+  PASS: Sublime Text started with a top-level window
+  PASS: the bar tracks the pinned application
+  PASS: the owner-drawn menu was read at all
+  PASS: six top-level titles were recovered from dwItemData
+  PASS: the titles are the real menu bar            (File,Edit,Selection,Find,View,Goto)
+  PASS: no title carries a leftover accelerator marker
+  PASS: every recovered title got a box on the bar
+  PASS: the boxes are ordered left to right
+  PASS: the command was forwarded
+  PASS: command id 0 is forwarded rather than discarded
+  PASS: the forwarded message reached the application window
+  PASS: a separator is refused instead of forwarded
+  PASS: a real command next to it still forwards
+  机制（menu_spike13.txt 的 hexdump 证据）：
+    MFT_OWNERDRAW 顶层项的 dwItemData 直接指向 NUL 分隔的 UTF-16 标题数组，
+    第 i 项的指针正好落在第 i 个标题的首字节（top[0]->&File, top[1]->&Edit, top[2]->&Selection），
+    所以 ReadProcessMemory 读一个字符串即可，不需要搜索。
+  已否决的替代路径（menu_spike9/10 实测）：
+    MSAA OBJID_MENU 的 10 个 child 全部 name=''；
+    UIA MenuBar 的子项 CurrentName 与 LegacyIAccessible.CurrentName 全为空；
+    点击应用自己的菜单栏等系统弹出（前台归属不成立时弹不出 #32768）。
+  命令 id 0 合法：Sublime 的 File > New File 就是 0，旧代码把它当"无命令"丢弃。
+
+7.5 回归
+  tools/build.ps1 -Action all -Jobs 2
+    All tests passed (4846 assertions in 490 test cases)     <- 基线 480/4681
+  新增 10 用例 / 165 断言：tests/shell_icon_test.cpp 5 个、tests/finderbar_test.cpp 5 个
+  tools/finderbar_probe.ps1（fixture 普通文本菜单路径）
+    verdict: Q19..Q23 五项仍全 PASS
+
+7.6 诚实边界（追加）
+  6. 探针不读应用内部状态（用户明确要求"别动我 sublime"），只断言"读到标题 + 消息已发出 +
+     分隔符被拒"。"Sublime 真的执行了那条命令"这一步没有仪器证据，只有 PostMessage 返回值
+     与日志。窗口标题在操作前后都是 `untitled • (Code_Source) - Sublime Text (UNREGISTERED)`，
+     因为新建同名标签不改变标题——这正是原断言误判的原因。
+  7. 本机未安装 VS Code，自绘菜单栏只在 Sublime Text 上验证。
+  8. 图标视觉归一化是按实测否决（ADR-0048），不是遗漏；若仍嫌小，要改的是 dock 槽位占比，
+     属 T-202 蒙版任务。

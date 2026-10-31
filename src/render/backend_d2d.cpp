@@ -132,11 +132,34 @@ class D2DBackend final : public IRenderBackend {
         ID2D1Bitmap1* bitmap = BitmapFor(cache_id, view);
         if (!bitmap) return;
         const D2D1_RECT_F dst = ToD2D(rect);
-        // Linear interpolation with a mip-free path is right here: icons are drawn
-        // at or below their extracted size, so this is a downscale, and nearest
-        // neighbour would shimmer on the 1px outline of a shell icon.
+        // Downscale filter, chosen by rendering all four modes and measuring the output.
+        //
+        // Dock tiles are extracted at 256px and drawn into a 48 dip slot - 96px at 192
+        // DPI, a 2.67x reduction. LINEAR samples a 2x2 neighbourhood, so at that ratio
+        // most source texels never reach the destination. Measured on this machine
+        // (spikes/T-301_finderbar_menu/interp_check2.cpp, hardware D3D11 target, results
+        // in evidence/T-301/interp.txt):
+        //
+        //   checkerboard 256->96, ideal flat 127 / zero spread
+        //     LINEAR              stdev 37.67   <- aliasing, the visible "mush"
+        //     MULTI_SAMPLE_LINEAR stdev 19.19
+        //     HIGH_QUALITY_CUBIC  stdev  0.48
+        //     ANISOTROPIC         stdev  0.01
+        //   notepad 256->96 against the shell's own 96px and a CPU box filter (lower rms
+        //   is closer; the two references agree with each other at rms 1.469)
+        //     LINEAR              rms_shell 5.209  rms_box 5.791
+        //     MULTI_SAMPLE_LINEAR rms_shell 2.143  rms_box 1.339
+        //     HIGH_QUALITY_CUBIC  rms_shell 2.403  rms_box 1.813
+        //     ANISOTROPIC         rms_shell 6.353  rms_box 5.587
+        //
+        // MULTI_SAMPLE_LINEAR wins the fidelity test outright - it lands closer to a
+        // correct area average (1.339) than the shell's own 96px rendition does (1.469) -
+        // and it halves the aliasing of LINEAR. HIGH_QUALITY_CUBIC is unbeatable on the
+        // synthetic checkerboard but visibly softens a real icon (rms_box 1.813), which
+        // is the wrong trade for a dock. ANISOTROPIC only wins where there is no detail
+        // to preserve. So: multi-sample linear.
         dc_->DrawBitmap(bitmap, &dst, std::clamp(opacity, 0.0f, 1.0f),
-                        D2D1_INTERPOLATION_MODE_LINEAR, nullptr, nullptr);
+                        D2D1_INTERPOLATION_MODE_MULTI_SAMPLE_LINEAR, nullptr, nullptr);
     }
 
   private:

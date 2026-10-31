@@ -11,7 +11,7 @@
 |---|---|---|---|
 | M0 | 骨架与验证 | 构建链路、窗口、渲染、配置、图标、布局数学全部跑通 | DONE（T-006a 帧尾延迟仍 TODO P1） |
 | M1 | Dock 核心 | 可用的 Dock 栏（放大、启动、指示、拖拽、缩略图） | DONE（T-009..T-016 全部 DONE） |
-| M2 | Finder Bar | 顶部栏 | TODO |
+| M2 | Finder Bar | 顶部栏 | IN PROGRESS（左区 T-301 DONE；中区 T-302 / 右区 T-303..T-307 TODO） |
 | M3 | Launchpad | 全屏网格启动器 | DONE (T-040/T-041/T-042 全部完成) |
 | M4 | 配置与主题 | 热重载 + 主题包 | DONE（T-050/T-051/T-052 全部 DONE；T-085 主题分发属 P1.5 队列） |
 | M5 | 系统集成 | 自启、隐藏任务栏、转储、日志轮转 | DONE（T-060/T-061/T-062 全部 DONE） |
@@ -1022,6 +1022,18 @@ GitHub: 已 push 至 <url> | 最新 commit <sha> | tag: <无/xxx>
   - [ ] 截图：无蒙版 vs 有蒙版，亮色 + 暗色各一张
 - 证据: `evidence/T-202/`
 
+### T-202a · 图标像素保真：alpha 布局与缩放滤波（用户点名缺陷）
+- 状态: DONE / 优先级: P4（插队，用户 2026-10-31 直接点名）/ 依赖: T-006、T-009 / 预估: 1 会话
+- 背景: 用户原话"现在的 dock 的图标连原生 windows 图标都不如更不要说还原了"。仪器化定位到三个根因，其中两个是真实缺陷、一个被实测否决。
+- DoD:
+  - [x] alpha 布局：`IconBitmapFromHBitmap` 入口调用 `PremultiplyIfStraight`，`IconBitmap::pixels` 的不变量改为"恒为预乘 BGRA"—— shell 交回的是**直通 alpha**（notepad 256px 有 6215 个 texel 满足 `rgb > a`，`px[6229] B=127 G=255 R=255 A=2`；自建 straight DIB 经同一 `GetDIBits` 原样返回），旧代码把它当预乘上传，深色背景上出现亮边与脏色
+  - [x] 转换必须**有条件**（存在 `a!=0 && a!=255 && rgb>a` 才乘），无条件预乘会把已预乘的数据再乘一次变暗
+  - [x] 磁盘缓存键 `v2_` → `v3_`，否则旧的双重错误 PNG 会被磁盘命中一直读回来；`SaveToDisk` 的 `Unpremultiply` 与入口预乘互为逆运算
+  - [x] 缩放滤波 `LINEAR` → `MULTI_SAMPLE_LINEAR`：256→96 棋盘格 stdev 37.67→19.19，真实 notepad 图标 `rms_box` 5.791→1.339（比 shell 自己的 96px 与 CPU box 的互相吻合度 1.469 还高）
+  - [x] 否决 bbox 归一化：23 个真实图标 fill 分布 86.7%~100%，归一化会把多数图标放大 15% 以上、dxdiag（coverage 10.4%）放大近 4 倍；coverage 差异是图标设计本身
+- 证据: `evidence/T-301/alpha.txt`（alpha_check）、`interp.txt`（interp_check2）、`icon_fill.txt`、`dock_after_alpha.png` + `slots_after_alpha.txt`（12 槽全 ICON，coverage 63.1%~70.4%）
+- 备注: 单测 `tests/shell_icon_test.cpp` 新增 5 个用例（直通被预乘 / 已预乘不二次乘 / 全不透明不动 / 缓存键带版本 / 真实图标无 `rgb>a`）。ADR-0046..0048。**判据教训**：`detail`（梯度均值）会奖励走样，LINEAR 在该指标上得分最高却最糊；必须用棋盘格 stdev + 与参考实现的 RMS 联合判定。
+
 ### T-203 · Dock 隐藏模式与多屏行为
 - 状态: TODO
 - 优先级: P4
@@ -1185,13 +1197,13 @@ GitHub: 已 push 至 <url> | 最新 commit <sha> | tag: <无/xxx>
 - DoD:
   - [x] 最左"系统菜单"按钮（关于/设置/配置目录/日志目录/退出）—— `FinderBar::OpenSystemMenu` 建 6 项 `CreatePopupMenu`（含两条分隔线），id 从 `kSystemMenuBase=100` 起，`SystemCommand{About=1,Settings=2,OpenConfigFolder=3,OpenLogs=4,Quit=5}`；`main.cpp` 的 `SetSystemCommandHandler` 分派到 settings 各页 / `ShellExecuteW` 打开 `core::ConfigDir()`/`core::LogsDir()` / `PostMessage(WM_CLOSE)`。图标不是 Apple 商标而是三条横线（ASSETS.md 商标约束）
   - [x] 前台应用名实时显示（SetWinEventHook + EVENT_SYSTEM_FOREGROUND）—— `SetWinEventHook(WINEVENT_OUTOFCONTEXT)` 失败时 Tick 回落 `GetForegroundWindow` 轮询；名字取 `FileDescription`（`GetFileVersionInfoW`+`VerQueryValueW`），无版本资源回落文件名。探针实测 `foreground_name=menu_target` 而非窗口标题 "T-301 menu target"
-  - [x] 按 ADR-0037 读 GetMenu 渲染菜单项（≤6 + 更多）—— `ReadAppMenu(hwnd, max_menu_items)` 用 `GetMenu`/`GetMenuItemCount`/`GetMenuStringW(MF_BYPOSITION)`/`GetSubMenu`；超限时 `LayoutBar` 折叠成单个 `…` 盒，`OpenOverflowMenu` 重读全部项并以 `MF_POPUP` 挂成二级菜单（系统绘制，不自绘）
-  - [x] 点击 PostMessage(WM_COMMAND) 转发 —— 菜单在**工作线程**用 `TrackPopupMenuEx(TPM_RETURNCMD|TPM_NONOTIFY)` 弹出（主线程帧率实测零停顿），返回 id 后 `PostMessageW(target, WM_COMMAND, MAKEWPARAM(id,0), 0)`；探针实测 fixture 收到 `command 4002`（File>Open）
+  - [x] 按 ADR-0037 读 GetMenu 渲染菜单项（≤6 + 更多）—— `ReadAppMenu(hwnd, max_menu_items)` 用 `GetMenu`/`GetMenuItemCount`/`GetMenuItemInfoW(MIIM_FTYPE|MIIM_STRING|MIIM_SUBMENU|MIIM_DATA|MIIM_ID)`/`GetSubMenu`；**自绘菜单栏（MFT_OWNERDRAW 且文本为空）走 `ReadProcessMemory(dwItemData)` + `DecodeOwnerDrawnTitle`**（Sublime Text / VS Code 这类应用 `GetMenuStringW` 返回空，标题在 dwItemData 指向的 NUL 分隔 UTF-16 数组里，第 i 项指针正好落在第 i 个标题首字节）；超限时 `LayoutBar` 折叠成单个 `…` 盒，`OpenOverflowMenu` 重读全部项并以 `MF_POPUP` 挂成二级菜单（系统绘制，不自绘）
+  - [x] 点击 PostMessage(WM_COMMAND) 转发 —— 菜单在**工作线程**用 `TrackPopupMenuEx(TPM_RETURNCMD|TPM_NONOTIFY)` 弹出（主线程帧率实测零停顿），返回 id 后 `PostMessageW(target, WM_COMMAND, MAKEWPARAM(id,0), 0)`；探针实测 fixture 收到 `command 4002`（File>Open）。**命令 id 0 必须转发**：Sublime 的 `File > New File` 就是 0，旧代码把它当"无命令"丢弃；只有 `(UINT)-1` 才表示无 id
   - [x] 无菜单窗口只显示应用名 —— spike Q3 实测本机 11 个可见窗口只有 2 个带 Win32 菜单（explorer/chrome 全 0），故这是主路径；`menu_readable=false` 时布局只剩 glyph + 名字盒，不占菜单空间
   - [x] 刷新延迟 < 100ms —— spike 实测 `EVENT_SYSTEM_FOREGROUND` 均值 5.5ms/最坏 8.2ms；名字解析（pid→`QueryFullProcessImageNameW`→`VerQueryValueW`）1.404ms
   - [x] 自动隐藏（Q8 硬约束的必然结果）—— `AdvanceAutoHide` 180ms smoothstep，收起态只留 4dip hairline 且 `SetWindowRgn` 把点击目标一起收掉；探针实测展开 `progress=1.0 interactive=True`、收起 `progress=0.0 interactive=False` 且 `WindowFromPoint` 不再命中栏
-- 证据: `evidence/T-301/`（`probe.txt` verdict 五项 PASS、`bar_retracted.png`/`bar_expanded.png`/`bar_with_menu.png`/`menu_open.png`、`dockforge-*.log`、`target-state.txt`）
-- 备注: 三个不可绕过的实测约束已写成 ADR-0042..0045。①**工作区预留不可行**：`SPI_SETWORKAREA` 返回成功但 explorer 立即覆盖，新最大化窗口仍压在栏下 → 只能自动隐藏。②**点击穿透与 DComp 材质互斥**：`WS_EX_LAYERED|WS_EX_TRANSPARENT`+`SetLayeredWindowAttributes` 能穿透，但不能配 `WS_EX_NOREDIRECTIONBITMAP`，故栏走 `SetWindowRgn` 路线。③**菜单必须在工作线程弹出**：`GetMenuItemRect` 只能在拥有菜单的线程调用（主线程调用在 192DPI 下返回双倍坐标），且菜单线程 `SetForegroundWindow` 成功后 Escape/外部点击才由系统原生关闭，失败回落 `WM_CANCELMODE`。另有两条截图侧教训：`WDA_EXCLUDEFROMCAPTURE` 会让栏对所有截图工具隐形（改为按 `style_.use_capture` 条件设置），`SetWindowRgn` 同时是绘制裁剪（零面积 region 会把 hairline 一起裁掉）。材质固定走 Solid 档（Blur 必须配 capture 排除 → 对截图隐形；Mica/Acrylic 忽略 region → 收起态仍填满 28dip）。
+- 证据: `evidence/T-301/`（`probe.txt` verdict 五项 PASS、`owner_probe.txt` 十三项 PASS、`bar_retracted.png`/`bar_expanded.png`/`bar_with_menu.png`/`menu_open.png`、`dockforge-*.log`、`target-state.txt`、`menu_spike13.txt`、`alpha.txt`/`interp.txt`/`icon_fill.txt`、`dock_after_alpha.png`+`slots_after_alpha.txt`）
+- 备注: 三个不可绕过的实测约束已写成 ADR-0042..0045，图标与自绘菜单的四个决策写成 ADR-0046..0049。①**工作区预留不可行**：`SPI_SETWORKAREA` 返回成功但 explorer 立即覆盖，新最大化窗口仍压在栏下 → 只能自动隐藏。②**点击穿透与 DComp 材质互斥**：`WS_EX_LAYERED|WS_EX_TRANSPARENT`+`SetLayeredWindowAttributes` 能穿透，但不能配 `WS_EX_NOREDIRECTIONBITMAP`，故栏走 `SetWindowRgn` 路线。③**菜单必须在工作线程弹出**：`GetMenuItemRect` 只能在拥有菜单的线程调用（主线程调用在 192DPI 下返回双倍坐标），且菜单线程 `SetForegroundWindow` 成功后 Escape/外部点击才由系统原生关闭，失败回落 `WM_CANCELMODE`。另有两条截图侧教训：`WDA_EXCLUDEFROMCAPTURE` 会让栏对所有截图工具隐形（改为按 `style_.use_capture` 条件设置），`SetWindowRgn` 同时是绘制裁剪（零面积 region 会把 hairline 一起裁掉）。材质固定走 Solid 档（Blur 必须配 capture 排除 → 对截图隐形；Mica/Acrylic 忽略 region → 收起态仍填满 28dip）。**自绘菜单栏**：MSAA `OBJID_MENU` 与 UIA `MenuBar` 的子项名称全为空，唯一可行路径是 `dwItemData` + `ReadProcessMemory`（只读、同完整性、失败即降级）。
 
 ### T-302 · Finder 栏中间：常驻小组件区
 - 状态: TODO / 优先级: P5 / 依赖: T-300 / 预估: 1–2 会话

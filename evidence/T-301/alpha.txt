@@ -1,0 +1,16 @@
+notepad 256x256 grabbed, 256x256 bytes
+  px[5977] B=183 G=183 R=173 A= 50  rgb<=a? 0
+  px[5978] B=183 G=181 R=170 A=121  rgb<=a? 0
+  px[5979] B=184 G=181 R=171 A=180  rgb<=a? 0
+  px[5980] B=182 G=180 R=171 A=226  rgb<=a? 1
+  px[5981] B=184 G=182 R=171 A=252  rgb<=a? 1
+  px[5982] B=182 G=180 R=171 A=226  rgb<=a? 1
+  px[5983] B=184 G=181 R=170 A= 90  rgb<=a? 0
+  px[6229] B=127 G=255 R=255 A=  2  rgb<=a? 0
+  px[6230] B=178 G=229 R=204 A= 10  rgb<=a? 0
+  px[6231] B=182 G=206 R=188 A= 42  rgb<=a? 0
+  px[6232] B=185 G=187 R=175 A=151  rgb<=a? 0
+  px[6233] B=185 G=184 R=173 A=235  rgb<=a? 1
+alpha=0:26299 alpha=255:29810 partial:9427 partial_violating:6215
+control rows=4 first B=0 G=0 R=255 A=64 (expect 0,0,255,64)
+verdict: done

@@ -1,0 +1,29 @@
+=== 256px canvas, alpha>=8 bbox
+explorer.exe                 bbox=  0, 20..255,243  fill=100.0%  coverage= 81.5%  offset=+0,+4
+notepad.exe                  bbox=  1, 23..247,247  fill= 96.5%  coverage= 58.4%  offset=-3,+8
+mspaint.exe                   no icon
+calc.exe                     bbox=  0,  0..255,255  fill=100.0%  coverage=100.0%  offset=+0,+0
+cmd.exe                      bbox=  1, 21..255,231  fill= 99.6%  coverage= 82.0%  offset=+1,-1
+SnippingTool.exe              no icon
+Taskmgr.exe                  bbox=  0, 32..255,223  fill=100.0%  coverage= 74.7%  offset=+0,+0
+control.exe                  bbox=  0, 32..255,223  fill=100.0%  coverage= 74.9%  offset=+0,+0
+shell32.dll                  bbox= 45, 17..211,238  fill= 86.7%  coverage= 54.7%  offset=+1,+0
+imageres.dll                 bbox= 45, 17..211,238  fill= 86.7%  coverage= 54.7%  offset=+1,+0
+write.exe                     no icon
+charmap.exe                  bbox=  0, 53..255,206  fill=100.0%  coverage= 41.5%  offset=+0,+2
+dxdiag.exe                   bbox=  0,  0..255,255  fill=100.0%  coverage= 10.4%  offset=+0,+0
+magnify.exe                  bbox=  0,  0..255,255  fill=100.0%  coverage= 10.2%  offset=+0,+0
+osk.exe                      bbox=  0, 16..255,239  fill=100.0%  coverage= 76.7%  offset=+0,+0
+perfmon.exe                  bbox= 10, 12..249,251  fill= 93.8%  coverage= 69.5%  offset=+2,+4
+regedit.exe                   no icon
+slui.exe                     bbox= 20,  2..244,255  fill= 99.2%  coverage= 39.0%  offset=+5,+1
+winver.exe                   bbox=  0, 32..255,223  fill=100.0%  coverage= 74.9%  offset=+0,+0
+wmplayer.exe                  no icon
+fsquirt.exe                  bbox= 39,  8..216,247  fill= 93.8%  coverage= 55.4%  offset=+0,+0
+colorcpl.exe                 bbox= 10, 17..250,213  fill= 94.1%  coverage= 59.6%  offset=+3,-12
+=== shell items
+chenk                        bbox= 16, 34..239,209  fill= 87.5%  coverage= 55.1%  offset=+0,-6
+Desktop                      bbox= 16, 34..239,209  fill= 87.5%  coverage= 55.1%  offset=+0,-6
+Documents                    bbox= 16, 34..239,209  fill= 87.5%  coverage= 55.1%  offset=+0,-6
+hosts                        bbox= 45, 17..211,238  fill= 86.7%  coverage= 54.7%  offset=+1,+0
+verdict: done

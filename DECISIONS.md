@@ -805,3 +805,27 @@ P1/P2 阶段的任务书假设本项目是 WinUI 3 + Windows App SDK 应用，�
 - **决策**：`BarPlateStyle()` 无条件返回 `StyleForTier(MaterialLevel::Solid, 0)`；`SetWindowDisplayAffinity` 按 `style_.use_capture` 条件设置，Solid 档设 `WDA_NONE`。
 - **理由**：① Blur 档必须配 `WDA_EXCLUDEFROMCAPTURE`，而栏钉在桌面顶部，让它对所有截图/录屏/投屏隐形不可接受（dock 可接受是因为它常驻底部且可被探针冻结）。② Mica/Acrylic 走 `DWMWA_SYSTEMBACKDROP_TYPE`，ADR-0008 已证会忽略 `SetWindowRgn` 与逐像素 alpha，收起态仍填满 28dip 矩形，正好破坏自动隐藏。③ 实测 `mat_blur.png` 与 `mat_solid.png` 采样完全相同 `rgba=(29,32,38,255)`，本机 blur 档无法用于截图证据。
 - **后果**：栏与 dock 的材质档位不再一致（I5 只能做到"同一 PlateRenderer + 同样圆角/描边"，做不到同一 tier）。若未来要恢复磨砂，需要先解决"截图可见"与"capture 排除"的矛盾。
+
+## ADR-0046 · 图标 alpha 在入口统一预乘，缓存键带布局版本（T-301 实测）
+- **决策**：`IconBitmapFromHBitmap` 在返回前调用 `PremultiplyIfStraight`，把 shell 给的直通 alpha 转成预乘；`IconBitmap` 的不变量改为"缓冲区始终是预乘 BGRA"，渲染端继续用 `D2D1_ALPHA_MODE_PREMULTIPLIED`。磁盘缓存键从 `v2_` 升到 `v3_`。
+- **理由**：spike 实测 notepad 256px 图标有 9427 个半透明 texel，其中 6215 个满足 `rgb > a`（`px[6229] B=127 G=255 R=255 A=2`），预乘数据不可能出现这种值；自建 straight DIB（R=255,A=64）经同一条 `GetDIBits` 路径原样返回，证明不是复制过程改的。旧代码把直通数据当预乘上传，深色背景上出现亮边和脏色——这就是"图标不如原生"的根因。
+- **转换必须是有条件的**：只在证据成立时乘（存在 `a!=0 && a!=255 && rgb>a`）。无条件预乘会把已经预乘的缓冲区再乘一次变暗，与要修的 bug 互为镜像。`SaveToDisk` 里的 `Unpremultiply` 与之互为逆运算，`LoadFromDisk` 读回的 WIC `32bppPBGRA` 已是预乘，不再二次处理。
+
+## ADR-0047 · 图标缩放用 MULTI_SAMPLE_LINEAR（T-301 实测）
+- **决策**：`DrawBitmap` 的插值模式从 `D2D1_INTERPOLATION_MODE_LINEAR` 改为 `MULTI_SAMPLE_LINEAR`。
+- **理由**：合成棋盘格 256→96 的 stdev 从 37.67 降到 19.19（理想 0，走样减半）；真实 notepad 图标与 CPU box 参考的 RMS 从 5.791 降到 1.339，比 shell 自己的 96px 与 box 的互相吻合度（1.469）还高。
+- **为什么不选 HIGH_QUALITY_CUBIC**：它在棋盘格上几乎完美（stdev 0.48），但真实图标偏软（rms_box 1.813）。dock 图标要的是"锐且准"，不是"平滑"。
+- **为什么不选 ANISOTROPIC**：棋盘格 stdev 0.01 最好看，但真实图标 rms 5.587，把细节全抹了。
+- **方法论教训**：`detail`（梯度均值）会奖励走样，LINEAR 在该指标上得分最高却最糊。判据必须是"与参考实现的 RMS"，不是"看起来更锐"。
+
+## ADR-0048 · 不做图标 bbox 归一化（T-301 实测否决）
+- **决策**：保持"整张 256px 画布缩放进槽位"，**不**按 alpha bbox 裁剪后归一化到固定视觉占比。
+- **理由**：23 个真实图标的 fill（bbox 长边占画布比）分布是 86.7%~100%，coverage 10.2%~100%。归一化会把多数图标放大 15% 以上，把 dxdiag（coverage 10.4%）放大近 4 倍。coverage 的差异是图标设计本身（notepad 的图形本来就比 explorer 小一圈），不是渲染缺陷；强行统一会让 dock 与资源管理器并排时大小失真。
+- **保留**：真正需要修的是 alpha 与滤波（ADR-0046/0047），不是几何。
+
+## ADR-0049 · owner-draw 菜单栏标题用 ReadProcessMemory 读取（T-301 实测）
+- **决策**：`ReadAppMenu` 在 `GetMenuItemInfoW` 拿到 `MFT_OWNERDRAW` 且文本为空时，用 `OpenProcess(PROCESS_VM_READ|PROCESS_QUERY_LIMITED_INFORMATION)` + `ReadProcessMemory(dwItemData, ...)` 读标题，经 `DecodeOwnerDrawnTitle` 解码；失败才回落到"只显示应用名"。
+- **理由**：Sublime Text 的 10 个顶层菜单项全部 `fType=0x100`、`text=''`，`GetMenuStringW` 拿不到任何标题。spike 实测 `dwItemData` 直接指向一块 NUL 分隔的 UTF-16 标题数组，第 i 项的指针正好落在第 i 个标题的首字节（`top[0]→&File`、`top[1]→&Edit`、`top[2]→&Selection`），所以读一个字符串即可，不需要在内存里搜索。
+- **已否决的替代路径**：MSAA `OBJID_MENU`（10 个 child 的 name 全空）、UIA `MenuBar`（子项 `CurrentName` 与 `LegacyIAccessible.CurrentName` 全空）、点击应用自己的菜单栏等系统弹出（前台归属不成立时弹不出 `#32768`）。这三条都实测过，不再尝试。
+- **安全边界**：只读、只读同完整性级别的进程、失败即降级，不注入、不写对方内存。
+- **命令 id 0 合法**：`ForwardMenuItem` 只拒绝 `(UINT)-1`。Sublime 的 `File > New File` 命令 id 正是 0，旧代码把它当"无命令"丢弃，导致真实菜单项点了没反应。

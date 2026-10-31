@@ -16,6 +16,7 @@
 
 namespace {
 
+using dockforge::finderbar::DecodeOwnerDrawnTitle;
 using dockforge::finderbar::DisplayNameForExecutable;
 using dockforge::finderbar::FallbackNameFromPath;
 using dockforge::finderbar::StripAccelerator;
@@ -103,4 +104,79 @@ TEST_CASE("system menu ids stay above the forwarded range", "[finderbar]") {
     CHECK(dockforge::finderbar::kSystemMenuBase +
               static_cast<int>(dockforge::finderbar::SystemCommand::About) >
           dockforge::finderbar::kSystemMenuBase);
+}
+
+// ------------------------------------------------- owner-drawn menu titles
+
+// The byte layout comes from spikes/T-301_finderbar_menu/menu_spike13.cpp, which dumped
+// Sublime Text's dwItemData: "&File\0&Edit\0&Selection\0F&ind\0&View\0&Goto\0&Tools\0
+// &Project\0Prefere&nces\0&Help\0" as UTF-16LE. Decoding is a pure function, so the rules
+// that matter - stop at NUL, refuse garbage - are testable without a live process.
+
+namespace {
+
+std::vector<std::uint8_t> Utf16Bytes(const std::wstring& text) {
+    std::vector<std::uint8_t> bytes;
+    bytes.reserve(text.size() * 2);
+    for (const wchar_t ch : text) {
+        const auto value = static_cast<std::uint16_t>(ch);
+        bytes.push_back(static_cast<std::uint8_t>(value & 0xFF));
+        bytes.push_back(static_cast<std::uint8_t>((value >> 8) & 0xFF));
+    }
+    return bytes;
+}
+
+}  // namespace
+
+TEST_CASE("An owner-drawn title decodes up to its terminator", "[finderbar][menu]") {
+    // The real buffer holds every title back to back; item i's pointer lands on the start
+    // of title i, so the decoder must stop at the first NUL and ignore the rest.
+    //
+    // Built with an explicit length on purpose: a std::wstring constructed from a literal
+    // stops at the first NUL, which would silently hand the decoder a single unterminated
+    // title and test the opposite of what this case claims.
+    const wchar_t raw[] = L"&File\0&Edit\0&Selection\0F&ind\0";
+    const std::wstring buffer(raw, std::size(raw) - 1);
+    const std::vector<std::uint8_t> bytes = Utf16Bytes(buffer);
+    CHECK(DecodeOwnerDrawnTitle(bytes.data(), bytes.size()) == L"&File");
+
+    // A pointer landing mid-array decodes that title, which is what makes the single read
+    // sufficient for every item.
+    const std::size_t second = 6 * 2;  // "&File\0" is 6 code units
+    CHECK(DecodeOwnerDrawnTitle(bytes.data() + second, bytes.size() - second) == L"&Edit");
+}
+
+TEST_CASE("An owner-drawn title with no terminator is rejected", "[finderbar][menu]") {
+    // Without a NUL the read ran off the end of a real title into whatever follows. The
+    // fallback is the application name, which is honest; a truncated guess is not.
+    const std::vector<std::uint8_t> bytes = Utf16Bytes(L"File Edit View");
+    CHECK(DecodeOwnerDrawnTitle(bytes.data(), bytes.size()).empty());
+}
+
+TEST_CASE("Control characters reject the buffer", "[finderbar][menu]") {
+    // A misaligned pointer reads the high byte of one character as the low byte of the
+    // next. Those produce control codes, and a menu title never contains one.
+    std::vector<std::uint8_t> bytes = Utf16Bytes(L"Fi");
+    bytes.push_back(0x01);
+    bytes.push_back(0x00);
+    bytes.push_back(0x00);
+    bytes.push_back(0x00);
+    CHECK(DecodeOwnerDrawnTitle(bytes.data(), bytes.size()).empty());
+}
+
+TEST_CASE("Degenerate owner-draw buffers are rejected", "[finderbar][menu]") {
+    CHECK(DecodeOwnerDrawnTitle(nullptr, 0).empty());
+    const std::vector<std::uint8_t> one{0x26};
+    CHECK(DecodeOwnerDrawnTitle(one.data(), one.size()).empty());  // half a code unit
+    const std::vector<std::uint8_t> immediate_nul{0x00, 0x00, 0x41, 0x00};
+    CHECK(DecodeOwnerDrawnTitle(immediate_nul.data(), immediate_nul.size()).empty());
+}
+
+TEST_CASE("A surrogate code unit rejects the buffer", "[finderbar][menu]") {
+    std::vector<std::uint8_t> bytes = Utf16Bytes(L"F");
+    bytes.push_back(0x00);
+    bytes.push_back(0xD8);  // 0xD800, a lone high surrogate
+    bytes.push_back(0x00);
+    bytes.push_back(0x00);
+    CHECK(DecodeOwnerDrawnTitle(bytes.data(), bytes.size()).empty());
 }

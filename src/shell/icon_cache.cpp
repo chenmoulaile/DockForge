@@ -20,25 +20,66 @@ using Microsoft::WRL::ComPtr;
 namespace dockforge::shell {
 namespace {
 
-// HBITMAPs from the shell are 32bpp DIBs whose alpha is already premultiplied,
-// which is exactly what Direct2D wants. PNG, on the other hand, stores straight
-// alpha, so the disk round trip has to unpremultiply on write and let WIC
-// premultiply again on read.
+// Alpha layout, measured rather than assumed.
+//
+// spikes/T-301_finderbar_menu/alpha_check.cpp dumps IShellItemImageFactory output and
+// finds texels like B=127 G=255 R=255 A=2 - a colour channel far above alpha, which is
+// arithmetically impossible for premultiplied data. 6215 of 9427 partial-alpha texels
+// violate rgb<=a for notepad.exe, 78 of 202 for explorer.exe, and a synthetic
+// straight-alpha DIB of known content (R=255,A=64) survives the same GetDIBits copy
+// unchanged. So the shell hands us STRAIGHT alpha while backend_d2d tags the texture
+// D2D1_ALPHA_MODE_PREMULTIPLIED, and every anti-aliased edge is drawn brighter than it
+// should be - the halo that made dock icons look worse than the native Windows icon.
+//
+// The conversion is conditional on proof, not on faith: a texel with any colour channel
+// above its alpha can only come from straight-alpha data, so we premultiply exactly when
+// such a texel exists. Buffers that are already premultiplied (or fully opaque) are left
+// untouched, because multiplying them again would darken them - the mirror image of the
+// bug being fixed. Returns true when the buffer was converted.
+bool PremultiplyIfStraight(std::vector<std::uint8_t>& bgra) {
+    bool straight = false;
+    for (std::size_t i = 0; i + 3 < bgra.size(); i += 4) {
+        const unsigned a = bgra[i + 3];
+        if (a == 0 || a == 255) continue;
+        if (bgra[i] > a || bgra[i + 1] > a || bgra[i + 2] > a) {
+            straight = true;
+            break;
+        }
+    }
+    if (!straight) return false;
+    for (std::size_t i = 0; i + 3 < bgra.size(); i += 4) {
+        const unsigned a = bgra[i + 3];
+        if (a == 0) {
+            bgra[i] = 0;
+            bgra[i + 1] = 0;
+            bgra[i + 2] = 0;
+            continue;
+        }
+        if (a == 255) continue;
+        for (int c = 0; c < 3; ++c) {
+            bgra[i + c] = static_cast<std::uint8_t>((bgra[i + c] * a + 127u) / 255u);
+        }
+    }
+    return true;
+}
+
+// Inverse of the above, used only on the way to disk: PNG stores straight alpha, so a
+// premultiplied buffer has to be divided back out before encoding. Kept next to
+// PremultiplyIfStraight on purpose - the two must stay exact inverses, and the original
+// bug was a comment claiming this division had already happened on extraction.
 void Unpremultiply(std::vector<std::uint8_t>& bgra) {
     for (std::size_t i = 0; i + 3 < bgra.size(); i += 4) {
         const unsigned a = bgra[i + 3];
-        if (a == 0 || a == 255) {
-            if (a == 0) {
-                bgra[i] = 0;
-                bgra[i + 1] = 0;
-                bgra[i + 2] = 0;
-            }
+        if (a == 0) {
+            bgra[i] = 0;
+            bgra[i + 1] = 0;
+            bgra[i + 2] = 0;
             continue;
         }
+        if (a == 255) continue;
         for (int c = 0; c < 3; ++c) {
-            const unsigned v = bgra[i + c];
-            const unsigned scaled = (v * 255u + a / 2u) / a;
-            bgra[i + c] = static_cast<std::uint8_t>(std::min(scaled, 255u));
+            const unsigned scaled = (bgra[i + c] * 255u + a / 2u) / a;
+            bgra[i + c] = static_cast<std::uint8_t>(scaled > 255u ? 255u : scaled);
         }
     }
 }
@@ -95,7 +136,12 @@ bool IconBitmapFromHBitmap(HBITMAP bitmap, IconBitmap& out) {
     const int rows = GetDIBits(dc, bitmap, 0, static_cast<UINT>(plain.bmHeight),
                                out.pixels.data(), &info, DIB_RGB_COLORS);
     ReleaseDC(nullptr, dc);
-    return rows == plain.bmHeight;
+    if (rows != plain.bmHeight) return false;
+
+    // IconBitmap is documented as premultiplied because that is what the D2D texture
+    // tag demands; the shell gives straight alpha. See PremultiplyIfStraight.
+    PremultiplyIfStraight(out.pixels);
+    return true;
 }
 
 std::size_t IconCache::KeyHash::operator()(const Key& key) const {
@@ -117,8 +163,13 @@ std::wstring IconCache::CacheKey(const std::wstring& source, int size_px) {
     // stores a vertically flipped icon (evidence/T-200/icon_flip_spike.txt). The
     // version lives in the literal on purpose: a wide swprintf with %s reads the wide
     // argument as narrow and truncates at its first NUL byte, which silently produced
-    // "v_" instead of "v2_" on the first attempt of this fix.
-    constexpr wchar_t kKeyFormat[] = L"v2_%016llx_%d.png";
+    // "v_" instead of "v2_" on the first attempt of that fix.
+    //
+    // v3 is the alpha-layout fix: v2 files hold straight-alpha pixels that were written
+    // after an Unpremultiply pass, so they are doubly wrong and must not be reused.
+    // Bumping the version is the only safe way to invalidate them - nothing in the PNG
+    // records which layout it was encoded from.
+    constexpr wchar_t kKeyFormat[] = L"v3_%016llx_%d.png";
     std::uint64_t hash = 1469598103934665603ull;
     for (const wchar_t ch : source) {
         hash ^= static_cast<std::uint64_t>(ch);
@@ -218,7 +269,9 @@ bool IconCache::SaveToDisk(const std::wstring& path, const IconBitmap& bitmap) {
     if (FAILED(frame->SetPixelFormat(&format))) return false;
     if (!IsEqualGUID(format, GUID_WICPixelFormat32bppBGRA)) return false;
 
-    // PNG wants straight alpha; the buffer holds premultiplied values.
+    // PNG wants straight alpha; IconBitmap holds premultiplied values (see
+    // PremultiplyIfStraight), so the division is real work here rather than the
+    // no-op the old comment implied.
     std::vector<std::uint8_t> straight = bitmap.pixels;
     Unpremultiply(straight);
 

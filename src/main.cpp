@@ -394,7 +394,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     }
 
     core::Logger::Instance().Init(L"app");
-    DF_INFO("app", "DockForge %s starting", "0.1.0");
+#ifndef DOCKFORGE_VERSION
+#define DOCKFORGE_VERSION "0.0.0-unknown"
+#endif
+    DF_INFO("app", "DockForge %s starting", DOCKFORGE_VERSION);
     DF_INFO("app", "config path = %s", core::WideToUtf8(core::ConfigPath()).c_str());
     // Crash recovery (T-061) installs before anything can hide the taskbar and
     // before any code that could crash in earnest. On a machine that never

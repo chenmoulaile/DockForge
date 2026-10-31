@@ -163,13 +163,37 @@ LEVEL ∈ TRACE/DEBUG/INFO/WARN/ERROR/FATAL。文件按天切分，保留 7 天�
 
 ### 图标缓存
 
-- 键：`FNV-1a(UTF-16 source) + size_px`，落盘文件名 `%016llx_%d.png`。
+- 键：`FNV-1a(UTF-16 source) + size_px`，落盘文件名 `v3_%016llx_%d.png`（版本前缀见下）。
 - 目录：`%LOCALAPPDATA%\DockForge\icons`（`core::IconCacheDir()`）。
 - 三级查找：内存 → 磁盘 PNG → `IShellItemImageFactory::GetImage` 提取。
 - 读盘时校验尺寸必须等于请求尺寸，否则视为 miss 重新提取（防键碰撞与篡改）。
 - 落盘失败不阻断绘制；`Get()` 返回 false 只表示这一张取不到。
 - 统计口径：`memory_hits`/`disk_hits`/`extractions`/`failures` 互斥计数，
   `average_extract_ms` 只对 `extractions` 求平均。
+
+### 图标像素格式不变量（T-301 冻结）
+
+**`IconBitmap::pixels` 恒为预乘 BGRA。** 这条不变量由 `IconBitmapFromHBitmap` 在入口保证，
+下游（`IRenderBackend::DrawBitmap` → `D2D1_ALPHA_MODE_PREMULTIPLIED`）不再做任何 alpha 处理。
+
+- shell 交回的 HBITMAP 是**直通 alpha**，不是预乘。实测 notepad 256px 有 9427 个半透明
+  texel，其中 6215 个满足 `rgb > a`（`px[6229] B=127 G=255 R=255 A=2`）；自建 straight DIB
+  经同一 `GetDIBits` 路径原样返回，证明不是复制过程改的。旧代码把它当预乘上传，深色背景上
+  出现亮边与脏色。
+- 转换必须**有条件**：只在存在 `a != 0 && a != 255 && (b > a || g > a || r > a)` 时预乘。
+  无条件预乘会把已经预乘的缓冲区再乘一次变暗，与要修的 bug 互为镜像。
+- 写盘前 `Unpremultiply`（PNG 要直通），读盘后 WIC 的 `32bppPBGRA` 已是预乘，不再二次处理。
+- **缓存键版本必须随 alpha 布局变更而升级**（`v2_` → `v3_`），否则旧的双重错误 PNG 会被
+  磁盘命中一直读回来。
+
+### 图标缩放（T-301 冻结）
+
+`DrawBitmap` 用 `D2D1_INTERPOLATION_MODE_MULTI_SAMPLE_LINEAR`。判据是"与参考实现的 RMS"
+而不是"看起来更锐"：`detail`（梯度均值）会奖励走样，LINEAR 在该指标上得分最高却最糊。
+实测 256→96 棋盘格 stdev 37.67→19.19，真实 notepad 图标 rms_box 5.791→1.339。
+
+**不做 bbox 归一化**：23 个真实图标的 fill 分布 86.7%~100%，归一化会把多数图标放大 15%
+以上、dxdiag（coverage 10.4%）放大近 4 倍。coverage 差异是图标设计本身，不是渲染缺陷。
 
 ### 启动结果
 
@@ -1123,18 +1147,23 @@ finderbar.auto_hide: bool = true          // 收起态留 4dip hairline 且不�
 ### T-301 落地实现（已冻结）
 
 ```
-读取:   GetMenu(hwnd) → GetMenuItemCount → GetMenuStringW(MF_BYPOSITION) → GetSubMenu
+读取:   GetMenu(hwnd) → GetMenuItemCount → GetMenuItemInfoW(MIIM_FTYPE|MIIM_STRING|MIIM_SUBMENU|MIIM_DATA|MIIM_ID)
+自绘项: MFT_OWNERDRAW 且文本为空 → ReadProcessMemory(dwItemData) → DecodeOwnerDrawnTitle
 去加速: StripAccelerator(&File → File, Rock && Roll → Rock & Roll)
 渲染:   LayoutBar 逐项成盒，超 max_menu_items 折叠成 "…" 盒；
         溢出菜单用 AppendMenuW(MF_POPUP, 原子菜单, 标题) 由系统绘制，不自绘
 弹出:   工作线程 TrackPopupMenuEx(TPM_RETURNCMD|TPM_NONOTIFY)（主线程帧预算零占用）
 关闭:   菜单线程先 SetForegroundWindow(owner)+SetFocus；
         成功则 Escape / 外部点击由系统原生关闭，失败回落 SendMessage(owner, WM_CANCELMODE)
-转发:   PostMessageW(目标窗口, WM_COMMAND, MAKEWPARAM(id, 0), 0)；id 为 0 或 -1 时不转发
-禁止:   注入目标进程、hook 全局菜单消息、DestroyMenu 外来子菜单
+转发:   PostMessageW(目标窗口, WM_COMMAND, MAKEWPARAM(id, 0), 0)；只有 id 为 -1 时不转发
+禁止:   注入目标进程、hook 全局菜单消息、DestroyMenu 外来子菜单、写目标进程内存
 ```
 
-实测依据（`spikes/T-301_finderbar_menu/`）：跨进程 `GetMenu` 无需 hook 即可读到完整结构（menu_spike Q2）；外来 HMENU 交给本进程 `TrackPopupMenuEx` 返回的是真实命令 id（menu_spike4 Q9 往返 PASS）；`GetMenuItemRect` 必须在拥有菜单的线程上调用，主线程调用在 192DPI 下返回双倍坐标（menu_spike5 Q12）；菜单线程 `SetForegroundWindow` 失败时 Escape 与外部点击都不生效（menu_spike7/8 Q14/Q18）。
+**命令 id 0 必须转发**（T-301 修正）：旧实现把 0 与 `(UINT)-1` 一起当作"无命令"丢弃，但 Sublime Text 的 `File > New File` 命令 id 正是 0，导致真实菜单项点了没反应。只有 `(UINT)-1` 表示"该项没有命令 id"（分隔符与子菜单项）。
+
+**owner-draw 菜单栏**（T-301 新增，Sublime Text / VS Code 这类自绘菜单栏的必经路径）：`GetMenuStringW` 对这类项返回空，标题在 `dwItemData` 指向的 NUL 分隔 UTF-16 数组里，第 i 项的指针正好落在第 i 个标题的首字节，`ReadProcessMemory` 读一个字符串即可。读取失败必须回落到"只显示应用名"，不得影响栏的其他部分。已否决的替代路径：MSAA `OBJID_MENU`、UIA `MenuBar`（两者子项名称全为空）、点击应用自己的菜单栏等系统弹出（前台归属不成立时弹不出 `#32768`）。
+
+实测依据（`spikes/T-301_finderbar_menu/`）：跨进程 `GetMenu` 无需 hook 即可读到完整结构（menu_spike Q2）；外来 HMENU 交给本进程 `TrackPopupMenuEx` 返回的是真实命令 id（menu_spike4 Q9 往返 PASS）；`GetMenuItemRect` 必须在拥有菜单的线程上调用，主线程调用在 192DPI 下返回双倍坐标（menu_spike5 Q12）；菜单线程 `SetForegroundWindow` 失败时 Escape 与外部点击都不生效（menu_spike7/8 Q14/Q18）；`dwItemData` 的 hexdump 与标题数组布局（menu_spike13 Q26）；Sublime Text 端到端 13 项全 PASS（`tools/finderbar_owner_probe.ps1`）。
 
 ## C-33 托盘镜像渲染（P5 冻结，即 P5 提示词的 C-20 顺延）
 

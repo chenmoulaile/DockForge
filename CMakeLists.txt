@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(DockForge VERSION 0.1.0 LANGUAGES CXX)
+project(DockForge VERSION 0.1.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -49,6 +49,10 @@ target_link_libraries(dockforge_lib PUBLIC
 # ---------------------------------------------------------------- executable
 add_executable(DockForge ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp)
 target_link_libraries(DockForge PRIVATE dockforge_lib)
+
+# One source of truth for the version string: the project() call above. main.cpp
+# reports it at startup so a log line identifies the build that produced it.
+target_compile_definitions(DockForge PRIVATE DOCKFORGE_VERSION="${PROJECT_VERSION}")
 
 if(MINGW)
   # wWinMain needs the unicode CRT entry point; -mwindows hides the console.

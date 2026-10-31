@@ -1,14 +1,14 @@
-{
+﻿{
  "project": "DockForge",
  "schema": 1,
  "milestone": "M2",
- "last_task": "T-301",
- "last_commit": "37c2637",
+ "last_task": "T-301b",
+ "last_commit": "4d58d6a",
  "current_module": "finderbar",
- "current_task": "T-301",
+ "current_task": "T-302",
  "counters": {
-  "total": 33,
-  "done": 30,
+  "total": 34,
+  "done": 31,
   "partial": 3,
   "blocked": 0
  },
@@ -173,7 +173,19 @@
   "cc1plus 在本机 15.5GB 内存只剩 2GB 可用时会 out of memory allocating 920039 bytes；tools/build.ps1 已改为按 FreePhysicalMemory 自适应 -j（$by_memory = Floor(free_gb / 1.3)）（T-301）",
   "ProbeCommandGate::Prime 把启动时已存在的命令文件内容当作已消费：启动前写好的探针命令永远不会执行，必须先启动应用再写入带唯一 token 的命令（T-301）",
   "BMP 采样函数的背景基准不能取被测区域自身的边缘行：56px 条带的第 54 行已接近桌面，用它当「板色」会把整片判成有墨（T-301 Measure-Ink）",
-  "Add-Type 的 P/Invoke FindWindowW 找隐藏的 1x1 菜单 owner 窗口必须不滤可见性：IsWindowVisible 过滤会让菜单 owner 恒找不到（T-301 探针 F 组）"
+  "Add-Type 的 P/Invoke FindWindowW 找隐藏的 1x1 菜单 owner 窗口必须不滤可见性：IsWindowVisible 过滤会让菜单 owner 恒找不到（T-301 探针 F 组）",
+  "shell 给回来的 HBITMAP 是直通 alpha（straight），不是预乘：notepad 256px 有 6215 个 texel 满足 rgb > a，自建 straight DIB 经同一 GetDIBits 路径原样返回，所以必须自己预乘后再交给 D2D 的 PREMULTIPLIED 纹理（T-301 图标）",
+  "判断缓冲区是直通还是预乘必须看证据（存在 a!=0 && a!=255 && rgb>a 才转），无条件预乘会把已经预乘的数据再乘一次变暗，与要修的 bug 互为镜像（T-301 PremultiplyIfStraight）",
+  "图标下采样质量的「detail=梯度均值」指标会奖励走样：LINEAR 得分最高却最糊；必须用棋盘格 stdev + 与参考实现的 RMS 联合判定，实测 MULTI_SAMPLE_LINEAR 的 rms_box=1.339 优于 HIGH_QUALITY_CUBIC 的 1.813（T-301 interp_check2）",
+  "不能按 alpha bbox 把图标归一化到固定视觉占比：23 个真实图标的 fill 分布 86.7%~100%，归一化会把多数图标放大 15% 以上、少数（dxdiag coverage=10.4%）放大 4 倍；coverage 差异是图标设计本身（T-301 icon_fill）",
+  "改图标 alpha 布局必须升磁盘缓存键版本（v2_->v3_），否则旧的双重错误 PNG 会被 LoadFromDisk 一直读回来（T-301）",
+  "owner-draw 菜单栏（Sublime Text / VS Code）的标题不在 GetMenuStringW 里：dwItemData 直接指向 NUL 分隔的 UTF-16 标题数组，第 i 项指针正好落在第 i 个标题首字节，ReadProcessMemory 读一个字符串即可，不需要搜索（T-301 menu_spike13）",
+  "菜单命令 id 0 是合法的：Sublime Text 的 File > New File 就是 0，把 0 当「无命令」拒绝会让真实菜单项失效；只有 (UINT)-1 才代表无 id（T-301 ForwardMenuItem）",
+  "C++ 里 std::wstring 用 L\"a\\0b\" 构造会在首个 NUL 截断，测试 NUL 分隔数据必须用 wchar_t 数组 + 显式长度（T-301 owner-draw 单测）",
+  "PowerShell 参数名与局部变量名大小写不敏感：param([string]$Sublime) 与 $sublime = Get-Process ... 是同一个变量，赋值会被类型约束转成字符串（T-301 owner 探针）",
+  "MSAA OBJID_MENU 与 UIA MenuBar 都拿不到 owner-draw 菜单标题（10 个 child 的 name/CurrentName 全空），不要在这两条路上再花时间（T-301 menu_spike9/10）",
+  "菜单 ID 与子菜单句柄在顶层项里会混在一起：GetMenuItemInfoW 对 MFT_OWNERDRAW 顶层项返回的 wID 是 HMENU 值，只有二级项才是真命令 id（T-301 menu_spike）",
+  "git push 弹账户选择是因为 credential.helper 链里有 git-credential-manager 且无可用登录态：清空 helper 链（cmd /c 'git config --global --add credential.helper \"\"'，PowerShell 传空串会报 wrong number of arguments）后改成 store，凭据填充从 6579ms 降到 169ms（T-301 推送免交互）"
  ],
- "updated_at": "2026-10-31T23:20:00+08:00"
+ "updated_at": "2026-11-01T00:20:00+08:00"
 }

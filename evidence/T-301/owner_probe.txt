@@ -1,0 +1,14 @@
+PASS: Sublime Text started with a top-level window
+PASS: the bar tracks the pinned application
+PASS: the owner-drawn menu was read at all
+PASS: six top-level titles were recovered from dwItemData
+PASS: the titles are the real menu bar
+PASS: no title carries a leftover accelerator marker
+PASS: every recovered title got a box on the bar
+PASS: the boxes are ordered left to right
+PASS: the command was forwarded
+PASS: command id 0 is forwarded rather than discarded
+PASS: the forwarded message reached the application window
+PASS: a separator is refused instead of forwarded
+PASS: a real command next to it still forwards
+verdict: Q24_ownerdraw_titles=PASS Q25_ownerdraw_forwarding=PASS

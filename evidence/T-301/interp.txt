@@ -1,0 +1,12 @@
+--- checkerboard 256->96 (ideal: flat 127, zero variance)
+LINEAR               mean=127.78 stdev= 37.67 min= 71 max=184
+MULTI_SAMPLE_LINEAR  mean=127.77 stdev= 19.19 min= 92 max=163
+HIGH_QUALITY_CUBIC   mean=127.66 stdev=  0.48 min=123 max=132
+ANISOTROPIC          mean=128.00 stdev=  0.01 min=127 max=128
+--- notepad 256->96 vs references (lower rms is closer)
+LINEAR               rms_shell96= 5.209 rms_box= 5.791
+MULTI_SAMPLE_LINEAR  rms_shell96= 2.143 rms_box= 1.339
+HIGH_QUALITY_CUBIC   rms_shell96= 2.403 rms_box= 1.813
+ANISOTROPIC          rms_shell96= 6.353 rms_box= 5.587
+reference agreement: rms_shell96_vs_box=1.469
+verdict: done

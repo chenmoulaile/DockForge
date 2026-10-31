@@ -290,3 +290,135 @@ TEST_CASE("A top-down DIB section is not flipped twice", "[shell][icons][flip]")
     CHECK(last[3] == 0);
     DeleteObject(section);
 }
+
+// ------------------------------------------------------------ alpha layout
+
+// spikes/T-301_finderbar_menu/alpha_check.cpp dumped real shell output: 6215 of 9427
+// partial-alpha texels had a colour channel above their alpha, which premultiplied data
+// cannot produce. These cases pin the conversion, and equally pin its restraint - a
+// buffer that is already premultiplied must come through untouched, or the fix would
+// darken every icon instead of brightening it.
+
+namespace {
+
+HBITMAP MakeAlphaSection(int width, int height, std::uint32_t pixel, void** bits_out) {
+    BITMAPV5HEADER info{};
+    info.bV5Size = sizeof(info);
+    info.bV5Width = width;
+    info.bV5Height = -height;  // top-down, so output row order matches input
+    info.bV5Planes = 1;
+    info.bV5BitCount = 32;
+    info.bV5Compression = BI_BITFIELDS;
+    info.bV5RedMask = 0x00FF0000;
+    info.bV5GreenMask = 0x0000FF00;
+    info.bV5BlueMask = 0x000000FF;
+    info.bV5AlphaMask = 0xFF000000;
+    HDC dc = GetDC(nullptr);
+    HBITMAP section = CreateDIBSection(dc, reinterpret_cast<BITMAPINFO*>(&info),
+                                       DIB_RGB_COLORS, bits_out, nullptr, 0);
+    ReleaseDC(nullptr, dc);
+    if (!section || !*bits_out) return nullptr;
+    auto* pixels = static_cast<std::uint32_t*>(*bits_out);
+    for (int i = 0; i < width * height; ++i) pixels[i] = pixel;
+    return section;
+}
+
+}  // namespace
+
+TEST_CASE("Straight-alpha shell pixels are premultiplied on the way in",
+          "[shell][icons][alpha]") {
+    // Straight alpha: full BLUE at 50%. The DWORD is little-endian, so 0x800000FF lands
+    // in memory as B=0xFF G=0x00 R=0x00 A=0x80.
+    void* bits = nullptr;
+    HBITMAP section = MakeAlphaSection(4, 4, 0x800000FFu, &bits);
+    REQUIRE(section != nullptr);
+
+    IconBitmap out;
+    REQUIRE(IconBitmapFromHBitmap(section, out));
+    REQUIRE(out.width == 4);
+    for (int i = 0; i < 16; ++i) {
+        const std::uint8_t* px = out.pixels.data() + static_cast<std::size_t>(i) * 4;
+        INFO("texel " << i << " B=" << int(px[0]) << " G=" << int(px[1]) << " R=" << int(px[2])
+                      << " A=" << int(px[3]));
+        CHECK(px[3] == 0x80);
+        CHECK(px[0] == 0x80);  // 255 * 128 / 255, blue channel
+        CHECK(px[1] == 0);
+        CHECK(px[2] == 0);
+    }
+    DeleteObject(section);
+}
+
+TEST_CASE("Already-premultiplied pixels are not multiplied twice", "[shell][icons][alpha]") {
+    // Premultiplied: 0x80 alpha with colour already scaled to 0x80. Multiplying again
+    // would give 0x40 and visibly darken the icon.
+    void* bits = nullptr;
+    HBITMAP section = MakeAlphaSection(4, 4, 0x80808080u, &bits);
+    REQUIRE(section != nullptr);
+
+    IconBitmap out;
+    REQUIRE(IconBitmapFromHBitmap(section, out));
+    for (int i = 0; i < 16; ++i) {
+        const std::uint8_t* px = out.pixels.data() + static_cast<std::size_t>(i) * 4;
+        INFO("texel " << i);
+        CHECK(px[3] == 0x80);
+        CHECK(px[2] == 0x80);
+        CHECK(px[1] == 0x80);
+        CHECK(px[0] == 0x80);
+    }
+    DeleteObject(section);
+}
+
+TEST_CASE("Fully opaque pixels are left alone", "[shell][icons][alpha]") {
+    void* bits = nullptr;
+    HBITMAP section = MakeAlphaSection(2, 2, 0xFF112233u, &bits);
+    REQUIRE(section != nullptr);
+
+    IconBitmap out;
+    REQUIRE(IconBitmapFromHBitmap(section, out));
+    for (int i = 0; i < 4; ++i) {
+        const std::uint8_t* px = out.pixels.data() + static_cast<std::size_t>(i) * 4;
+        CHECK(px[3] == 0xFF);
+        CHECK(px[2] == 0x11);
+        CHECK(px[1] == 0x22);
+        CHECK(px[0] == 0x33);
+    }
+    DeleteObject(section);
+}
+
+TEST_CASE("The disk cache key carries the alpha-layout version",
+          "[shell][icons][alpha][cache]") {
+    // v3 is the layout that stores premultiplied pixels. v2 files were written after an
+    // Unpremultiply pass that made them doubly wrong; they must never be loaded again.
+    const std::wstring key = IconCache::CacheKey(L"C:\\app.exe", 256);
+    INFO("key = " << std::string(key.begin(), key.end()));
+    CHECK(key.rfind(L"v3_", 0) == 0);
+}
+
+TEST_CASE("A real shell icon comes back with no colour above alpha",
+          "[shell][icons][alpha][real]") {
+    // The end-to-end form of the bug: this is the exact condition alpha_check.cpp found
+    // in raw IShellItemImageFactory output (6215 violations for notepad at 256px). After
+    // IconBitmapFromHBitmap it must be zero, because that invariant is what the D2D
+    // texture tag promises.
+    const std::wstring notepad = NotepadPath();
+    REQUIRE(!notepad.empty());
+
+    IconCache cache;
+    cache.Initialize(TempCacheDir());
+    IconBitmap icon;
+    REQUIRE(cache.Get(notepad, 256, icon));
+    REQUIRE(icon.valid());
+
+    int violations = 0;
+    int partial = 0;
+    for (int i = 0; i < icon.width * icon.height; ++i) {
+        const std::uint8_t* px = icon.pixels.data() + static_cast<std::size_t>(i) * 4;
+        const int a = px[3];
+        if (a == 0 || a == 255) continue;
+        ++partial;
+        if (px[0] > a || px[1] > a || px[2] > a) ++violations;
+    }
+    INFO("partial=" << partial << " violations=" << violations);
+    CHECK(partial > 0);  // the icon really does have anti-aliased edges
+    CHECK(violations == 0);
+}

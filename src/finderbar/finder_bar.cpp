@@ -343,6 +343,42 @@ std::wstring StripAccelerator(const std::wstring& title) {
     return out;
 }
 
+// Decoding rules, all measured against menu_spike13.cpp's dump of Sublime Text's menu bar
+// (a single 128-byte block: "&File\0&Edit\0&Selection\0F&ind\0&View\0&Goto\0&Tools\0
+// &Project\0Prefere&nces\0&Help\0").
+//
+// A title is a NUL-terminated run of UTF-16 code units. The buffer has no length prefix
+// and no other structure, so the only safe way to read it is to walk to the terminator and
+// refuse anything that does not look like a title by the time we get there.
+std::wstring DecodeOwnerDrawnTitle(const std::uint8_t* bytes, std::size_t size) {
+    if (bytes == nullptr || size < 2) return {};
+    std::wstring title;
+    bool terminated = false;
+    // 128 characters is far beyond any real menu title (the longest measured is
+    // "Prefere&nces" at 12) and keeps a garbage pointer from walking megabytes.
+    constexpr std::size_t kMaxTitleChars = 128;
+    for (std::size_t offset = 0; offset + 1 < size && title.size() < kMaxTitleChars;
+         offset += 2) {
+        const wchar_t ch = static_cast<wchar_t>(bytes[offset] | (bytes[offset + 1] << 8));
+        if (ch == L'\0') {
+            terminated = true;
+            break;
+        }
+        // A title is printable text plus the accelerator marker. Anything below 0x20 is a
+        // control code: either the pointer is not on a title, or the encoding is not what
+        // the spike measured. Both mean "do not guess".
+        if (ch < 0x20) return {};
+        // Lone surrogates and non-characters come from misaligned reads, not from menus.
+        if (ch >= 0xD800 && ch <= 0xDFFF) return {};
+        title.push_back(ch);
+    }
+    // No terminator inside the window we were given means the read stopped in the middle of
+    // a string, so what we have is a prefix and not a title. Returning it would put a
+    // truncated label on the bar; the caller falls back to the application name instead.
+    if (!terminated || title.empty()) return {};
+    return title;
+}
+
 AppMenuSnapshot ReadAppMenu(HWND hwnd, int max_items) {
     AppMenuSnapshot snapshot;
     if (hwnd == nullptr) return snapshot;
@@ -357,14 +393,57 @@ AppMenuSnapshot ReadAppMenu(HWND hwnd, int max_items) {
 
     snapshot.menu = bar;
     snapshot.readable = true;
+
+    // Owner-drawn menu bars (Sublime Text, VS Code, anything with a custom-painted menu)
+    // carry no item text at all: every top-level item is MFT_OWNERDRAW with an empty
+    // string. The titles are still there, in the target process, reachable through
+    // dwItemData (spike Q26). Reading them needs PROCESS_VM_READ, which fails for an
+    // elevated target; that failure is silent and falls back to the application name,
+    // which is the same outcome as a window with no menu at all.
+    DWORD pid = 0;
+    GetWindowThreadProcessId(hwnd, &pid);
+    HANDLE process = nullptr;
+    if (pid != 0) {
+        process = OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    }
+    const auto close_process = MakeGuard([&] {
+        if (process != nullptr) CloseHandle(process);
+    });
+
     const int limit = std::max(1, max_items);
     for (int i = 0; i < count; ++i) {
+        MENUITEMINFOW info{};
+        info.cbSize = sizeof(info);
+        info.fMask = MIIM_FTYPE | MIIM_STRING | MIIM_SUBMENU | MIIM_DATA | MIIM_ID;
         wchar_t text[128]{};
-        const int copied = GetMenuStringW(bar, static_cast<UINT>(i), text,
-                                          static_cast<int>(std::size(text)), MF_BYPOSITION);
-        if (copied <= 0) continue;
-        snapshot.titles.push_back(StripAccelerator(text));
-        snapshot.submenus.push_back(GetSubMenu(bar, i));
+        info.dwTypeData = text;
+        info.cch = static_cast<UINT>(std::size(text));
+        if (!GetMenuItemInfoW(bar, static_cast<UINT>(i), TRUE, &info)) continue;
+
+        std::wstring title;
+        if ((info.fType & MFT_OWNERDRAW) != 0 && process != nullptr) {
+            // dwItemData is a pointer in the target's address space. The spike measured it
+            // landing exactly on the first byte of this item's title, inside a shared
+            // NUL-separated array, so one bounded read is enough.
+            std::uint8_t buffer[512]{};
+            SIZE_T got = 0;
+            if (ReadProcessMemory(process, reinterpret_cast<const void*>(info.dwItemData),
+                                  buffer, sizeof(buffer), &got) &&
+                got >= 2) {
+                title = DecodeOwnerDrawnTitle(buffer, static_cast<std::size_t>(got));
+            }
+            if (title.empty()) {
+                DF_DEBUG("finderbar", "owner-draw title for item %d unreadable (pid=%lu)", i,
+                         static_cast<unsigned long>(pid));
+            }
+        }
+        if (title.empty() && info.cch > 0 && text[0] != L'\0') {
+            title = text;
+        }
+        if (title.empty()) continue;
+
+        snapshot.titles.push_back(StripAccelerator(title));
+        snapshot.submenus.push_back(info.hSubMenu);
     }
     if (static_cast<int>(snapshot.titles.size()) > limit) {
         // Keep the first `limit` and let the layout decide whether they fit. The rest stay
@@ -888,11 +967,16 @@ bool FinderBar::ForwardMenuItem(std::size_t box_index, int item) {
     if (submenu == nullptr) return false;
     const int count = GetMenuItemCount(submenu);
     if (item < 0 || item >= count) return false;
-    // GetMenuItemID returns -1 for separators and for items that open a submenu; both
-    // are real states a user can click, and neither carries a command to forward.
+    // GetMenuItemID returns -1 for separators and for items that open a submenu; both are
+    // real states a user can click and neither carries a command to forward.
+    //
+    // Zero is NOT a rejection case. It was one here until Sublime Text proved otherwise:
+    // its "New File" command is id 0 (measured, menu_spike13.log), so treating 0 as
+    // "no command" silently swallowed the first item of every menu. The only value the
+    // API uses to mean "nothing" is -1.
     const UINT id = static_cast<UINT>(GetMenuItemID(submenu, item));
-    if (id == static_cast<UINT>(-1) || id == 0) {
-        DF_DEBUG(kModule, "menu item %d of box %zu has no command id", item, box_index);
+    if (id == static_cast<UINT>(-1)) {
+        DF_DEBUG(kModule, "menu item %d of box %zu is a separator or submenu", item, box_index);
         return false;
     }
     if (foreground_.hwnd == nullptr) return false;

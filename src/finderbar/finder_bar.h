@@ -103,6 +103,23 @@ std::wstring FallbackNameFromPath(const std::wstring& exe_path);
 // make the bar look like a Win32 app rather than a menu bar.
 std::wstring StripAccelerator(const std::wstring& title);
 
+// Decodes a menu title that a program draws itself.
+//
+// Modern applications (Sublime Text, VS Code, and anything else with a custom-drawn menu
+// bar) put an MFT_OWNERDRAW item in the top-level menu and leave the item's text empty.
+// GetMenuStringW therefore returns nothing and the bar used to fall back to showing the
+// application name alone. spikes/T-301_finderbar_menu/menu_spike13.cpp found where the
+// title actually lives: dwItemData points into the target process at a NUL-separated
+// array of wide-character titles, and the pointer for item i lands exactly on the first
+// byte of title i. This decodes that buffer, so it is a pure function over bytes and can
+// be unit-tested without a live process.
+//
+// The decoder is deliberately strict: it stops at the first NUL, rejects a buffer with no
+// terminator, rejects control characters, and rejects anything that is not a plausible
+// menu title. Reading another process's memory is not a place to be optimistic, and a
+// wrong title is worse than the application-name fallback it replaces.
+std::wstring DecodeOwnerDrawnTitle(const std::uint8_t* bytes, std::size_t size);
+
 // Reads at most `max_items` top-level entries. Returns readable=false for the majority of
 // modern applications, which have no Win32 menu at all (spike Q3: 11 visible windows, 2
 // with menus, 0 of them explorer or Chrome). The bar treats that as the normal case, not

@@ -16,6 +16,11 @@
 namespace dockforge::shell {
 
 // Pixels as the renderer wants them: premultiplied BGRA, top-down, no padding.
+//
+// "Premultiplied" is an invariant of this struct, not an assumption about the source:
+// the shell hands back straight alpha (measured, see PremultiplyIfStraight in the .cpp),
+// and IconBitmapFromHBitmap converts it on the way in so that everything downstream -
+// the D2D texture tag, the PNG round trip, the unit tests - can rely on one layout.
 struct IconBitmap {
     int width = 0;
     int height = 0;
