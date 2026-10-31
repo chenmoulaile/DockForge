@@ -3,7 +3,7 @@
  "schema": 1,
  "milestone": "M2",
  "last_task": "T-301b",
- "last_commit": "4d58d6a",
+ "last_commit": "39e1301",
  "current_module": "finderbar",
  "current_task": "T-302",
  "counters": {
@@ -14,10 +14,10 @@
  },
  "remote": {
   "name": "origin",
-  "url": null,
-  "status": "unconfigured",
-  "reason": "gh repo create 返回 exit=4（未登录）；本地 commit 正常，push 步骤 SKIPPED",
-  "retry_command": "gh auth login 后执行: gh repo create DockForge --private --source=. --remote=origin --push"
+  "url": "https://github.com/chenmoulaile/DockForge.git",
+  "status": "pushed",
+  "reason": "首次推送 4d58d6a 完成；此后 credential.helper 改为 store，push 无需任何人工交互（git config --local 已固化 lowspeedlimit=0/lowspeedtime=0/http.version=HTTP\\/1.1）",
+  "retry_command": "git push origin main"
  },
  "toolchain": {
   "compiler": "g++ (MSYS2 mingw-w64) 15.2.0",
