@@ -1,0 +1,76 @@
+2026-10-26T01:04:54.617+08:00 INFO [app] logger started, file=C:\Users\chenk\AppData\Local\Temp\dockforge-stalecmd-47693156\logs\dockforge-20261026.log
+2026-10-26T01:04:54.617+08:00 INFO [app] DockForge 0.1.0 starting
+2026-10-26T01:04:54.617+08:00 INFO [app] config path = C:\Users\chenk\AppData\Local\Temp\dockforge-stalecmd-47693156\config.json
+2026-10-26T01:04:54.617+08:00 INFO [taskbar] crash recovery filter installed
+2026-10-26T01:04:54.621+08:00 INFO [crash] crash dump filter installed (dir=C:\Users\chenk\AppData\Local\DockForge\dumps prev=00007ff698840150)
+2026-10-26T01:04:54.622+08:00 INFO [core] config loaded from C:\Users\chenk\AppData\Local\Temp\dockforge-stalecmd-47693156\config.json
+2026-10-26T01:04:54.622+08:00 INFO [app] config: icon_size=48 gap=8 mag=1.80 falloff=sine material=mica corner=22
+2026-10-26T01:04:55.035+08:00 DEBUG [shell] skip D:\Beautiful\.tools\innosetup\Examples (file-path): not-found
+2026-10-26T01:04:55.037+08:00 INFO [shell] AppsFolder scan: 214 entries (shortcut=49 uwp=42 desktop-id=69 namespace=54 skipped=1)
+2026-10-26T01:04:55.059+08:00 INFO [app] apps: 214 (shortcut=49 uwp=42 desktop-id=69 namespace=54 skipped=1) scan=414.4ms icons=24/24 in 22.8ms
+2026-10-26T01:04:55.061+08:00 INFO [app] dock tiles: 12 of 214 apps (limit=12 icon=256px)
+2026-10-26T01:04:55.061+08:00 DEBUG [dock] tile[0] 7-Zip kind=executable icon=ok
+2026-10-26T01:04:55.061+08:00 DEBUG [dock] tile[1] Ahk2Exe kind=shell-item icon=ok
+2026-10-26T01:04:55.061+08:00 DEBUG [dock] tile[2] AI 空间 kind=namespace-item icon=ok
+2026-10-26T01:04:55.061+08:00 DEBUG [dock] tile[3] AutoClaw kind=shell-item icon=ok
+2026-10-26T01:04:55.061+08:00 DEBUG [dock] tile[4] AutoHotkey kind=executable icon=ok
+2026-10-26T01:04:55.061+08:00 DEBUG [dock] tile[5] AutoHotkey Dash kind=shell-item icon=ok
+2026-10-26T01:04:55.061+08:00 DEBUG [dock] tile[6] AutoHotkey Help File kind=executable icon=ok
+2026-10-26T01:04:55.061+08:00 DEBUG [dock] tile[7] AutoHotkey Setup kind=executable icon=ok
+2026-10-26T01:04:55.061+08:00 DEBUG [dock] tile[8] AutoHotkey Window Spy kind=shell-item icon=ok
+2026-10-26T01:04:55.061+08:00 DEBUG [dock] tile[9] BandiView kind=namespace-item icon=ok
+2026-10-26T01:04:55.061+08:00 DEBUG [dock] tile[10] Bandizip kind=namespace-item icon=ok
+2026-10-26T01:04:55.061+08:00 DEBUG [dock] tile[11] Beautiful kind=executable icon=ok
+2026-10-26T01:04:55.061+08:00 INFO [app] material: requested=mica resolved=blur os_build=26300 backdrop=1 capture=1
+2026-10-26T01:04:55.061+08:00 WARN [render] material degraded mica -> blur: system backdrop cannot be clipped to a custom corner radius
+2026-10-26T01:04:55.062+08:00 INFO [app] message-count adapters: 2 registered, poll 1000ms
+2026-10-26T01:04:55.074+08:00 INFO [dock] message count 'weixin.exe' -> 0
+2026-10-26T01:04:55.084+08:00 INFO [dock] message count 'qq.exe' -> 0
+2026-10-26T01:04:55.085+08:00 INFO [app] taskbar-progress white list: 1 entry, poll 500ms
+2026-10-26T01:04:55.086+08:00 INFO [platform] window created hwnd=0000000000950e16 dpi=192
+2026-10-26T01:04:55.138+08:00 DEBUG [render] composition initialized for hwnd=0000000000950e16
+2026-10-26T01:04:55.138+08:00 INFO [platform] display[0] \\.\DISPLAY1 monitor=0,0,2880,1920 work=0,0,2880,1824 dpi=192 raw=243 primary=1
+2026-10-26T01:04:55.141+08:00 DEBUG [render] surface resized to 1510x213 px
+2026-10-26T01:04:55.141+08:00 INFO [app] dock placed edge=0 work=0,0,2880,1824 target=685,1595 1510x213 rect=685,1595,2195,1808 dpi=192
+2026-10-26T01:04:55.142+08:00 INFO [render] backdrop capture started: 1510x213 @685,1595 every 200ms
+2026-10-26T01:04:55.166+08:00 DEBUG [render] composition initialized for hwnd=0000000000cf0a82
+2026-10-26T01:04:55.166+08:00 DEBUG [render] surface resized to 2880x1920 px
+2026-10-26T01:04:55.166+08:00 INFO [launchpad] initialized 1 overlay(s), tier=solid
+2026-10-26T01:04:55.515+08:00 DEBUG [shell] skip D:\Beautiful\.tools\innosetup\Examples (file-path): not-found
+2026-10-26T01:04:55.517+08:00 INFO [shell] AppsFolder scan: 214 entries (shortcut=49 uwp=42 desktop-id=69 namespace=54 skipped=1)
+2026-10-26T01:04:55.517+08:00 INFO [shell] launchpad index: 207 items (apps=214 accepted=207 extra=0 dup=0 skipped=7 upstream=1 pathfail=0) in 351.9ms
+2026-10-26T01:04:55.517+08:00 INFO [launchpad] index rebuilt: items=207 apps=214 accepted=207 extra=0 dup=0 skipped=7 pathfail=0 scan=351.9ms total=344.0ms
+2026-10-26T01:04:55.519+08:00 INFO [shell] launchpad watcher watching 2 directories
+2026-10-26T01:04:55.563+08:00 INFO [launchpad] tiles built: 70 prewarmed of 207 items at 192px in 47.0ms
+2026-10-26T01:04:55.563+08:00 INFO [launchpad] index warmed: items=207 in 391.0ms
+2026-10-26T01:04:55.564+08:00 INFO [shell] launchpad watcher watching 1 directories
+2026-10-26T01:04:55.565+08:00 INFO [notifications] banner material tier=blur alpha=248
+2026-10-26T01:04:55.565+08:00 INFO [notifications] disabled (notifications.enabled=0 ready=1)
+2026-10-26T01:04:55.584+08:00 INFO [settings] settings window created (1760x1160 @ 192 dpi)
+2026-10-26T01:04:55.584+08:00 INFO [settings] ready (window deferred until show)
+2026-10-26T01:04:55.584+08:00 INFO [launchpad] hotkey registered: Ctrl+Alt+Space
+2026-10-26T01:04:55.584+08:00 INFO [core] emergency hotkey registered: Ctrl+Alt+T restores the taskbar
+2026-10-26T01:04:55.584+08:00 INFO [settings] probe file=C:\Users\chenk\AppData\Local\Temp\dockforge-stalecmd-47693156\settings-cmd.txt
+2026-10-26T01:04:55.584+08:00 DEBUG [probe] primed with existing content, first command is inert: set behavior.hide_taskbar 1
+2026-10-26T01:04:55.584+08:00 DEBUG [dock] region plate=0,77,1510,213 row=0,0,0,0 include_row=0
+2026-10-26T01:04:55.585+08:00 INFO [hotkeys] applied 0 hotkey entries, 0 registered, 0 failed
+2026-10-26T01:04:55.588+08:00 DEBUG [dock] drop grid scale=2.000 slots=12 first=69.4 last=685.4 dip
+2026-10-26T01:04:55.588+08:00 INFO [dock] drop target registered (12 slots, scale=2.000)
+2026-10-26T01:04:55.594+08:00 INFO [app] dock placed edge=0 work=0,0,2880,1824 target=685,1595 1510x213 rect=685,1595,2195,1808 dpi=192
+2026-10-26T01:04:55.594+08:00 DEBUG [dock] drop grid scale=2.000 slots=12 first=69.4 last=685.4 dip
+2026-10-26T01:04:55.597+08:00 INFO [core] hide_taskbar off (default); taskbar untouched
+2026-10-26T01:04:55.597+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-26T01:04:55.806+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-26T01:04:56.014+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-26T01:04:56.222+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-26T01:04:56.430+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-26T01:04:56.606+08:00 DEBUG [loop] frames=63 avg=16.01ms p50=16.03ms p99=21.83ms fps=62.5 | paint n=7 avg=4.94ms p99=12.78ms | capture=6/6 avg=47.7ms | run polls=4 avg=0.57ms max=0.77ms fg=1
+2026-10-26T01:04:56.638+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-26T01:04:56.846+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-26T01:04:57.054+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-26T01:04:57.262+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-26T01:04:57.470+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-26T01:04:57.615+08:00 DEBUG [loop] frames=126 avg=16.01ms p50=16.00ms p99=21.83ms fps=62.5 | paint n=11 avg=4.35ms p99=12.78ms | capture=10/10 avg=38.5ms | run polls=7 avg=0.51ms max=0.77ms fg=1
+2026-10-26T01:04:57.678+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0
+2026-10-26T01:04:57.806+08:00 DEBUG [settings] probe command=show
+2026-10-26T01:04:57.878+08:00 DEBUG [preview] tick hovered=-1 active=0 elapsed=0.0 windows=0

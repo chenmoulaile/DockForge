@@ -1,8 +1,8 @@
-[  0%] Built target hw_sidecar
-[  2%] Built target message_badge_probe_app
-[  3%] Built target notification_sidecar_stub
-[  4%] Built target notification_sidecar
-[ 63%] Built target dockforge_lib
+﻿[  1%] Built target hw_sidecar
+[  3%] Built target message_badge_probe_app
+[  4%] Built target notification_sidecar_stub
+[  5%] Built target notification_sidecar
+[ 64%] Built target dockforge_lib
 [ 65%] Built target layout_bench
 [ 66%] Built target DockForge
 [ 68%] Built target autostart_probe

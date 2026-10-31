@@ -619,3 +619,29 @@ config=false 不动任务——不主动清除用户手工创建的同名任务�
   判定不实现：该源枚举的是通知中心里还留着的条数，微信/QQ 恒不出现，其余应用两次枚举 id 完全一致，
   不随用户读消息下降——不是未读数。理由同步写进 TASKS.md 的 T-065「剩余工作」。
 - 下轮开始于：T-085 社区主题分发替代方案（P1）
+
+## 2026-10-26T01:20:00+08:00 | HOTFIX | DONE
+- 做了什么：修复交付 T-076 后操作者报告的任务栏被隐藏事故。两个独立缺陷：
+  ① 五条探针文件通道（settings/launchpad/folder/hardware/notifications）都以「读文件 → 与
+  last_command 比较 → 不同则执行」工作，而该记忆启动时为空，于是继承来的隔夜命令被当作新命令执行。
+  事故日志实证 `DEBUG [settings] probe command=set behavior.hide_taskbar 1` →
+  `INFO [core] taskbar visibility -> 0`。新增 `src/core/probe_file.{h,cpp}`
+  （`ReadProbeFileContent` / `ProbeCommandOf` / `ProbeCommandGate::Prime`），启动时把文件现有内容
+  标记为已读，五条通道收敛到同一实现；hover 通道故意不 Prime（它承载电平而非事件，Prime 会吞掉
+  探针的下一次同值写入）。
+  ② 探针用 `Stop-Process -Force` 收尾，即 TerminateProcess，正常退出恢复与
+  SetUnhandledExceptionFilter 崩溃恢复都跑不到。新增 `tools/probe_cleanup.ps1`（杀全部探针镜像 +
+  恢复 Shell_TrayWnd/Shell_SecondaryTrayWnd + 报告泄漏环境变量），`notifications_probe.ps1` 每条
+  退出路径走 `Stop-ProbeCleanly` 并自清 20 个可能继承的 `DOCKFORGE_*` 变量。
+- 顺带修掉既有测试缺陷：`tests/shell_window_test.cpp` 的 EnumerateAppWindows 用例在循环内对每个
+  实时窗口断言 8 次，断言总数随操作者开几个应用而变（同一 commit 实测 4530 与 4554，差 24 =
+  3 窗口 × 8），使 evidence/test.log 无法跨次比较。改为累积违规后断言一次，计数固定。
+- 实测：build 全目标 exit 0；全量 456 用例 4544 断言 exit 0 且连跑四次数字完全一致；`[probe]`
+  8 用例 21 断言；`[notifications]` 32 用例 181 断言；新增 `tools/stale_command_probe.ps1`
+  ALL PASS（植入隔夜命令 → 启动 → 断言未执行且任务栏可见 → 写新命令仍生效，证明通道未被堵死）；
+  notifications 探针真实与桩两种模式仍全 PASS，结束后无残留进程。
+- 证据：`evidence/T-076/verify.txt` 第八节、`probe_stale_command.log`、`build.log`、`test.log`、
+  `test_probe.log`
+- 遗留：probe_cleanup 只能恢复被 ShowWindow 隐藏的任务栏，shell 自身状态被改坏仍需重启 explorer；
+  脚本不碰注册表与自动隐藏设置。
+- 下轮开始于：T-085 社区主题分发替代方案（P1）

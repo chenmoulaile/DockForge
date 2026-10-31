@@ -105,17 +105,47 @@ TEST_CASE("EnumerateAppWindows returns plausible windows only", "[shell][window]
     // closing, an app shutting down - and a window that is gone is not a violation of
     // the filter. Skipping dead handles keeps this from flaking on a live desktop
     // (observed: 3 spurious failures while another test command was killing apps).
+    //
+    // Violations are accumulated rather than CHECKed per window. Asserting inside the
+    // loop made the total assertion count a function of how many apps the operator
+    // had open, so two runs of the same commit reported different numbers - measured
+    // 4530 vs 4554, exactly three windows' worth of difference. That made every
+    // evidence log incomparable with the one before it. Now the count is fixed and the
+    // message still names the offending window.
     const auto windows = shell::EnumerateAppWindows();
+    std::wstring violations;
+    int checked_windows = 0;
     for (const auto& window : windows) {
         if (IsWindow(window.hwnd) == FALSE) continue;
-        CHECK(window.hwnd != nullptr);
-        CHECK(window.pid != 0);
-        CHECK(window.app_pid != 0);
-        CHECK_FALSE(window.title.empty());
-        CHECK_FALSE(window.class_name.empty());
-        CHECK(IsWindowVisible(window.hwnd) != FALSE);
-        CHECK(GetWindow(window.hwnd, GW_OWNER) == nullptr);
-        CHECK((GetWindowLongPtrW(window.hwnd, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) == 0);
+        ++checked_windows;
+        const wchar_t* bad = nullptr;
+        if (window.hwnd == nullptr) {
+            bad = L"null handle";
+        } else if (window.pid == 0) {
+            bad = L"zero pid";
+        } else if (window.app_pid == 0) {
+            bad = L"zero app pid";
+        } else if (window.title.empty()) {
+            bad = L"empty title";
+        } else if (window.class_name.empty()) {
+            bad = L"empty class name";
+        } else if (IsWindowVisible(window.hwnd) == FALSE) {
+            bad = L"not visible";
+        } else if (GetWindow(window.hwnd, GW_OWNER) != nullptr) {
+            bad = L"has an owner";
+        } else if ((GetWindowLongPtrW(window.hwnd, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) != 0) {
+            bad = L"is a tool window";
+        }
+        if (bad != nullptr && violations.empty()) {
+            violations = std::wstring(bad) + L" (hwnd=" +
+                         std::to_wstring(reinterpret_cast<std::uintptr_t>(window.hwnd)) +
+                         L" class=" + window.class_name + L" title=" + window.title + L")";
+        }
+    }
+    INFO("windows checked: " << checked_windows);
+    CHECK(violations.empty());
+    if (!violations.empty()) {
+        UNSCOPED_INFO("first violation: " << std::string(violations.begin(), violations.end()));
     }
 }
 

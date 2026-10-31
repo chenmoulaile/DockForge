@@ -692,6 +692,22 @@
   - C-21 的电池省电分支未被实机触发；实机跑到的是设备丢失分支。
   - Launchpad / FolderPanel 仍未订阅 C-21（既有缺口，Launchpad 固定 Solid、FolderPanel 走 GDI）。
 
+#### T-076 交付后事故：任务栏被隐藏（HOTFIX，已修复）
+
+- 状态: DONE（2026-10-26）
+- 现象: 操作者报告「任务栏变成全黑了然后什么都点击不到」。
+- 根因一（真产品缺陷）: 五条探针文件通道都以「与 `last_command` 比较」去重，而该记忆启动时为空，
+  于是继承来的隔夜命令（`set behavior.hide_taskbar 1`）被当作新命令执行。
+  修法: `src/core/probe_file.{h,cpp}` 的 `ProbeCommandGate::Prime`，启动时把文件现有内容标记为已读；
+  五条通道收敛到 `ReadProbeFileContent` / `ProbeCommandOf`；hover 通道故意不 Prime（电平非事件）。
+- 根因二（探针收尾缺陷）: `Stop-Process -Force` 即 TerminateProcess，正常退出恢复与崩溃恢复都跑不到。
+  修法: `tools/probe_cleanup.ps1` + 各探针 `Stop-ProbeCleanly` 收尾，并自清继承的 `DOCKFORGE_*` 变量。
+- 顺带修掉: `tests/shell_window_test.cpp` 的 EnumerateAppWindows 用例在循环内按实时窗口数断言，
+  导致断言总数随桌面窗口数变化（实测 4530 vs 4554），evidence/test.log 无法跨次比较。改为累积后断言一次。
+- 验证: `tools/stale_command_probe.ps1` ALL PASS（植入旧命令→启动→未执行且任务栏可见→新命令仍生效）；
+  全量 456 用例 4544 断言，连跑四次数字一致。
+- 证据: `evidence/T-076/verify.txt` 第八节、`evidence/T-076/probe_stale_command.log`
+
 ### T-085 · 社区主题分发替代方案（P1 · 低风险）
 
 - 状态: TODO

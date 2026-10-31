@@ -147,5 +147,65 @@ cmake -S . -B build
 cmake --build build -j 8
 build\bin\dockforge_tests.exe
 build\bin\dockforge_tests.exe "[notifications]"
+build\bin\dockforge_tests.exe "[probe]"
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\notifications_probe.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\notifications_probe.ps1 -StubSidecar
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\stale_command_probe.ps1
+
+八、交付后事故：任务栏被隐藏（2026-10-26，已修复并加回归）
+------------------------------------------------------------
+操作者在 T-076 交付后报告："任务栏变成全黑了然后什么都点击不到"。
+诊断结论：两个独立缺陷叠加，都不是渲染问题。
+
+根因一（真产品缺陷）：隔夜旧命令被当成新命令执行。
+  本 shell 从 DSH 父进程继承了上一日留下的 DOCKFORGE_SETTINGS_CMD_FILE，
+  该文件内容仍是 `set behavior.hide_taskbar 1`（mtime 前一天 12:19）。
+  五条文件通道（settings/launchpad/folder/hardware/notifications）都以
+  "读文件 → 与 last_command 比较 → 不同则执行" 工作，而 last_command 启动时为空，
+  于是文件里任何既有内容都会被当作刚写入的命令。事故日志实证：
+    DEBUG [settings] probe command=set behavior.hide_taskbar 1
+    INFO  [taskbar] apply hide=1 -> no-op: already hidden
+    INFO  [core] taskbar visibility -> 0; re-reading work area
+  修法：新增 core/probe_file.{h,cpp} 的 ProbeCommandGate，启动时用文件现有内容
+  Prime 一次，使既有命令成为惰性；探针脚本全部在启动后才写第一条命令
+  （11 个文件通道探针逐一核实），所以 Prime 不会吞掉真实命令。
+  五个通道的重复读取逻辑一并收敛到 ReadProbeFileContent / ProbeCommandOf。
+  hover 通道故意不 Prime：它承载的是电平不是事件，Prime 会吞掉探针的下一次
+  同值写入，把一个无害的陈旧悬停换成坏掉的测试。
+
+根因二（探针收尾缺陷）：Stop-Process -Force 是 TerminateProcess，
+  既跑不到 main.cpp 正常退出的 RestoreTaskbarSystem，也跑不到
+  core/taskbar.cpp 的 SetUnhandledExceptionFilter 崩溃恢复。
+  崩溃标记文件本次未产生，证实是强制终止而非崩溃。
+  修法：新增 tools/probe_cleanup.ps1（杀全部探针镜像 + 恢复 Shell_TrayWnd /
+  Shell_SecondaryTrayWnd + 报告泄漏的环境变量），notifications_probe.ps1 的
+  每条退出路径（成功、Fail、启动前）都走 Stop-ProbeCleanly，
+  并自清 20 个可能继承来的 DOCKFORGE_* 变量。
+
+顺带修掉的一个既有测试缺陷：
+  tests/shell_window_test.cpp 的 "EnumerateAppWindows returns plausible windows only"
+  在循环里对每个实时窗口断言 8 次，导致断言总数随操作者开了几个应用而变。
+  实测同一 commit 两次跑出 4530 与 4554（差 24 = 3 个窗口 × 8）。
+  这使每一份 evidence/test.log 都无法与前一份比较。
+  改为累积违规后断言一次，计数固定，失败信息仍带 hwnd/class/title。
+
+验证：
+  build 全目标 exit 0（evidence/T-076/build.log）
+  全量 456 用例 4544 断言 exit 0，连跑四次数字完全一致（evidence/T-076/test.log）
+  [probe] 8 用例 21 断言 exit 0（evidence/T-076/test_probe.log）
+  [notifications] 32 用例 181 断言 exit 0（evidence/T-076/test_notifications.log）
+  tools/stale_command_probe.ps1 ALL PASS（evidence/T-076/probe_stale_command.log）：
+    A 植入隔夜命令 → B 启动 → C 断言未执行（日志无该命令、config 仍 false、
+    任务栏可见）→ D 写新命令仍生效（证明通道没被堵死）。
+    日志首行即 DEBUG [probe] primed with existing content, first command is inert。
+  notifications 探针两种模式仍 ALL PASS（真实 sidecar 与 -StubSidecar），
+  结束后无任何残留进程，任务栏保持可见。
+
+诚实边界（新增）：
+  1. 事故发生时任务栏已被系统恢复（explorer 两个实例、StuckRects3 的 autohide 位为 0），
+     修复是按日志与代码路径定位的，不是在被破坏的现场上验证的。
+  2. 根因二只能证明"强制终止会跳过恢复"，没有复现"探针确实把任务栏藏起来了"的完整时序——
+     当时的 scratch config 里 hide_taskbar 已是 true（mtime 0:07:15），
+     说明隐藏动作发生在该 run 内，但隐藏后探针是否立即退出无法从日志区分。
+  3. probe_cleanup.ps1 只能恢复"被 ShowWindow 隐藏"的任务栏；如果 shell 自身状态被改坏，
+     仍需重启 explorer。脚本不碰注册表，也不改自动隐藏设置。

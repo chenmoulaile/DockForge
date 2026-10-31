@@ -15,6 +15,7 @@
 #include "core/frame_clock.h"
 #include "core/log.h"
 #include "core/paths.h"
+#include "core/probe_file.h"
 #include "core/secrets.h"
 #include "core/taskbar.h"
 #include "dock/dock_view.h"
@@ -207,6 +208,7 @@ bool ReadEnvFlag(const wchar_t* name, bool default_on) {
 bool ReadEnvFlag(const wchar_t* name) {
     return ReadEnvFlag(name, false);
 }
+
 
 // DOCKFORGE_FORCE_MATERIAL=<mica|acrylic|blur|solid> overrides the configured
 // tier so every degradation step can be exercised on a machine whose OS would
@@ -1229,7 +1231,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         WriteFile(h, json.data(), static_cast<DWORD>(json.size()), &written, nullptr);
         CloseHandle(h);
     };
-    std::string notif_last_command;
+    core::ProbeCommandGate notif_gate;
+    // A stale command left by an earlier run must not fire on this one (measured:
+    // it hid the operator's taskbar). Priming makes the file's existing content
+    // count as already seen.
+    notif_gate.Prime(core::ReadProbeFileContent(notif_cmd_file));
     double notif_cmd_since_read_ms = 1e9;
     // Synthetic ids start above anything the sidecar reports so a probe push
     // can never collide with a real notification id.
@@ -1267,31 +1273,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         if (notif_cmd_since_read_ms < 50.0) return;
         notif_cmd_since_read_ms = 0.0;
         if (notif_cmd_file.empty()) return;
-        HANDLE h = CreateFileW(notif_cmd_file.c_str(), GENERIC_READ,
-                               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                               nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-        if (h == INVALID_HANDLE_VALUE) return;
-        char raw[1024]{};
-        DWORD got = 0;
-        const BOOL read_ok = ReadFile(h, raw, sizeof(raw) - 1, &got, nullptr);
-        CloseHandle(h);
-        if (!read_ok || got == 0) return;
-        raw[got] = '\0';
-        std::string content(raw);
-        while (!content.empty() &&
-               (content.back() == '\n' || content.back() == '\r' || content.back() == ' ')) {
-            content.pop_back();
-        }
+        const std::string content = core::ReadProbeFileContent(notif_cmd_file);
         // Full-content dedup, same as the hardware probe: the script appends a
         // unique token line so repeated identical commands all arrive.
-        if (content.empty() || content == notif_last_command) return;
-        notif_last_command = content;
-        std::string command = content;
-        const std::size_t nl = command.find('\n');
-        if (nl != std::string::npos) command.resize(nl);
-        while (!command.empty() && (command.back() == '\r' || command.back() == ' ')) {
-            command.pop_back();
-        }
+        if (!notif_gate.Accept(content)) return;
+        const std::string command = core::ProbeCommandOf(content);
         if (command.empty()) return;
         // Log the verb only. `push` carries app|title|body, and ADR-0025 says
         // notification text never reaches the log file - a probe command must
@@ -1516,33 +1502,15 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                     core::WideToUtf8(launchpad_cmd_file).c_str());
         }
     }
-    std::string launchpad_last_command;
+    core::ProbeCommandGate launchpad_gate;
+    launchpad_gate.Prime(core::ReadProbeFileContent(launchpad_cmd_file));
     double launchpad_cmd_since_read_ms = 1e9;
     auto read_launchpad_command = [&](double delta_ms) {
         launchpad_cmd_since_read_ms += delta_ms;
         if (launchpad_cmd_since_read_ms < 50.0) return;
         launchpad_cmd_since_read_ms = 0.0;
-        // Full sharing, not _wfopen_s: the writer is another process rewriting the file
-        // between frames, and a CRT fopen denies the concurrent write (measured on the
-        // T-016 hover probe: "The process cannot access the file ... because it is being
-        // used by another process").
-        HANDLE h = CreateFileW(launchpad_cmd_file.c_str(), GENERIC_READ,
-                               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                               nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-        if (h == INVALID_HANDLE_VALUE) return;
-        char raw[128]{};
-        DWORD got = 0;
-        const BOOL read_ok = ReadFile(h, raw, sizeof(raw) - 1, &got, nullptr);
-        CloseHandle(h);
-        if (!read_ok || got == 0) return;
-        raw[got] = '\0';
-        std::string command(raw);
-        while (!command.empty() &&
-               (command.back() == '\n' || command.back() == '\r' || command.back() == ' ')) {
-            command.pop_back();
-        }
-        if (command.empty() || command == launchpad_last_command) return;
-        launchpad_last_command = command;
+        const std::string command = core::ReadProbeFileContent(launchpad_cmd_file);
+        if (!launchpad_gate.Accept(command)) return;
         DF_DEBUG("launchpad", "probe command=%s", command.c_str());
 
         if (command == "open") {
@@ -1600,30 +1568,16 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
             DF_INFO("settings", "probe file=%s", core::WideToUtf8(settings_cmd_file).c_str());
         }
     }
-    std::string settings_last_command;
+    core::ProbeCommandGate settings_gate;
+    settings_gate.Prime(core::ReadProbeFileContent(settings_cmd_file));
     double settings_cmd_since_read_ms = 1e9;
     auto read_settings_command = [&](double delta_ms) {
         settings_cmd_since_read_ms += delta_ms;
         if (settings_cmd_since_read_ms < 50.0) return;
         settings_cmd_since_read_ms = 0.0;
         if (settings_cmd_file.empty()) return;
-        HANDLE h = CreateFileW(settings_cmd_file.c_str(), GENERIC_READ,
-                               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                               nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-        if (h == INVALID_HANDLE_VALUE) return;
-        char raw[192]{};
-        DWORD got = 0;
-        const BOOL read_ok = ReadFile(h, raw, sizeof(raw) - 1, &got, nullptr);
-        CloseHandle(h);
-        if (!read_ok || got == 0) return;
-        raw[got] = '\0';
-        std::string command(raw);
-        while (!command.empty() &&
-               (command.back() == '\n' || command.back() == '\r' || command.back() == ' ')) {
-            command.pop_back();
-        }
-        if (command.empty() || command == settings_last_command) return;
-        settings_last_command = command;
+        const std::string command = core::ReadProbeFileContent(settings_cmd_file);
+        if (!settings_gate.Accept(command)) return;
         DF_DEBUG("settings", "probe command=%s", command.c_str());
         if (command == "show") {
             settings.Show();
@@ -1678,22 +1632,15 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         hover_probe_since_read_ms += delta_ms;
         if (hover_probe_since_read_ms < 50.0) return;
         hover_probe_since_read_ms = 0.0;
-        // CreateFileW with full sharing, not _wfopen_s: the writer is another
-        // process rewriting this file between frames, and a CRT fopen denies the
-        // concurrent write (measured: "The process cannot access the file because it
-        // is being used by another process" on the second cycle). This is the same
-        // pattern config.cpp uses for its own reads.
-        HANDLE h = CreateFileW(hover_probe_file.c_str(), GENERIC_READ,
-                               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                               nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-        if (h == INVALID_HANDLE_VALUE) return;
-        char raw[32]{};
-        DWORD got = 0;
-        const BOOL read_ok = ReadFile(h, raw, sizeof(raw) - 1, &got, nullptr);
-        CloseHandle(h);
-        if (!read_ok || got == 0) return;
-        raw[got] = '\0';
-        const int parsed = atoi(raw);
+        // Deliberately NOT gated like the command channels. This file holds a
+        // level, not an event: the app re-applies it whenever the number differs
+        // from the hovered tile, so re-writing the same index is a no-op by
+        // design. Priming it with the file's existing content would swallow the
+        // probe's next write of that same index, turning a harmless stale hover
+        // into a broken test. A stale index here can only open a preview popup.
+        const std::string content = core::ReadProbeFileContent(hover_probe_file);
+        if (content.empty()) return;
+        const int parsed = atoi(content.c_str());
         const int clamped = (parsed >= 0 && parsed < static_cast<int>(tiles.size()))
                                 ? parsed
                                 : -1;
@@ -1733,30 +1680,15 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     }
     bool folder_probe_opened = false;
     int folder_probe_tile_click = -1;  // consumed by the tick, runs ActivateTile
-    std::string folder_last_command;
+    core::ProbeCommandGate folder_gate;
+    folder_gate.Prime(core::ReadProbeFileContent(folder_cmd_file));
     double folder_cmd_since_read_ms = 1e9;
     auto read_folder_command = [&](double delta_ms) {
         folder_cmd_since_read_ms += delta_ms;
         if (folder_cmd_since_read_ms < 50.0) return;
         folder_cmd_since_read_ms = 0.0;
-        // Full sharing: the writer is another process (see read_hover_probe).
-        HANDLE h = CreateFileW(folder_cmd_file.c_str(), GENERIC_READ,
-                               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                               nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-        if (h == INVALID_HANDLE_VALUE) return;
-        char raw[512]{};
-        DWORD got = 0;
-        const BOOL read_ok = ReadFile(h, raw, sizeof(raw) - 1, &got, nullptr);
-        CloseHandle(h);
-        if (!read_ok || got == 0) return;
-        raw[got] = '\0';
-        std::string command(raw);
-        while (!command.empty() &&
-               (command.back() == '\n' || command.back() == '\r' || command.back() == ' ')) {
-            command.pop_back();
-        }
-        if (command.empty() || command == folder_last_command) return;
-        folder_last_command = command;
+        const std::string command = core::ReadProbeFileContent(folder_cmd_file);
+        if (!folder_gate.Accept(command)) return;
         DF_INFO("folder", "probe command=%s", command.c_str());
 
         if (command == "back") {
@@ -1896,42 +1828,21 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         WriteFile(h, json.data(), static_cast<DWORD>(json.size()), &written, nullptr);
         CloseHandle(h);
     };
-    std::string hw_last_command;
+    core::ProbeCommandGate hw_gate;
+    hw_gate.Prime(core::ReadProbeFileContent(hw_cmd_file));
     double hw_cmd_since_read_ms = 1e9;
     auto read_hw_command = [&](double delta_ms) {
         hw_cmd_since_read_ms += delta_ms;
         if (hw_cmd_since_read_ms < 50.0) return;
         hw_cmd_since_read_ms = 0.0;
         if (hw_cmd_file.empty()) return;
-        HANDLE h = CreateFileW(hw_cmd_file.c_str(), GENERIC_READ,
-                               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                               nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-        if (h == INVALID_HANDLE_VALUE) return;
-        char raw[256]{};
-        DWORD got = 0;
-        const BOOL read_ok = ReadFile(h, raw, sizeof(raw) - 1, &got, nullptr);
-        CloseHandle(h);
-        if (!read_ok || got == 0) return;
-        raw[got] = '\0';
-        std::string content(raw);
-        while (!content.empty() &&
-               (content.back() == '\n' || content.back() == '\r' ||
-                content.back() == ' ')) {
-            content.pop_back();
-        }
+        const std::string content = core::ReadProbeFileContent(hw_cmd_file);
         // Dedup on the FULL file content: the probe appends a unique token
         // line after the command so repeated identical commands (e.g. `state`
         // five times) are all delivered; only a byte-identical rewrite of the
         // whole file is a true repeat.
-        if (content.empty() || content == hw_last_command) return;
-        hw_last_command = content;
-        std::string command = content;
-        const std::size_t nl = command.find('\n');
-        if (nl != std::string::npos) command.resize(nl);
-        while (!command.empty() &&
-               (command.back() == '\r' || command.back() == ' ')) {
-            command.pop_back();
-        }
+        if (!hw_gate.Accept(content)) return;
+        const std::string command = core::ProbeCommandOf(content);
         if (command.empty()) return;
         DF_INFO("finderbar", "probe command=%s", command.c_str());
         auto report = [&](const finderbar::HardwareControlError& err) {

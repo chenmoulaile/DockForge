@@ -55,16 +55,49 @@ New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 
 function Fail([string]$why) {
     Write-Host "FAIL: $why"
-    Get-Process -Name DockForge -ErrorAction SilentlyContinue | Stop-Process -Force
-    Get-Process -Name notification_sidecar -ErrorAction SilentlyContinue | Stop-Process -Force
-    Get-Process -Name notification_sidecar_stub -ErrorAction SilentlyContinue | Stop-Process -Force
+    Stop-ProbeCleanly
     exit 1
 }
 
-Get-Process -Name DockForge -ErrorAction SilentlyContinue | Stop-Process -Force
-Get-Process -Name notification_sidecar -ErrorAction SilentlyContinue | Stop-Process -Force
-Get-Process -Name notification_sidecar_stub -ErrorAction SilentlyContinue | Stop-Process -Force
+# Every exit path goes through here: killing the dock with TerminateProcess skips
+# both of its taskbar restore paths (normal exit and the crash filter), so the
+# probe has to put the shell back itself.
+#
+# 2026-10-26: this probe hid the operator's taskbar and left it hidden, because
+# the cleanup below did not exist. See tools/probe_cleanup.ps1 for the full story.
+function Stop-ProbeCleanly {
+    Get-Process -Name DockForge -ErrorAction SilentlyContinue | Stop-Process -Force
+    Get-Process -Name notification_sidecar -ErrorAction SilentlyContinue | Stop-Process -Force
+    Get-Process -Name notification_sidecar_stub -ErrorAction SilentlyContinue | Stop-Process -Force
+    try {
+        & (Join-Path $root 'tools\probe_cleanup.ps1') -SkipTaskbar:$false | Out-Null
+    } catch {
+        Write-Host "cleanup script failed: $($_.Exception.Message)"
+    }
+}
+
+Stop-ProbeCleanly
 Start-Sleep -Milliseconds 400
+
+# Drop every DOCKFORGE_* variable this script does not set itself. The probe
+# inherits the parent shell's environment, and a stale
+# DOCKFORGE_SETTINGS_CMD_FILE from an earlier run carries whatever command that
+# run last wrote - which is how a day-old `set behavior.hide_taskbar 1` fired
+# inside this probe and hid the taskbar. main.cpp now primes its dedup memory
+# with the file's existing content, so a stale line is inert; clearing the
+# variable is the second lock on the same door.
+foreach ($leaked in @('DOCKFORGE_SETTINGS', 'DOCKFORGE_SETTINGS_CMD_FILE',
+                      'DOCKFORGE_SETTINGS_SHOW', 'DOCKFORGE_SETTINGS_THEME',
+                      'DOCKFORGE_LAUNCHPAD', 'DOCKFORGE_LAUNCHPAD_CMD_FILE',
+                      'DOCKFORGE_FOLDER_CMD_FILE', 'DOCKFORGE_FOLDER_PROBE',
+                      'DOCKFORGE_HW_PANEL', 'DOCKFORGE_HW_PANEL_CMD_FILE',
+                      'DOCKFORGE_HW_PANEL_STATE_FILE', 'DOCKFORGE_HW_PANEL_SHOW',
+                      'DOCKFORGE_TASKBAR_CRASH_TEST', 'DOCKFORGE_HOVER_PROBE',
+                      'DOCKFORGE_DPI_OVERRIDE', 'DOCKFORGE_FORCE_MATERIAL',
+                      'DOCKFORGE_SIMULATE_DPI', 'DOCKFORGE_WEATHER_API_HOST',
+                      'DOCKFORGE_SECRETS_PATH', 'DOCKFORGE_NOTIFICATION_SIDECAR')) {
+    Remove-Item "Env:$leaked" -ErrorAction SilentlyContinue
+}
 
 if (-not (Test-Path $Exe)) { Fail "app missing: $Exe" }
 if (-not (Test-Path 'build\bin\notification_sidecar.exe')) {
@@ -405,3 +438,8 @@ if ($sc) {
     Fail "$sidecarImage survived the dock exit (stdin EOF path broken)"
 }
 Write-Host '=== T-076 probe: ALL PASS ==='
+
+# Leaving the machine as we found it is part of passing. The dock is already
+# down, so this is the taskbar restore plus a sweep for anything else still
+# holding a window or a pipe.
+Stop-ProbeCleanly
