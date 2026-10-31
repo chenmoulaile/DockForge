@@ -1,0 +1,25 @@
+{
+  "appearance": {
+    "corner_radius": 22,
+    "material": "mica",
+    "theme": "default"
+  },
+  "behavior": {
+    "autostart": false,
+    "hide_taskbar": false
+  },
+  "dock": {
+    "falloff_sharpness": 2.0,
+    "gap": 8,
+    "hover_falloff": "sine",
+    "icon_size": 48,
+    "influence_radius": 3.0,
+    "magnification": 1.8,
+    "position": "bottom"
+  },
+  "launchpad": {
+    "columns": 0,
+    "icon_size": 96,
+    "page_size": 35
+  }
+}

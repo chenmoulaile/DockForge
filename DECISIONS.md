@@ -785,3 +785,23 @@ P1/P2 阶段的任务书假设本项目是 WinUI 3 + Windows App SDK 应用，�
 ## ADR-0041 · 首次启动引导（P5 冻结，即 P5 提示词的 ADR-0028 顺延）
 - **决策**：首次启动显示**单页引导窗口**：欢迎语、核心功能截图、系统要求确认、开机自启开关（默认关闭）、隐私说明、"开始使用"。完成后写 `%APPDATA%\DockForge\.firstrun`，不再显示。
 - **禁止**：不得强制登录、不得收集遥测、不得要求超出必要的权限。
+
+## ADR-0042 · Finder 栏无法预留工作区，只能自动隐藏（T-301 实测）
+- **决策**：Finder 栏作为 topmost overlay 覆盖在窗口之上，**不**尝试用 `SPI_SETWORKAREA` 让最大化窗口避开它；遮挡问题由自动隐藏解决（默认 `finderbar.auto_hide=true`，收起态只保留 4 DIP hairline，`SetWindowRgn` 把点击目标一起收掉）。
+- **理由**：spike 实测 `SPI_SETWORKAREA(work.top += 56)` 返回 1 但工作区**完全不变**（`work area after set = 0,0,2880,1824`），新进程也看不到变化；Win11 上 explorer 会立即覆盖该值。改之前已把原矩形写入 `spikes/T-301_finderbar_menu/workarea_original.txt` 作为紧急恢复依据。
+- **禁止**：不得 hook explorer 或替换 `Shell_TrayWnd` 来强占顶部空间。
+
+## ADR-0043 · Finder 栏用 SetWindowRgn 而非 layered 穿透（T-301 实测）
+- **决策**：栏窗口保持 `WS_EX_NOREDIRECTIONBITMAP` + DirectComposition 直绘，点击范围由 `SetWindowRgn` 控制；**不**使用 `WS_EX_LAYERED|WS_EX_TRANSPARENT`。
+- **理由**：spike 实测只有 `WS_EX_LAYERED|WS_EX_TRANSPARENT` + 显式 `SetLayeredWindowAttributes(hwnd,0,255,LWA_ALPHA)` 能让 28dip 条带点击穿透（单独 `WS_EX_TRANSPARENT` 无效），但 layered 窗口不能配 `WS_EX_NOREDIRECTIONBITMAP`，等于放弃 DComp 与 `PlateRenderer` 材质链。改用 region 后同一套渲染路径通吃两种状态。
+- **代价**：region 同时是绘制裁剪，零面积 region 会把 hairline 一起裁掉（T-301 曾因此让收起态完全不可见）；region 高度必须与"几何留在屏幕上的那部分板"一致。
+
+## ADR-0044 · Finder 栏应用菜单在独立工作线程弹出（T-301 实测）
+- **决策**：`TrackPopupMenuEx(TPM_RETURNCMD|TPM_NONOTIFY)` 在专用线程执行，结果经 `PostMessage(WM_COMMAND)` 转发给前台应用；菜单 owner 窗口与栏窗口分离。
+- **理由**：菜单模态循环会阻塞调用线程。实测菜单线程运行期间主线程帧间隔 32.27→31.85ms（无停顿）；`GetMenuItemRect` 只能在拥有菜单的线程上调用，主线程调用在 192 DPI 下返回双倍坐标导致点错项。
+- **关闭语义**：菜单线程必须先 `SetForegroundWindow(owner)` + `SetFocus`；成功后 Escape 与外部点击由系统原生关闭菜单，失败则回落 `SendMessage(owner, WM_CANCELMODE)`（实测 187ms 退出）。前台被别的进程占用时，真实 Escape 和外部点击都无效——这不是取消技术的问题，是前台归属的问题。
+
+## ADR-0045 · Finder 栏材质固定 Solid 档，且不排除截图（T-301 实测）
+- **决策**：`BarPlateStyle()` 无条件返回 `StyleForTier(MaterialLevel::Solid, 0)`；`SetWindowDisplayAffinity` 按 `style_.use_capture` 条件设置，Solid 档设 `WDA_NONE`。
+- **理由**：① Blur 档必须配 `WDA_EXCLUDEFROMCAPTURE`，而栏钉在桌面顶部，让它对所有截图/录屏/投屏隐形不可接受（dock 可接受是因为它常驻底部且可被探针冻结）。② Mica/Acrylic 走 `DWMWA_SYSTEMBACKDROP_TYPE`，ADR-0008 已证会忽略 `SetWindowRgn` 与逐像素 alpha，收起态仍填满 28dip 矩形，正好破坏自动隐藏。③ 实测 `mat_blur.png` 与 `mat_solid.png` 采样完全相同 `rgba=(29,32,38,255)`，本机 blur 档无法用于截图证据。
+- **后果**：栏与 dock 的材质档位不再一致（I5 只能做到"同一 PlateRenderer + 同样圆角/描边"，做不到同一 tier）。若未来要恢复磨砂，需要先解决"截图可见"与"capture 排除"的矛盾。

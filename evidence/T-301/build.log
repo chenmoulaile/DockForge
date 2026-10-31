@@ -1,0 +1,19 @@
+﻿-- Configuring done (0.1s)
+-- Generating done (0.2s)
+-- Build files have been written to: D:/MacDock/build
+building with -j 2 (free memory adaptive)
+[  2%] Built target message_badge_probe_app
+[  3%] Built target hw_sidecar
+[ 62%] Built target dockforge_lib
+[ 63%] Built target notification_sidecar
+[ 64%] Built target notification_sidecar_stub
+[ 65%] Built target DockForge
+[ 95%] Built target dockforge_tests
+[ 96%] Built target layout_bench
+[ 98%] Built target autostart_probe
+[100%] Built target log_probe
+Randomness seeded to: 2106346715
+===============================================================================
+All tests passed (4681 assertions in 480 test cases)
+
+OK: all

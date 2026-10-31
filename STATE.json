@@ -1,14 +1,14 @@
 {
  "project": "DockForge",
  "schema": 1,
- "milestone": "M5",
- "last_task": "T-069",
- "last_commit": "8e22948",
- "current_module": "core",
- "current_task": "T-069",
+ "milestone": "M2",
+ "last_task": "T-301",
+ "last_commit": "37c2637",
+ "current_module": "finderbar",
+ "current_task": "T-301",
  "counters": {
-  "total": 31,
-  "done": 28,
+  "total": 33,
+  "done": 30,
   "partial": 3,
   "blocked": 0
  },
@@ -159,7 +159,21 @@
   "settings 命令通道把整个文件当一条命令读（无多行 token 约定），与 hw 通道不同：set 的 value 会连 token 一起吃进去被判 unparsable；重复命令去重靠内容比较，探针只能发唯一命令（T-069 探针第一版三个假阴性源于此）",
   "PS 5.1 Get-Content 默认按 ANSI 读 UTF-8 日志：中文正则（\"已被其他程序占用\"）永不匹配；Wait-Log 必须显式 -Encoding UTF8（T-069 探针 D 部分）",
   "热重载路径先 config=std::move(next) 再 publish：订阅里 diff event.config vs 主 config 恒空，增量订阅必须与「已应用快照」比较才能触发（T-069 ApplyShortcuts/applied_* 快照）",
-  "P/Invoke RegisterHotKey 判 GetLastError 必须 DllImport(SetLastError=true)，否则 GetLastWin32Error 恒 0（T-069 探针 B 部分）"
+  "P/Invoke RegisterHotKey 判 GetLastError 必须 DllImport(SetLastError=true)，否则 GetLastWin32Error 恒 0（T-069 探针 B 部分）",
+  "WDA_EXCLUDEFROMCAPTURE 让窗口对包括本仓截图工具在内的所有采集器隐形：Finder 栏无条件设置它时截图采样全是壁纸色，栏本身完全不可见；必须按 style.use_capture 条件设置（T-301）",
+  "SetWindowRgn 同时是点击目标和绘制裁剪：用零面积 region 表示「收起」会把要展示的 4dip hairline 一起裁掉，收起态变成完全不可见；region 高度必须等于几何留在屏幕上的那部分板（T-301）",
+  "SPI_SETWORKAREA 在 Win11 返回 1 但工作区完全不变（explorer 立即覆盖），新进程也读不到；靠预留顶部空间让最大化窗口避开 Finder 栏这条路不存在（T-301 spike Q8）",
+  "点击穿透只有 WS_EX_LAYERED|WS_EX_TRANSPARENT + 显式 SetLayeredWindowAttributes 有效（单独 WS_EX_TRANSPARENT 无效），而 layered 不能配 WS_EX_NOREDIRECTIONBITMAP，与 DComp 直绘互斥（T-301 spike Q7）",
+  "TrackPopupMenuEx 必须放在独立工作线程：菜单模态循环阻塞调用线程，实测菜单期间主线程帧间隔 32.27→31.85ms 无停顿；GetMenuItemRect 只能在拥有菜单的线程调用，主线程调用在 192DPI 下返回双倍坐标（T-301 spike Q12）",
+  "菜单能否被 Escape/外部点击关闭取决于前台归属：菜单线程 SetForegroundWindow(owner) 成功后系统原生关闭，失败则两者全无效（capture 在 owner 上也没用）；失败必须回落 SendMessage(owner, WM_CANCELMODE)（T-301 spike Q14/Q15/Q18）",
+  "现代桌面上 Win32 传统菜单是少数派：实测 11 个可见窗口只有 2 个带菜单，explorer/chrome 全为 0，所以「无菜单只显示应用名」是主路径不是降级路径（T-301 spike Q3）",
+  "匿名 namespace 的常量与头文件同名常量共存时，非限定引用同时看到两个 → reference to X is ambiguous；命名空间作用域常量必须换名（T-301 kSystemMenuBase）",
+  "含 std::atomic 成员的结构体不能整体赋值（job = MenuJob{} 不可编译），必须逐字段赋值 + store()（T-301 MenuJob）",
+  "C++ 里「先清标志再读标志」是静默失效：RefreshForeground 第一行置 foreground_dirty_=false，之后读 foreground_changed 恒 false，布局更新了却从不重绘；脏标志必须在调用前快照（T-301）",
+  "cc1plus 在本机 15.5GB 内存只剩 2GB 可用时会 out of memory allocating 920039 bytes；tools/build.ps1 已改为按 FreePhysicalMemory 自适应 -j（$by_memory = Floor(free_gb / 1.3)）（T-301）",
+  "ProbeCommandGate::Prime 把启动时已存在的命令文件内容当作已消费：启动前写好的探针命令永远不会执行，必须先启动应用再写入带唯一 token 的命令（T-301）",
+  "BMP 采样函数的背景基准不能取被测区域自身的边缘行：56px 条带的第 54 行已接近桌面，用它当「板色」会把整片判成有墨（T-301 Measure-Ink）",
+  "Add-Type 的 P/Invoke FindWindowW 找隐藏的 1x1 菜单 owner 窗口必须不滤可见性：IsWindowVisible 过滤会让菜单 owner 恒找不到（T-301 探针 F 组）"
  ],
- "updated_at": "2026-10-25T18:57:00+08:00"
+ "updated_at": "2026-10-31T23:20:00+08:00"
 }

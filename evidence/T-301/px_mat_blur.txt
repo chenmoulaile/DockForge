@@ -1,0 +1,5 @@
+﻿source=image evidence\T-301\mat_blur.png rect=(0,0) size=600x56
+a              (300,4) rgba=(29,32,38,255)
+b              (300,20) rgba=(29,32,38,255)
+c              (300,40) rgba=(29,32,38,255)
+d              (300,52) rgba=(29,32,38,255)

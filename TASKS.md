@@ -1181,9 +1181,17 @@ GitHub: 已 push 至 <url> | 最新 commit <sha> | tag: <无/xxx>
 - 证据: `evidence/T-300/`
 
 ### T-301 · Finder 栏左侧：系统菜单 + 前台应用菜单
-- 状态: TODO / 优先级: P5 / 依赖: T-300、ADR-0037 / 预估: 2 会话
-- DoD: 最左"系统菜单"按钮（关于/设置/配置目录/退出）；前台应用名实时显示（SetWinEventHook + EVENT_SYSTEM_FOREGROUND）；按 ADR-0037 读 GetMenu 渲染菜单项（≤6 + 更多）；点击 PostMessage(WM_COMMAND) 转发；无菜单窗口只显示应用名；刷新延迟 < 100ms
-- 证据: `evidence/T-301/`
+- 状态: DONE / 优先级: P5 / 依赖: T-300、ADR-0037 / 预估: 2 会话
+- DoD:
+  - [x] 最左"系统菜单"按钮（关于/设置/配置目录/日志目录/退出）—— `FinderBar::OpenSystemMenu` 建 6 项 `CreatePopupMenu`（含两条分隔线），id 从 `kSystemMenuBase=100` 起，`SystemCommand{About=1,Settings=2,OpenConfigFolder=3,OpenLogs=4,Quit=5}`；`main.cpp` 的 `SetSystemCommandHandler` 分派到 settings 各页 / `ShellExecuteW` 打开 `core::ConfigDir()`/`core::LogsDir()` / `PostMessage(WM_CLOSE)`。图标不是 Apple 商标而是三条横线（ASSETS.md 商标约束）
+  - [x] 前台应用名实时显示（SetWinEventHook + EVENT_SYSTEM_FOREGROUND）—— `SetWinEventHook(WINEVENT_OUTOFCONTEXT)` 失败时 Tick 回落 `GetForegroundWindow` 轮询；名字取 `FileDescription`（`GetFileVersionInfoW`+`VerQueryValueW`），无版本资源回落文件名。探针实测 `foreground_name=menu_target` 而非窗口标题 "T-301 menu target"
+  - [x] 按 ADR-0037 读 GetMenu 渲染菜单项（≤6 + 更多）—— `ReadAppMenu(hwnd, max_menu_items)` 用 `GetMenu`/`GetMenuItemCount`/`GetMenuStringW(MF_BYPOSITION)`/`GetSubMenu`；超限时 `LayoutBar` 折叠成单个 `…` 盒，`OpenOverflowMenu` 重读全部项并以 `MF_POPUP` 挂成二级菜单（系统绘制，不自绘）
+  - [x] 点击 PostMessage(WM_COMMAND) 转发 —— 菜单在**工作线程**用 `TrackPopupMenuEx(TPM_RETURNCMD|TPM_NONOTIFY)` 弹出（主线程帧率实测零停顿），返回 id 后 `PostMessageW(target, WM_COMMAND, MAKEWPARAM(id,0), 0)`；探针实测 fixture 收到 `command 4002`（File>Open）
+  - [x] 无菜单窗口只显示应用名 —— spike Q3 实测本机 11 个可见窗口只有 2 个带 Win32 菜单（explorer/chrome 全 0），故这是主路径；`menu_readable=false` 时布局只剩 glyph + 名字盒，不占菜单空间
+  - [x] 刷新延迟 < 100ms —— spike 实测 `EVENT_SYSTEM_FOREGROUND` 均值 5.5ms/最坏 8.2ms；名字解析（pid→`QueryFullProcessImageNameW`→`VerQueryValueW`）1.404ms
+  - [x] 自动隐藏（Q8 硬约束的必然结果）—— `AdvanceAutoHide` 180ms smoothstep，收起态只留 4dip hairline 且 `SetWindowRgn` 把点击目标一起收掉；探针实测展开 `progress=1.0 interactive=True`、收起 `progress=0.0 interactive=False` 且 `WindowFromPoint` 不再命中栏
+- 证据: `evidence/T-301/`（`probe.txt` verdict 五项 PASS、`bar_retracted.png`/`bar_expanded.png`/`bar_with_menu.png`/`menu_open.png`、`dockforge-*.log`、`target-state.txt`）
+- 备注: 三个不可绕过的实测约束已写成 ADR-0042..0045。①**工作区预留不可行**：`SPI_SETWORKAREA` 返回成功但 explorer 立即覆盖，新最大化窗口仍压在栏下 → 只能自动隐藏。②**点击穿透与 DComp 材质互斥**：`WS_EX_LAYERED|WS_EX_TRANSPARENT`+`SetLayeredWindowAttributes` 能穿透，但不能配 `WS_EX_NOREDIRECTIONBITMAP`，故栏走 `SetWindowRgn` 路线。③**菜单必须在工作线程弹出**：`GetMenuItemRect` 只能在拥有菜单的线程调用（主线程调用在 192DPI 下返回双倍坐标），且菜单线程 `SetForegroundWindow` 成功后 Escape/外部点击才由系统原生关闭，失败回落 `WM_CANCELMODE`。另有两条截图侧教训：`WDA_EXCLUDEFROMCAPTURE` 会让栏对所有截图工具隐形（改为按 `style_.use_capture` 条件设置），`SetWindowRgn` 同时是绘制裁剪（零面积 region 会把 hairline 一起裁掉）。材质固定走 Solid 档（Blur 必须配 capture 排除 → 对截图隐形；Mica/Acrylic 忽略 region → 收起态仍填满 28dip）。
 
 ### T-302 · Finder 栏中间：常驻小组件区
 - 状态: TODO / 优先级: P5 / 依赖: T-300 / 预估: 1–2 会话

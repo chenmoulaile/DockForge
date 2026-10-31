@@ -1,0 +1,8 @@
+a=evidence\T-301\clip_hidden.png
+b=evidence\T-301\clip_expanded.png
+size=400x80
+tolerance=6
+changed_pixels=0
+total_pixels=32000
+changed_pct=0
+verdict=IDENTICAL

@@ -1,0 +1,67 @@
+T-301 · Finder 栏左侧：系统菜单 + 前台应用菜单 · 验证报告
+================================================================
+
+一、交付物
+  src/finderbar/bar_layout.{h,cpp}   纯函数布局层（可脱离桌面单测）
+  src/finderbar/finder_bar.{h,cpp}   窗口 + DComp 表面 + PlateRenderer + 菜单线程 + 前台跟踪
+  src/core/config.{h,cpp}            FinderBarConfig 七键（C-01：钳制 / 未知键保留 / 默认值不写键）
+  src/main.cpp                       装配 / tick / config 热重载 / 系统菜单分派 / 探针通道
+  tests/finderbar_layout_test.cpp    17 用例
+  tests/finderbar_test.cpp           5 用例
+  tools/finderbar_probe.ps1          端到端探针（35 项断言）
+  spikes/T-301_finderbar_menu/       8 个 spike + 1 个 fixture
+
+二、构建与单测（build.log）
+  tools/build.ps1 -Action all -Jobs 2  -> exit 0
+  All tests passed (4681 assertions in 480 test cases)
+  基线 475 用例 / 4654 断言；新增 22 用例 / 133 断言
+
+三、端到端探针（probe.txt，exit 0，0 行 FAIL）
+  verdict: Q19_bar_geometry=PASS Q20_auto_hide=PASS Q21_foreign_menu=PASS
+           Q22_forwarding=PASS Q23_menu_lifecycle=PASS
+
+  A 栏几何
+    bar window exists (class DockForgeFinderBar)
+    bar rect = 0,0,2880,56            <- 28 dip @ 192 dpi（C-31）
+    width_dip=1440.0 height_dip=28.0 dpi=192
+
+  B 自动隐藏
+    收起: progress=0.0 offset=-24.0 interactive=False  WindowFromPoint 不命中
+    展开: progress=1.0 offset=0.0  interactive=True   WindowFromPoint 命中
+
+  C/D/E 读外部菜单 + 转发
+    foreground_name=menu_target menu_readable=True titles=[File,Edit,View,Help]
+    四个菜单盒都带 menu_index 且左到右有序
+    像素有墨：File 9.84% / Edit 11.39% / View 10.65% / Help 11.61% / 应用名 15.51%
+    fixture 收到 command 4002（File>Open）—— WM_COMMAND 转发真实生效
+
+  F 菜单生命周期
+    弹出 PASS / 独立 owner 窗口 PASS / 保持打开 PASS
+    WM_CANCELMODE 关闭 PASS，关闭后 menu_open=False paints=19（栏在弹窗期间持续绘制）
+
+  G 收回
+    指针离开后 progress=0.0 interactive=False，日志记录转发命令
+
+四、截图证据
+  bar_retracted.png   收起态：前 4px 是 hairline，其余是桌面
+  bar_expanded.png    展开态：glyph + 应用名 + 四个菜单标题
+  bar_with_menu.png   读外部菜单后的一帧
+  menu_open.png       系统菜单弹窗（由系统绘制）
+  image_diff: 收起 vs 展开 changed_pct=92.834 bbox=0,0..2879,55
+
+五、dist 冒烟（strip 后的交付 exe）
+  DockForge.exe 1932288 bytes + libwinpthread-1.dll 64915 bytes
+  alive=True
+  DockForgeFinderBar  rect=0,0,2880,56   size=2880x56
+  DockForgeHostWindow rect=685,1595,2195,1808 size=1510x213
+
+六、诚实边界
+  1. 栏材质固定 Solid 档（ADR-0045）：Blur 必须配 WDA_EXCLUDEFROMCAPTURE，会让栏对所有
+     截图/录屏工具隐形；Mica/Acrylic 忽略 SetWindowRgn，收起态仍填满 28dip。故 I5 只做到
+     「同一 PlateRenderer + 同样圆角/描边」，做不到与 dock 同 tier。
+  2. 应用名点击暂不动作（macOS 那里是窗口列表，属 T-204）。
+  3. 中区/右区未实现，status_width_dip 恒 0。
+  4. 探针用 SetForegroundOverride(attach <hwnd>) 钉住前台——探针进程无法替目标窗口抢前台
+     （spike Q18 同一条规则）。该接口只替换输入源，其余全走生产路径。
+  5. 未在真实第三方应用上跑端到端点击，只用 fixture 验证 C-32 全链路；本机 11 个可见窗口
+     只有 2 个带 Win32 菜单（spike Q3），没有别的候选。

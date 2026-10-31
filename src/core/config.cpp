@@ -41,6 +41,12 @@ const std::unordered_set<std::string> kNotificationsKeys = {"enabled", "banner_e
                                                             "pulse_icons",
                                                             "banner_timeout_seconds",
                                                             "poll_seconds"};
+// T-301: the Finder Bar section. Deliberately narrow - the centre widgets and the
+// tray mirror add their own keys when they land, so nothing here is a switch that
+// no code reads.
+const std::unordered_set<std::string> kFinderBarKeys = {
+    "enabled", "height", "show_system_menu", "show_app_name", "show_app_menu",
+    "max_menu_items", "auto_hide"};
 
 // Upper bound on the persisted tile list.
 //
@@ -500,16 +506,17 @@ json StripUnknownKeys(const json& source) {
                             : name == "integrations"  ? kIntegrationsKeys
                             : name == "weather"       ? kWeatherKeys
                             : name == "notifications" ? kNotificationsKeys
+                            : name == "finderbar"     ? kFinderBarKeys
                                                       : kLaunchpadKeys;
         PreserveUnknown(source[section], section_out, owned);
         if (!section_out.empty()) result[section] = section_out;
     }
-    // Top-level unknown keys. "hotkeys"/"hotspots" (T-069), "weather" (T-075) and
-    // "notifications" (T-076) are owned by the schema now, so they must NOT be
-    // double-preserved here.
+    // Top-level unknown keys. "hotkeys"/"hotspots" (T-069), "weather" (T-075),
+    // "notifications" (T-076) and "finderbar" (T-301) are owned by the schema now,
+    // so they must NOT be double-preserved here.
     static const std::unordered_set<std::string> kTopKeys = {
         "dock", "appearance", "behavior", "launchpad", "integrations", "hotkeys", "hotspots",
-        "weather", "notifications"};
+        "weather", "notifications", "finderbar"};
     PreserveUnknown(source, result, kTopKeys);
     return result;
 }
@@ -615,6 +622,13 @@ IntRange WeatherRefreshMinutesRange() { return {5, 360}; }
 IntRange NotificationBannerTimeoutRange() { return {2, 30}; }
 IntRange NotificationPollRange() { return {1, 30}; }
 
+// T-301. 18 DIP is about the shortest a 12 DIP label with padding survives; 96
+// DIP is already a sixth of a 1080-tall screen and nobody wants a banner.
+IntRange FinderBarHeightRange() { return {18, 96}; }
+// Two items is the point where folding into "More" stops being absurd, and 16 is
+// where a menu bar becomes unreadable on a 1366-wide laptop.
+IntRange FinderBarMaxMenuItemsRange() { return {2, 16}; }
+
 bool SameWeather(const WeatherConfig& a, const WeatherConfig& b) {
     return a.enabled == b.enabled && a.provider == b.provider && a.city == b.city &&
            a.refresh_minutes == b.refresh_minutes;
@@ -624,6 +638,13 @@ bool SameNotifications(const NotificationsConfig& a, const NotificationsConfig& 
     return a.enabled == b.enabled && a.banner_enabled == b.banner_enabled &&
            a.pulse_icons == b.pulse_icons && a.banner_timeout_seconds == b.banner_timeout_seconds &&
            a.poll_seconds == b.poll_seconds;
+}
+
+bool SameFinderBar(const FinderBarConfig& a, const FinderBarConfig& b) {
+    return a.enabled == b.enabled && a.height == b.height &&
+           a.show_system_menu == b.show_system_menu && a.show_app_name == b.show_app_name &&
+           a.show_app_menu == b.show_app_menu && a.max_menu_items == b.max_menu_items &&
+           a.auto_hide == b.auto_hide;
 }
 
 const char* ToString(FalloffCurve value) {
@@ -824,6 +845,22 @@ bool ClampConfig(Config& config) {
             changed = true;
         }
     }
+
+    // T-301: Finder Bar bounds.
+    {
+        const int height = ClampInt(config.finderbar.height, FinderBarHeightRange(),
+                                    "finderbar.height");
+        if (height != config.finderbar.height) {
+            config.finderbar.height = height;
+            changed = true;
+        }
+        const int items = ClampInt(config.finderbar.max_menu_items, FinderBarMaxMenuItemsRange(),
+                                   "finderbar.max_menu_items");
+        if (items != config.finderbar.max_menu_items) {
+            config.finderbar.max_menu_items = items;
+            changed = true;
+        }
+    }
     return changed;
 }
 
@@ -969,6 +1006,24 @@ bool ParseConfig(const std::string& json_text, Config& out, std::string* error) 
         }
     }
 
+    // T-301: Finder Bar. Every key is optional, so a section that only carries
+    // "enabled": true gets documented defaults for the rest.
+    if (document.contains("finderbar")) {
+        const auto& node = document["finderbar"];
+        if (node.is_object()) {
+            bad_value |= ReadBool(node, "enabled", parsed.finderbar.enabled);
+            bad_value |= ReadNumber(node, "height", parsed.finderbar.height);
+            bad_value |= ReadBool(node, "show_system_menu", parsed.finderbar.show_system_menu);
+            bad_value |= ReadBool(node, "show_app_name", parsed.finderbar.show_app_name);
+            bad_value |= ReadBool(node, "show_app_menu", parsed.finderbar.show_app_menu);
+            bad_value |= ReadNumber(node, "max_menu_items", parsed.finderbar.max_menu_items);
+            bad_value |= ReadBool(node, "auto_hide", parsed.finderbar.auto_hide);
+        } else if (!node.is_null()) {
+            DF_WARN("core", "config finderbar is not an object, keeping default");
+            bad_value = true;
+        }
+    }
+
     // Snapshot the raw parsed values so we can tell whether clamping actually
     // changed anything (that drives the rewrite decision together with enums).
     const DockConfig raw_dock = parsed.dock;
@@ -976,6 +1031,7 @@ bool ParseConfig(const std::string& json_text, Config& out, std::string* error) 
     const LaunchpadConfig raw_launchpad = parsed.launchpad;
     const WeatherConfig raw_weather = parsed.weather;
     const NotificationsConfig raw_notifications = parsed.notifications;
+    const FinderBarConfig raw_finderbar = parsed.finderbar;
 
     ClampConfig(parsed);
 
@@ -995,7 +1051,8 @@ bool ParseConfig(const std::string& json_text, Config& out, std::string* error) 
         hotkeys_raw != parsed.hotkeys.size() ||
         hotspots_raw != parsed.hotspots.size() ||
         !SameWeather(raw_weather, parsed.weather) ||
-        !SameNotifications(raw_notifications, parsed.notifications);
+        !SameNotifications(raw_notifications, parsed.notifications) ||
+        !SameFinderBar(raw_finderbar, parsed.finderbar);
 
     out = std::move(parsed);
     return true;
@@ -1113,6 +1170,27 @@ std::string SerializeConfig(const Config& config) {
             {"pulse_icons", config.notifications.pulse_icons},
             {"banner_timeout_seconds", config.notifications.banner_timeout_seconds},
             {"poll_seconds", config.notifications.poll_seconds},
+        };
+    }
+
+    // T-301: the same quiet-file rule. Every default is compared against the
+    // documented value, so a file the user never touched carries no "finderbar"
+    // key at all and a file where they only flipped "enabled" off records that one
+    // switch plus nothing else. `enabled` defaults to TRUE (C-31), so the test is
+    // the negated form - writing it whenever it is true would put the section in
+    // every file, which is exactly the noise C-01 forbids.
+    if (!config.finderbar.enabled || config.finderbar.height != 28 ||
+        !config.finderbar.show_system_menu || !config.finderbar.show_app_name ||
+        !config.finderbar.show_app_menu || config.finderbar.max_menu_items != 6 ||
+        !config.finderbar.auto_hide) {
+        document["finderbar"] = {
+            {"enabled", config.finderbar.enabled},
+            {"height", config.finderbar.height},
+            {"show_system_menu", config.finderbar.show_system_menu},
+            {"show_app_name", config.finderbar.show_app_name},
+            {"show_app_menu", config.finderbar.show_app_menu},
+            {"max_menu_items", config.finderbar.max_menu_items},
+            {"auto_hide", config.finderbar.auto_hide},
         };
     }
 

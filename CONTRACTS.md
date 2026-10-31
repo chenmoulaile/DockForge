@@ -1094,6 +1094,22 @@ finderbar.tray_order: [string]  // 托盘图标标识列表，按渲染顺序
 finderbar.hide_mode: enum{normal, auto_hide, smart_hide, always_visible} = normal
 ```
 
+### T-301 落地子集（已冻结，后续任务在此基础上增量）
+
+T-301 只落地了左侧区所需的最小键集合，其余键等对应任务（T-302/T-303/T-304）实现时再解冻：
+
+```
+finderbar.enabled: bool = true            // 默认开启：栏不改变系统行为（不预留工作区、不 hook、不碰 taskbar）
+finderbar.height: int = 28                // 钳制 [18, 96]
+finderbar.show_system_menu: bool = true   // 对应 left=system_menu
+finderbar.show_app_name: bool = true      // 对应 left=app_name_with_menu
+finderbar.show_app_menu: bool = true      // 读 GetMenu 渲染菜单项
+finderbar.max_menu_items: int = 6         // 钳制 [2, 16]，超出折叠成 "…"
+finderbar.auto_hide: bool = true          // 收起态留 4dip hairline 且不吃点击
+```
+
+三条逃生路径（PROMPT.md「用户可救」）：`DOCKFORGE_FINDERBAR=0` 单次关闭 / 配置 `finderbar.enabled=false` 永久关闭 / 栏内系统菜单「Quit DockForge」。
+
 ## C-32 应用菜单读取与转发（P5 冻结，即 P5 提示词的 C-19 顺延）
 
 ```
@@ -1103,6 +1119,22 @@ finderbar.hide_mode: enum{normal, auto_hide, smart_hide, always_visible} = norma
 降级: 读取失败时只显示应用名，不崩溃
 禁止: 注入目标进程、hook 全局菜单消息
 ```
+
+### T-301 落地实现（已冻结）
+
+```
+读取:   GetMenu(hwnd) → GetMenuItemCount → GetMenuStringW(MF_BYPOSITION) → GetSubMenu
+去加速: StripAccelerator(&File → File, Rock && Roll → Rock & Roll)
+渲染:   LayoutBar 逐项成盒，超 max_menu_items 折叠成 "…" 盒；
+        溢出菜单用 AppendMenuW(MF_POPUP, 原子菜单, 标题) 由系统绘制，不自绘
+弹出:   工作线程 TrackPopupMenuEx(TPM_RETURNCMD|TPM_NONOTIFY)（主线程帧预算零占用）
+关闭:   菜单线程先 SetForegroundWindow(owner)+SetFocus；
+        成功则 Escape / 外部点击由系统原生关闭，失败回落 SendMessage(owner, WM_CANCELMODE)
+转发:   PostMessageW(目标窗口, WM_COMMAND, MAKEWPARAM(id, 0), 0)；id 为 0 或 -1 时不转发
+禁止:   注入目标进程、hook 全局菜单消息、DestroyMenu 外来子菜单
+```
+
+实测依据（`spikes/T-301_finderbar_menu/`）：跨进程 `GetMenu` 无需 hook 即可读到完整结构（menu_spike Q2）；外来 HMENU 交给本进程 `TrackPopupMenuEx` 返回的是真实命令 id（menu_spike4 Q9 往返 PASS）；`GetMenuItemRect` 必须在拥有菜单的线程上调用，主线程调用在 192DPI 下返回双倍坐标（menu_spike5 Q12）；菜单线程 `SetForegroundWindow` 失败时 Escape 与外部点击都不生效（menu_spike7/8 Q14/Q18）。
 
 ## C-33 托盘镜像渲染（P5 冻结，即 P5 提示词的 C-20 顺延）
 

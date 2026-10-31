@@ -29,6 +29,7 @@
 #include "dock/weather.h"
 #include "dock/weather_popup.h"
 #include "finderbar/audio_hardware.h"
+#include "finderbar/finder_bar.h"
 #include "finderbar/hardware_panel.h"
 #include "finderbar/media_sidecar.h"
 #include "finderbar/system_stats.h"
@@ -62,6 +63,7 @@
 
 #include <d2d1helper.h>
 #include <dwmapi.h>
+#include <shellapi.h>
 #include <windowsx.h>
 
 #include <cmath>
@@ -1881,6 +1883,192 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         write_hw_state_file();
     };
 
+    // ---- Finder Bar (T-301, C-31/C-32) -----------------------------------
+    // The bar is the first half of the macOS menu bar: the system menu on the far
+    // left, the front application's name, and that application's own Win32 menu
+    // forwarded back to it. The centre widgets (T-302) and the tray mirror
+    // (T-303..T-307) are separate tasks and deliberately absent.
+    //
+    // Architecture is fixed by spikes/T-301_finderbar_menu, not by taste:
+    //   Q8  SPI_SETWORKAREA is a no-op on Windows 11, so the bar cannot reserve the
+    //       top strip and a maximized window's title bar sits underneath it. Auto
+    //       hide is the answer, not a workaround: the bar retracts to a 4dip
+    //       hairline and its window region shrinks to nothing, so the title bar is
+    //       reachable and the hairline is the only thing on screen.
+    //   Q7  WS_EX_LAYERED|WS_EX_TRANSPARENT makes a window click-through, but a
+    //       layered window cannot also carry WS_EX_NOREDIRECTIONBITMAP, which is
+    //       what CompositionSurface requires. Since the bar must keep the same
+    //       frosted material as the dock (ADR-0008 / I5), it stays a DComp surface
+    //       and gets its click-through from SetWindowRgn instead.
+    //   Q12 TrackPopupMenuEx pumps a modal loop, so it runs on its own thread and
+    //       the dock keeps its 16ms cadence (measured 32.27ms -> 31.85ms).
+    //   Q18 Whether Escape or an outside click dismisses the menu depends only on
+    //       who owns the foreground. The menu thread claims it first; WM_CANCELMODE
+    //       is the fallback when the claim is refused.
+    const bool finderbar_enabled = ReadEnvFlag(L"DOCKFORGE_FINDERBAR", config.finderbar.enabled);
+    // A probe turns the bar on with DOCKFORGE_FINDERBAR=1 while the user's file still
+    // says false. That override has to survive a config publish, otherwise the first
+    // unrelated hot reload would take the bar away mid-probe.
+    const bool finderbar_forced_on = finderbar_enabled && !config.finderbar.enabled;
+    finderbar::FinderBar finder_bar;
+    bool finder_bar_ready = false;
+    if (finderbar_enabled) {
+        if (finderbar::FinderBar::RegisterWindowClass(instance)) {
+            // The env switch wins over the file for this run so a probe can turn the
+            // bar on without editing the user's config, and off again the same way.
+            core::Config bar_config = config;
+            bar_config.finderbar.enabled = true;
+            if (finder_bar.Initialize(instance, bar_config)) {
+                finder_bar_ready = true;
+                DF_INFO("finderbar", "bar ready (height=%d dip auto_hide=%d)",
+                        bar_config.finderbar.height,
+                        bar_config.finderbar.auto_hide ? 1 : 0);
+            } else {
+                DF_WARN("finderbar", "bar initialize failed");
+            }
+        } else {
+            DF_WARN("finderbar", "bar window class registration failed");
+        }
+    } else {
+        DF_INFO("finderbar", "disabled by DOCKFORGE_FINDERBAR/config");
+    }
+
+    // The bar never performs a system command itself: main.cpp owns the settings
+    // window, the config directory and the exit path. Same division as the dock's
+    // preview window and the Launchpad.
+    if (finder_bar_ready) {
+        finder_bar.SetSystemCommandHandler([&](finderbar::SystemCommand command) {
+            switch (command) {
+                case finderbar::SystemCommand::About:
+                    if (settings_ready) {
+                        settings.Show();
+                        settings.ShowSection("about");
+                    }
+                    break;
+                case finderbar::SystemCommand::Settings:
+                    if (settings_ready) {
+                        settings.Show();
+                        settings.ShowSection("dock");
+                    } else {
+                        DF_WARN("finderbar", "settings window unavailable this run");
+                    }
+                    break;
+                case finderbar::SystemCommand::OpenConfigFolder:
+                case finderbar::SystemCommand::OpenLogs: {
+                    const std::wstring dir = command == finderbar::SystemCommand::OpenLogs
+                                                 ? core::LogsDir()
+                                                 : core::ConfigDir();
+                    const HINSTANCE result =
+                        ShellExecuteW(nullptr, L"open", dir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+                    DF_INFO("finderbar", "opening %s -> %s",
+                            core::WideToUtf8(dir).c_str(),
+                            reinterpret_cast<std::intptr_t>(result) > 32 ? "ok" : "FAILED");
+                    break;
+                }
+                case finderbar::SystemCommand::Quit:
+                    DF_INFO("finderbar", "system menu quit");
+                    PostMessageW(window.Handle(), WM_CLOSE, 0, 0);
+                    break;
+                default:
+                    break;
+            }
+        });
+    }
+
+    // Probe channel (settings/hardware pattern). Commands: state, show, hide,
+    // menu <box-index>, system <1..5>, foreground. `menu` drives the real
+    // TrackPopupMenuEx path without a cursor - the spike had to synthesise mouse
+    // events to do that, and no probe should have to repeat it.
+    std::wstring finderbar_cmd_file;
+    std::wstring finderbar_state_file;
+    if (finder_bar_ready) {
+        wchar_t buffer[MAX_PATH]{};
+        DWORD n = GetEnvironmentVariableW(L"DOCKFORGE_FINDERBAR_CMD_FILE", buffer,
+                                          ARRAYSIZE(buffer));
+        if (n > 0 && n < ARRAYSIZE(buffer)) finderbar_cmd_file.assign(buffer, n);
+        n = GetEnvironmentVariableW(L"DOCKFORGE_FINDERBAR_STATE_FILE", buffer,
+                                    ARRAYSIZE(buffer));
+        if (n > 0 && n < ARRAYSIZE(buffer)) finderbar_state_file.assign(buffer, n);
+        DF_INFO("finderbar", "probe cmd=%s state=%s",
+                finderbar_cmd_file.empty() ? "<none>"
+                                           : core::WideToUtf8(finderbar_cmd_file).c_str(),
+                finderbar_state_file.empty() ? "<none>"
+                                             : core::WideToUtf8(finderbar_state_file).c_str());
+    }
+    auto write_finderbar_state_file = [&]() {
+        if (finderbar_state_file.empty()) return;
+        const std::string json = finder_bar.SnapshotJson() + "\n";
+        HANDLE h = CreateFileW(finderbar_state_file.c_str(), GENERIC_WRITE,
+                               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                               nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (h == INVALID_HANDLE_VALUE) return;
+        DWORD written = 0;
+        WriteFile(h, json.data(), static_cast<DWORD>(json.size()), &written, nullptr);
+        CloseHandle(h);
+    };
+    core::ProbeCommandGate finderbar_gate;
+    finderbar_gate.Prime(core::ReadProbeFileContent(finderbar_cmd_file));
+    double finderbar_cmd_since_read_ms = 1e9;
+    auto read_finderbar_command = [&](double delta_ms) {
+        finderbar_cmd_since_read_ms += delta_ms;
+        if (finderbar_cmd_since_read_ms < 50.0) return;
+        finderbar_cmd_since_read_ms = 0.0;
+        if (finderbar_cmd_file.empty()) return;
+        const std::string content = core::ReadProbeFileContent(finderbar_cmd_file);
+        if (!finderbar_gate.Accept(content)) return;
+        const std::string command = core::ProbeCommandOf(content);
+        if (command.empty()) return;
+        DF_INFO("finderbar", "probe command=%s", command.c_str());
+        if (command == "show") {
+            finder_bar.SetEnabled(true);
+        } else if (command == "hide") {
+            finder_bar.SetEnabled(false);
+        } else if (command == "attach none") {
+            finder_bar.SetForegroundOverride(nullptr);
+        } else if (command.rfind("attach ", 0) == 0) {
+            // Pins the tracked application to a named window. Needed because a probe
+            // process cannot win a foreground race against a terminal (measured: our
+            // SetForegroundWindow returned true and the bar still saw the terminal).
+            // Only the input source changes; everything downstream is the real path.
+            unsigned long long raw = 0;
+            if (sscanf(command.c_str() + 7, "%llx", &raw) == 1) {
+                finder_bar.SetForegroundOverride(reinterpret_cast<HWND>(
+                    static_cast<std::uintptr_t>(raw)));
+            }
+        } else if (command.rfind("menu ", 0) == 0) {
+            const int index = atoi(command.c_str() + 5);
+            const bool opened = finder_bar.OpenMenuForBox(static_cast<std::size_t>(
+                index < 0 ? 0 : index));
+            DF_INFO("finderbar", "probe menu index=%d opened=%d", index, opened ? 1 : 0);
+        } else if (command == "cancel") {
+            // The menu is modal on its own thread; a probe that opened one has to be
+            // able to close it, or every later command waits behind a stuck popup.
+            // WM_CANCELMODE is the measured escape (spike Q13: 187ms, no side effects).
+            const HWND owner = FindWindowW(L"DockForgeFinderBarMenuOwner", nullptr);
+            if (owner != nullptr) SendMessageW(owner, WM_CANCELMODE, 0, 0);
+            DF_INFO("finderbar", "probe cancel owner=%p", static_cast<void*>(owner));
+        } else if (command.rfind("pick ", 0) == 0) {
+            // Forwards one application menu command exactly as a real selection does,
+            // without needing a cursor on a system popup. This is the C-32 path under
+            // test: GetMenuItemID -> PostMessage(WM_COMMAND).
+            int box = 0, item = 0;
+            if (sscanf(command.c_str() + 5, "%d %d", &box, &item) == 2) {
+                const bool sent = finder_bar.ForwardMenuItem(
+                    static_cast<std::size_t>(box < 0 ? 0 : box), item);
+                DF_INFO("finderbar", "probe pick box=%d item=%d sent=%d", box, item,
+                        sent ? 1 : 0);
+            }
+        } else if (command.rfind("system ", 0) == 0) {
+            const int id = atoi(command.c_str() + 7);
+            const bool ran = finder_bar.RunSystemCommand(
+                static_cast<int>(finderbar::kSystemMenuBase) + id);
+            DF_INFO("finderbar", "probe system id=%d ran=%d", id, ran ? 1 : 0);
+        }
+        // "state" and every other command falls through to the snapshot write, so a
+        // probe never has to send two commands to see the effect of one.
+        write_finderbar_state_file();
+    };
+
     auto repaint = [&] {
         const float dpi = static_cast<float>(window.Dpi());
         const std::int64_t paint_start = core::QueryPerformanceTicks();
@@ -2307,6 +2495,28 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                 config.notifications.poll_seconds);
     });
 
+    // T-301: Finder Bar re-apply. Same rule as weather and notifications - only a
+    // real change against the running config acts, so a hot reload that touches an
+    // unrelated section does not re-read the foreground menu. The env switch keeps
+    // winning: a probe that forced the bar on is not turned off by a publish that
+    // carries the file's value.
+    bus.Subscribe<core::ConfigChanged>([&](const core::ConfigChanged& event) {
+        if (!finder_bar_ready) return;
+        if (core::SameFinderBar(config.finderbar, event.config.finderbar)) return;
+        const bool was_enabled = config.finderbar.enabled;
+        config.finderbar = event.config.finderbar;
+        const bool want = finderbar_forced_on || config.finderbar.enabled;
+        if (want != was_enabled) finder_bar.SetEnabled(want);
+        finder_bar.ReloadConfig(config);
+        DF_INFO("finderbar", "config applied: enabled=%d height=%d system_menu=%d app_name=%d "
+                             "app_menu=%d max_items=%d auto_hide=%d",
+                config.finderbar.enabled ? 1 : 0, config.finderbar.height,
+                config.finderbar.show_system_menu ? 1 : 0,
+                config.finderbar.show_app_name ? 1 : 0,
+                config.finderbar.show_app_menu ? 1 : 0,
+                config.finderbar.max_menu_items, config.finderbar.auto_hide ? 1 : 0);
+    });
+
     // ---- OLE drop target (T-014) ----------------------------------------
     // The sink is a set of std::functions rather than a subclass because every piece
     // of state it needs is a local in this function, and threading a subclass through
@@ -2651,6 +2861,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         if (hw_panel_ready) {
             hw_panel.Tick(delta_ms);
             read_hw_command(delta_ms);
+        }
+        // Finder Bar (T-301). Tick advances the reveal animation, re-reads the
+        // foreground application and repaints only when something moved; the
+        // probe reader piggybacks the same 50ms cadence as every other channel.
+        if (finder_bar_ready) {
+            finder_bar.Tick(delta_ms, config);
+            read_finderbar_command(delta_ms);
         }
         // Weather (T-075): the countdown to the next automatic refresh runs
         // here, and a published snapshot is adopted at most once per frame.
@@ -3585,6 +3802,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     // residue" guarantee. The host's destructor would do the same; doing it
     // here keeps all three unregisters on the same lines of the shutdown path.
     hotkey_host.UnregisterAll();
+    // T-301: the bar owns a window, a DComp surface and a possibly blocked menu
+    // thread, so it goes before the dock's own surface for the same reason the
+    // Launchpad does - a live composition target on a destroyed HWND is a shutdown
+    // hang, not a leak.
+    finder_bar.Shutdown();
     launchpad.Shutdown();
     capture.Stop();
     plate.Reset();

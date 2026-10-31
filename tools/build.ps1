@@ -3,7 +3,13 @@
 param(
     [ValidateSet('configure', 'build', 'test', 'all')][string]$Action = 'all',
     [string]$Config = 'RelWithDebInfo',
-    [switch]$Clean
+    [switch]$Clean,
+    # Parallel compiles. Each cc1plus peaks around 1.2 GB on this tree (config.cpp and
+    # main.cpp are the worst), so the default is derived from free memory instead of a
+    # fixed 8: with 8 jobs on a 16 GB machine that already has Windows and a browser
+    # resident, the compiler dies with "out of memory allocating" and the failure looks
+    # like a code error when it is only a scheduling one.
+    [int]$Jobs = 0
 )
 
 $ErrorActionPreference = 'Stop'
@@ -25,8 +31,23 @@ function Invoke-Configure {
     if ($LASTEXITCODE -ne 0) { throw "configure failed ($LASTEXITCODE)" }
 }
 
+function Resolve-Jobs {
+    if ($Jobs -gt 0) { return $Jobs }
+    $os = Get-CimInstance Win32_OperatingSystem
+    $free_gb = $os.FreePhysicalMemory / 1MB
+    $cpu = [Environment]::ProcessorCount
+    # 1.3 GB per compiler process, rounded down, never more than the CPU count, never
+    # less than 1. A machine with 2 GB free gets a serial build rather than a crash.
+    $by_memory = [int][math]::Floor($free_gb / 1.3)
+    $resolved = [math]::Min($by_memory, $cpu)
+    if ($resolved -lt 1) { $resolved = 1 }
+    return $resolved
+}
+
 function Invoke-Build {
-    & $CMake --build $BuildDir -j 8
+    $jobs = Resolve-Jobs
+    Write-Output "building with -j $jobs (free memory adaptive)"
+    & $CMake --build $BuildDir -j $jobs
     if ($LASTEXITCODE -ne 0) { throw "build failed ($LASTEXITCODE)" }
 }
 

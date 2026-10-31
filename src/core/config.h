@@ -144,6 +144,42 @@ bool SameWeather(const WeatherConfig& a, const WeatherConfig& b);
 // other applications' message text, so the app does not even start the sidecar
 // until the user says yes. Nothing here is persisted notification CONTENT -
 // these are only the switches.
+// T-301 / C-31: the Finder Bar. Only the keys this task actually implements are
+// declared here; the centre widgets (T-302) and the tray mirror (T-303..T-307)
+// add their own keys when they land, so no file ever carries a switch nothing
+// reads.
+struct FinderBarConfig {
+    // C-31 freezes the default as true, and that is safe here because the bar changes
+    // no system behaviour: it does not reserve the work area (Q8 proved that is
+    // impossible), does not hook anything, and does not touch the taskbar. It is a
+    // topmost overlay exactly like the dock, which is also on by default. Auto-hide
+    // (below) means it spends its life as a 4dip hairline, so the "draws over every
+    // window" objection only applies to the pinned mode a user asks for.
+    //
+    // Three independent escapes, in increasing severity: DOCKFORGE_FINDERBAR=0 for one
+    // run, finderbar.enabled=false in config.json for good, and the system menu's
+    // "Quit DockForge" for the whole app.
+    bool enabled = true;
+    // C-31 says 28px at 100%. Height is DIP, so the bar is 56 physical px at the
+    // 192 DPI this host runs at.
+    int height = 28;
+    bool show_system_menu = true;
+    bool show_app_name = true;
+    bool show_app_menu = true;
+    // C-32: at most this many top-level items, the rest fold into one "More"
+    // entry that opens a popup listing them.
+    int max_menu_items = 6;
+    // Q8 in spikes/T-301_finderbar_menu proved SPI_SETWORKAREA is a no-op on
+    // Windows 11 (explorer rewrites the work area immediately), so the bar cannot
+    // reserve space and a maximized window's title bar sits under it. Auto-hide
+    // is therefore the default: the bar retracts to a hairline and slides down
+    // when the pointer reaches the top edge. Users who want it pinned set this
+    // false.
+    bool auto_hide = true;
+};
+
+bool SameFinderBar(const FinderBarConfig& a, const FinderBarConfig& b);
+
 struct NotificationsConfig {
     bool enabled = false;             // master switch; false means no sidecar process
     bool banner_enabled = true;       // top-right banner for newly arrived toasts
@@ -171,6 +207,9 @@ struct Config {
     // T-076: notification centre. Off by default; a default config.json carries
     // no "notifications" key.
     NotificationsConfig notifications;
+    // T-301: Finder Bar. Off by default; a default config.json carries no
+    // "finderbar" key.
+    FinderBarConfig finderbar;
 
     // Raw JSON as loaded from disk. Unknown keys live here so that a
     // save round-trip never silently drops user data (C-01 实现约束).
@@ -225,6 +264,10 @@ IntRange HotspotSizeRange();
 IntRange WeatherRefreshMinutesRange();
 IntRange NotificationBannerTimeoutRange();
 IntRange NotificationPollRange();
+// T-301: the bar must stay readable (too short clips the label) and must not
+// eat a third of the screen (a hand-edited 400 would).
+IntRange FinderBarHeightRange();
+IntRange FinderBarMaxMenuItemsRange();
 
 // Hotspot enum <-> string helpers (C-24 canonical spellings).
 const char* ToString(HotspotEdge value);
