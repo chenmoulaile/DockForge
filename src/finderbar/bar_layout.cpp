@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cwchar>
 
 namespace dockforge::finderbar {
 namespace {
@@ -256,6 +257,156 @@ bool AutoHideInteractive(const AutoHideState& state) {
     // hairline, and eating a click meant for the desktop is worse than a missed one:
     // the user can always come back, but a swallowed click looks like a broken system.
     return state.progress >= 0.5f;
+}
+
+// ---- right group (T-307) -----------------------------------------------------
+
+const wchar_t* RightTypeName(int type_index) {
+    // C-31's declaration sequence. The index form keeps this table iterable without
+    // casting the enum at every call site.
+    static const wchar_t* kNames[kRightTypeCount] = {
+        L"tray_mirror", L"control_center", L"notification_center", L"ime",
+        L"battery",     L"network",        L"clock",              L"weather_brief",
+    };
+    if (type_index < 0 || type_index >= kRightTypeCount) return L"";
+    return kNames[type_index];
+}
+
+std::optional<RightType> RightTypeFromName(const wchar_t* name) {
+    if (name == nullptr) return std::nullopt;
+    for (int i = 0; i < kRightTypeCount; ++i) {
+        if (wcscmp(name, RightTypeName(i)) == 0) return static_cast<RightType>(i);
+    }
+    return std::nullopt;
+}
+
+bool RightTypeRegistered(RightType type) {
+    // T-307 registers exactly these two. The rest flip here task by task (T-303
+    // tray_mirror, T-304 control_center, T-305 notification_center, T-306 ime /
+    // battery / network); until then they are skipped, never drawn as placeholders.
+    switch (type) {
+        case RightType::Clock:
+        case RightType::WeatherBrief:
+            return true;
+        default:
+            return false;
+    }
+}
+
+namespace {
+
+// Width of one entry: inner padding on both sides, plus the glyph box and its gap to
+// the text when the entry carries an icon.
+float RightItemWidth(const RightItem& item, MeasureFn measure) {
+    const float text_width = item.text.empty() ? 0.0f : measure(item.text.c_str(), kMenuFontDip);
+    float width = kRightContentPaddingDip * 2.0f + text_width;
+    if (item.has_icon) width += kRightIconBoxDip + (text_width > 0.0f ? kRightIconTextGapDip : 0.0f);
+    return width;
+}
+
+}  // namespace
+
+std::size_t LayoutRightGroup(const RightItem* items, std::size_t count, float width_dip,
+                             float height_dip, MeasureFn measure, RightBox* out,
+                             std::size_t capacity, RightGroupSummary* summary) {
+    RightGroupSummary local;
+    if (out == nullptr || capacity == 0 || items == nullptr || count == 0) {
+        if (summary != nullptr) *summary = local;
+        return 0;
+    }
+    const MeasureFn measure_fn = measure != nullptr ? measure : &ApproximateTextWidth;
+
+    // Stable sort by (order, type): `order` decides the position from the right edge,
+    // the C-31 declaration sequence breaks ties, and stability keeps two entries with
+    // equal (order, type) in the caller's sequence - the render is then a function of
+    // the file, not of qsort's mood. Bounded copy: the caller's array is const and a
+    // sort needs scratch space, so entries are copied into a local vector first.
+    std::vector<const RightItem*> sorted;
+    sorted.reserve(count);
+    for (std::size_t i = 0; i < count; ++i) sorted.push_back(&items[i]);
+    std::stable_sort(sorted.begin(), sorted.end(),
+                     [](const RightItem* a, const RightItem* b) {
+                         if (a->order != b->order) return a->order < b->order;
+                         return static_cast<int>(a->type) < static_cast<int>(b->type);
+                     });
+
+    // From the right edge inwards. The trailing inset stays OUT of total_width_dip:
+    // LayoutBar already subtracts it when reserving the status area, and counting it
+    // twice would leave a 12 DIP hole between the left group and the right region.
+    const float right_edge = std::max(0.0f, width_dip - kTrailingInsetDip);
+    float cursor = right_edge;
+    const float left_limit = 0.0f;  // the left group's guard is status_width, not ours
+    std::size_t written = 0;
+    const float bar_height = height_dip > 0.0f ? height_dip : kDefaultBarHeightDip;
+
+    for (const RightItem* item : sorted) {
+        const float box_width = RightItemWidth(*item, measure_fn);
+        const float box_left = cursor - box_width;
+        // An entry that would cross the left edge is dropped, not squeezed: a squeezed
+        // clock or a clipped glyph is a visible bug, and the caller can shrink the
+        // left group or the item list once the summary reports the drop. The capacity
+        // guard counts the same way - measured, refused, reported.
+        if (box_left < left_limit || written >= capacity) {
+            ++local.dropped;
+            continue;
+        }
+        RightBox box;
+        box.rect = render::RectF{box_left, 0.0f, cursor, bar_height};
+        box.type = item->type;
+        box.text = item->text;
+        box.has_icon = item->has_icon;
+        if (item->has_icon) {
+            // The glyph sits left of the text (macOS order: symbol, then value) and is
+            // vertically centred in the bar - the painter draws into this exact square.
+            const float glyph_left = box_left + kRightContentPaddingDip;
+            const float glyph_top = (bar_height - kRightIconBoxDip) * 0.5f;
+            box.icon = render::RectF{glyph_left, glyph_top, glyph_left + kRightIconBoxDip,
+                                     glyph_top + kRightIconBoxDip};
+        }
+        out[written++] = box;
+        cursor = box_left - kRightItemGapDip;
+    }
+
+    // Left-to-right output order, so a paint loop and the hit test scan like the left
+    // group's. The sort above runs right-to-left, hence the reverse.
+    for (std::size_t i = 0; i < written / 2; ++i) {
+        RightBox tmp = out[i];
+        out[i] = out[written - 1 - i];
+        out[written - 1 - i] = tmp;
+    }
+    local.placed = written;
+    // Width is the span from the right edge to the leftmost drawn box. With nothing
+    // placed (everything dropped) the group is empty and reserves nothing, so the
+    // left group gets the whole bar back - the T-301 rule that reserves space only
+    // for something that exists.
+    local.total_width_dip = 0.0f;
+    if (written > 0) {
+        local.total_width_dip = std::max(0.0f, right_edge - out[0].rect.left);
+    }
+    if (summary != nullptr) *summary = local;
+    return written;
+}
+
+std::vector<RightBox> LayoutRightGroup(const std::vector<RightItem>& items, float width_dip,
+                                       float height_dip, MeasureFn measure,
+                                       RightGroupSummary* summary) {
+    // Bounded by the inputs: at most one box per entry.
+    std::vector<RightBox> boxes(items.size());
+    const std::size_t written = LayoutRightGroup(items.data(), items.size(), width_dip, height_dip,
+                                                 measure, boxes.data(), boxes.size(), summary);
+    boxes.resize(written);
+    return boxes;
+}
+
+std::size_t RightBoxIndexAt(const RightBox* boxes, std::size_t count, float x_dip, float y_dip) {
+    if (boxes == nullptr) return kNoMenu;
+    for (std::size_t i = 0; i < count; ++i) {
+        const render::RectF& r = boxes[i].rect;
+        if (x_dip < r.left || x_dip >= r.right) continue;
+        if (y_dip < r.top || y_dip >= r.bottom) continue;
+        return i;
+    }
+    return kNoMenu;
 }
 
 }  // namespace dockforge::finderbar

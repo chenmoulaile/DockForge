@@ -43,10 +43,19 @@ const std::unordered_set<std::string> kNotificationsKeys = {"enabled", "banner_e
                                                             "poll_seconds"};
 // T-301: the Finder Bar section. Deliberately narrow - the centre widgets and the
 // tray mirror add their own keys when they land, so nothing here is a switch that
-// no code reads.
+// no code reads. T-307 added "right" (C-31 finderbar.right table) and "clock"
+// (finderbar.clock.*, ADR-0053).
 const std::unordered_set<std::string> kFinderBarKeys = {
     "enabled", "height", "show_system_menu", "show_app_name", "show_app_menu",
-    "max_menu_items", "auto_hide"};
+    "max_menu_items", "auto_hide", "right", "clock"};
+
+// T-307: bounds for the hand-editable right-region table and clock format string,
+// same reasoning as kMaxTileListEntries: a hand-written file must not be able to
+// make the bar allocate unbounded memory. 32 entries is far above the eight types
+// C-31 enumerates; 64 bytes is far above any real time format picture ("h:mm:ss tt"
+// is 9) while still rejecting garbage.
+constexpr std::size_t kMaxFinderBarRightItems = 32;
+constexpr std::size_t kMaxFinderBarClockFormatBytes = 64;
 
 // Upper bound on the persisted tile list.
 //
@@ -555,6 +564,30 @@ bool WriteWholeFile(const std::wstring& path, const std::string& data) {
     return written == data.size();
 }
 
+bool ReadBool(const json& node, const char* key, bool& out) {
+    if (!node.contains(key)) return false;
+    const auto& value = node.at(key);
+    if (value.is_boolean()) {
+        out = value.get<bool>();
+        return false;
+    }
+    DF_WARN("core", "config %s has non-boolean type, keeping default", key);
+    return true;
+}
+
+// T-307: reads a plain string field. Returns true when the key was present but was
+// not a string (caller rewrites). Missing keys keep the caller's default.
+bool ReadStringField(const json& node, const char* key, std::string& out) {
+    if (!node.contains(key)) return false;
+    const auto& value = node.at(key);
+    if (value.is_string()) {
+        out = value.get<std::string>();
+        return false;
+    }
+    DF_WARN("core", "config %s is not a string, keeping default", key);
+    return true;
+}
+
 // Reads a value only when the JSON type matches; otherwise the default stands.
 // Returns true when the key was present but had an unusable type.
 template <typename T>
@@ -566,17 +599,6 @@ bool ReadNumber(const json& node, const char* key, T& out) {
         return false;
     }
     DF_WARN("core", "config %s has non-numeric type, keeping default", key);
-    return true;
-}
-
-bool ReadBool(const json& node, const char* key, bool& out) {
-    if (!node.contains(key)) return false;
-    const auto& value = node.at(key);
-    if (value.is_boolean()) {
-        out = value.get<bool>();
-        return false;
-    }
-    DF_WARN("core", "config %s has non-boolean type, keeping default", key);
     return true;
 }
 
@@ -640,11 +662,33 @@ bool SameNotifications(const NotificationsConfig& a, const NotificationsConfig& 
            a.poll_seconds == b.poll_seconds;
 }
 
+bool operator==(const FinderBarRightItem& a, const FinderBarRightItem& b) {
+    return a.type == b.type && a.order == b.order;
+}
+
+bool SameRightItems(const std::vector<FinderBarRightItem>& a,
+                    const std::vector<FinderBarRightItem>& b) {
+    if (a.size() != b.size()) return false;
+    // Order-preserving comparison: [{clock,0},{weather,1}] is not the same table as
+    // [{weather,1},{clock,0}]. The layout sorts stably by (order, type), so the file's
+    // entry order only decides which of two same-(order,type) entries wins - keeping
+    // the file's sequence intact makes that tie-break reproducible.
+    return std::equal(a.begin(), a.end(), b.begin());
+}
+
+// T-307 (ADR-0053): the frozen default right-region table. C-31 freezes the key shape
+// but not the default value, so this is where the default lives. See config.h.
+std::vector<FinderBarRightItem> DefaultFinderBarRightItems() {
+    return {FinderBarRightItem{"clock", 0}};
+}
+
 bool SameFinderBar(const FinderBarConfig& a, const FinderBarConfig& b) {
     return a.enabled == b.enabled && a.height == b.height &&
            a.show_system_menu == b.show_system_menu && a.show_app_name == b.show_app_name &&
            a.show_app_menu == b.show_app_menu && a.max_menu_items == b.max_menu_items &&
-           a.auto_hide == b.auto_hide;
+           a.auto_hide == b.auto_hide && SameRightItems(a.right, b.right) &&
+           a.clock.format == b.clock.format && a.clock.show_date == b.clock.show_date &&
+           a.clock.show_seconds == b.clock.show_seconds;
 }
 
 const char* ToString(FalloffCurve value) {
@@ -860,6 +904,22 @@ bool ClampConfig(Config& config) {
             config.finderbar.max_menu_items = items;
             changed = true;
         }
+        // T-307: the right-region table is hand-editable, so it gets the same ceiling
+        // treatment as the tile list. Unknown type strings are deliberately NOT
+        // normalised away - the renderer skips them (bar_layout.h), and rewriting them
+        // would silently drop whatever a future task expects to find (C-01).
+        if (config.finderbar.right.size() > kMaxFinderBarRightItems) {
+            config.finderbar.right.resize(kMaxFinderBarRightItems);
+            DF_WARN("core", "config finderbar.right has more than %zu entries, extras dropped",
+                    kMaxFinderBarRightItems);
+            changed = true;
+        }
+        if (config.finderbar.clock.format.size() > kMaxFinderBarClockFormatBytes) {
+            config.finderbar.clock.format.resize(kMaxFinderBarClockFormatBytes);
+            DF_WARN("core", "config finderbar.clock.format exceeded %zu bytes, truncated",
+                    kMaxFinderBarClockFormatBytes);
+            changed = true;
+        }
     }
     return changed;
 }
@@ -1019,6 +1079,64 @@ bool ParseConfig(const std::string& json_text, Config& out, std::string* error) 
             bad_value |= ReadBool(node, "show_app_menu", parsed.finderbar.show_app_menu);
             bad_value |= ReadNumber(node, "max_menu_items", parsed.finderbar.max_menu_items);
             bad_value |= ReadBool(node, "auto_hide", parsed.finderbar.auto_hide);
+            // T-307 (ADR-0053): the C-31 right-region table. An explicit empty array
+            // falls back to the default table - an empty right region would blank the
+            // clock, and the C-31 default exists precisely so a minimal file still
+            // reads like the macOS menu bar. Overflows are dropped here and ClampConfig
+            // re-checks the surviving count.
+            if (node.contains("right")) {
+                const auto& right = node.at("right");
+                if (right.is_array()) {
+                    // An explicit table REPLACES the member's default rows, it does not
+                    // append to them (the member starts at the frozen default table).
+                    parsed.finderbar.right.clear();
+                    bool right_dirty = false;
+                    for (const auto& item : right) {
+                        if (parsed.finderbar.right.size() >= kMaxFinderBarRightItems) {
+                            right_dirty = true;
+                            break;
+                        }
+                        if (!item.is_object()) {
+                            DF_WARN("core", "config finderbar.right has a non-object entry, dropped");
+                            right_dirty = true;
+                            continue;
+                        }
+                        FinderBarRightItem entry;
+                        bad_value |= ReadStringField(item, "type", entry.type);
+                        bad_value |= ReadNumber(item, "order", entry.order);
+                        // An entry without a usable type is dropped, not kept: a typeless
+                        // widget is unrenderable by any future task, so keeping it would
+                        // only make the table lie about what it contains.
+                        if (entry.type.empty()) {
+                            DF_WARN("core", "config finderbar.right entry has no type, dropped");
+                            right_dirty = true;
+                            continue;
+                        }
+                        parsed.finderbar.right.push_back(std::move(entry));
+                    }
+                    bad_value |= right_dirty;
+                } else if (!right.is_null()) {
+                    DF_WARN("core", "config finderbar.right is not an array, keeping default");
+                    bad_value = true;
+                }
+            }
+            if (parsed.finderbar.right.empty()) {
+                parsed.finderbar.right = DefaultFinderBarRightItems();
+            }
+            // T-307: finderbar.clock.* (ADR-0053). Empty format keeps following the
+            // system region; everything else is read as-is and clamped in ClampConfig.
+            if (node.contains("clock")) {
+                const auto& clock = node.at("clock");
+                if (clock.is_object()) {
+                    bad_value |= ReadStringField(clock, "format", parsed.finderbar.clock.format);
+                    bad_value |= ReadBool(clock, "show_date", parsed.finderbar.clock.show_date);
+                    bad_value |=
+                        ReadBool(clock, "show_seconds", parsed.finderbar.clock.show_seconds);
+                } else if (!clock.is_null()) {
+                    DF_WARN("core", "config finderbar.clock is not an object, keeping default");
+                    bad_value = true;
+                }
+            }
         } else if (!node.is_null()) {
             DF_WARN("core", "config finderbar is not an object, keeping default");
             bad_value = true;
@@ -1185,11 +1303,21 @@ std::string SerializeConfig(const Config& config) {
     // (T-302b: the AppBar reservation makes pinning safe) so it is written when true.
     // Getting one of these backwards puts the whole section in every default file,
     // which is the noise C-01 exists to prevent.
+    //
+    // T-307 (ADR-0053): "right" is written only when it differs from the default
+    // table, "clock" only when any of its fields differs from its default. Unknown
+    // type strings survive this path untouched, so a table referencing a widget a
+    // later task will register round-trips without loss.
+    const bool right_default =
+        SameRightItems(config.finderbar.right, DefaultFinderBarRightItems());
+    const bool clock_default = config.finderbar.clock.format.empty() &&
+                               config.finderbar.clock.show_date &&
+                               !config.finderbar.clock.show_seconds;
     if (!config.finderbar.enabled || config.finderbar.height != 28 ||
         !config.finderbar.show_system_menu || !config.finderbar.show_app_name ||
         !config.finderbar.show_app_menu || config.finderbar.max_menu_items != 6 ||
-        config.finderbar.auto_hide) {
-        document["finderbar"] = {
+        config.finderbar.auto_hide || !right_default || !clock_default) {
+        json finderbar = {
             {"enabled", config.finderbar.enabled},
             {"height", config.finderbar.height},
             {"show_system_menu", config.finderbar.show_system_menu},
@@ -1198,6 +1326,22 @@ std::string SerializeConfig(const Config& config) {
             {"max_menu_items", config.finderbar.max_menu_items},
             {"auto_hide", config.finderbar.auto_hide},
         };
+        if (!right_default) {
+            json right = json::array();
+            for (const FinderBarRightItem& item : config.finderbar.right) {
+                right.push_back({{"type", item.type}, {"order", item.order}});
+            }
+            finderbar["right"] = std::move(right);
+        }
+        if (!clock_default) {
+            json clock = {{"show_date", config.finderbar.clock.show_date},
+                          {"show_seconds", config.finderbar.clock.show_seconds}};
+            if (!config.finderbar.clock.format.empty()) {
+                clock["format"] = config.finderbar.clock.format;
+            }
+            finderbar["clock"] = std::move(clock);
+        }
+        document["finderbar"] = std::move(finderbar);
     }
 
     // Re-attach unknown keys captured at load time.

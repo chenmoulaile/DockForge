@@ -2,6 +2,7 @@
 
 #include "core/log.h"
 #include "core/paths.h"
+#include "dock/dock_view.h"
 #include "finderbar/appbar.h"
 #include "platform/win_common.h"
 #include "platform/window.h"
@@ -60,6 +61,77 @@ constexpr UINT kSystemIdBase = static_cast<UINT>(kSystemMenuBase);
 // and it can be verified in a screenshot because it appears in one.
 render::PlateStyle BarPlateStyle() {
     return render::StyleForTier(core::MaterialLevel::Solid, 0);
+}
+
+// The region's own format pictures, looked up once per layout change rather than per
+// frame: two GetLocaleInfoEx calls cost microseconds, but there is no reason to pay
+// them sixty times a second when the result only changes on a locale edit.
+//
+// Note on the constants: the ask names LOCALE_SSHORTTIME / LOCALE_SDATE, but
+// LOCALE_SDATE is the date SEPARATOR ("-" or "/"), not a picture - feeding it to
+// GetDateFormatEx renders a lone slash (measured on this host, evidence/T-307). The
+// complete short-date picture is LOCALE_SSHORTDATE; that is what follows the system
+// region and what the user can copy verbatim, so that is what production uses.
+void LocalePictures(std::wstring* time_picture, std::wstring* date_picture) {
+    wchar_t buffer[64]{};
+    if (time_picture != nullptr) {
+        if (GetLocaleInfoEx(LOCALE_NAME_USER_DEFAULT, LOCALE_SSHORTTIME, buffer, 64) > 0) {
+            *time_picture = buffer;
+        }
+    }
+    if (date_picture != nullptr) {
+        if (GetLocaleInfoEx(LOCALE_NAME_USER_DEFAULT, LOCALE_SSHORTDATE, buffer, 64) > 0) {
+            *date_picture = buffer;
+        }
+    }
+}
+
+// Renders the configured finderbar.right table into layout inputs. Types without a
+// renderer (RightTypeRegistered) are skipped entirely - no box, no gap - so a config
+// referencing a widget a later task will register costs nothing today, and each task
+// flips its type live by extending RightTypeRegistered alone.
+std::vector<RightItem> BuildRightItems(const core::FinderBarConfig& config,
+                                       const dock::weather::Snapshot& weather,
+                                       const SYSTEMTIME& now, const std::wstring& time_picture,
+                                       const std::wstring& date_picture) {
+    std::vector<RightItem> items;
+    items.reserve(config.right.size());
+    for (const core::FinderBarRightItem& entry : config.right) {
+        // The config stores the type as UTF-8 std::string (C-01 JSON round-trip); the
+        // layout speaks wide strings.
+        const std::wstring type_name = core::Utf8ToWide(entry.type);
+        const std::optional<RightType> type = RightTypeFromName(type_name.c_str());
+        // An unknown type string stays in the config (C-01: never drop user data) but
+        // produces no box, and the skip is logged once per layout instead of every
+        // frame.
+        if (!type.has_value()) {
+            DF_DEBUG(kModule, "finderbar.right type '%s' is not known, skipped",
+                     entry.type.c_str());
+            continue;
+        }
+        if (!RightTypeRegistered(*type)) continue;  // T-303..T-306 land here
+        RightItem item;
+        item.type = *type;
+        item.order = entry.order;
+        switch (*type) {
+            case RightType::Clock:
+                item.text = FormatBarClockText(now, config.clock, time_picture.c_str(),
+                                               date_picture.c_str());
+                item.has_icon = false;
+                break;
+            case RightType::WeatherBrief:
+                // Same placeholder contract as the dock tile (WeatherTextFor): an
+                // unread snapshot shows "--°" instead of an empty slot, and the glyph
+                // shows its own Unknown placeholder ring.
+                item.has_icon = true;
+                item.text = dock::WeatherTextFor(weather);
+                break;
+            default:
+                break;
+        }
+        items.push_back(std::move(item));
+    }
+    return items;
 }
 
 // The strip that summons a fully retracted bar. Three DIP is enough to hit without aiming
@@ -242,6 +314,139 @@ float MeasureBarText(const wchar_t* text, float size_dip) {
     layout->Release();
     if (FAILED(hr)) return ApproximateTextWidth(text, size_dip);
     return metrics.widthIncludingTrailingWhitespace;
+}
+
+// ---- clock formatting (T-307, finderbar.clock.*) ------------------------------
+
+namespace {
+
+// Removes the seconds token from a GetTimeFormatEx format picture, together with one
+// separator on each side of it. GetTimeFormatEx's seconds token is a run of 's'
+// between tokens; everything else (quoted literals, other tokens, whitespace) passes
+// through untouched. "HH:mm:ss" -> "HH:mm", "h:mm:ss tt" -> "h:mm tt".
+std::wstring StripSecondsPicture(const wchar_t* picture) {
+    if (picture == nullptr) return {};
+    std::wstring out;
+    std::wstring pending;  // separators held back so the one before 's' can be dropped
+    bool in_quote = false;
+    for (std::size_t i = 0; picture[i] != L'\0';) {
+        const wchar_t ch = picture[i];
+        if (ch == L'\'') {
+            in_quote = !in_quote;
+            out.push_back(ch);
+            pending.clear();
+            ++i;
+            continue;
+        }
+        if (in_quote) {
+            out.push_back(ch);
+            ++i;
+            continue;
+        }
+        if (ch == L':' || ch == L'.') {
+            pending.push_back(ch);
+            ++i;
+            continue;
+        }
+        if (ch == L's' || ch == L'S') {
+            pending.clear();
+            while (picture[i] == L's' || picture[i] == L'S') ++i;
+            if (picture[i] == L':' || picture[i] == L'.') ++i;  // the separator after it
+            continue;
+        }
+        out.append(pending);
+        pending.clear();
+        out.push_back(ch);
+        ++i;
+    }
+    out.append(pending);
+    return out;
+}
+
+// Appends a ":ss" seconds field before any AM/PM designator ('t' token), or at the
+// end when the picture has none - "h:mm tt" gains seconds as "h:mm:ss tt", not as
+// "h:mm tt:ss". The insertion point walks back over whitespace so the separator lands
+// before the space that leads the designator ("h:mm tt" inserts at the space, not
+// after it).
+std::wstring AppendSecondsPicture(const wchar_t* picture) {
+    if (picture == nullptr) return L"HH:mm:ss";
+    std::wstring out(picture);
+    bool in_quote = false;
+    std::size_t t_pos = std::wstring::npos;
+    for (std::size_t i = 0; i < out.size(); ++i) {
+        if (out[i] == L'\'') in_quote = !in_quote;
+        if (!in_quote && (out[i] == L't' || out[i] == L'T')) {
+            t_pos = i;
+            break;
+        }
+    }
+    if (t_pos == std::wstring::npos) {
+        out += L":ss";
+    } else {
+        while (t_pos > 0 && out[t_pos - 1] == L' ') --t_pos;
+        out.insert(t_pos, L":ss");
+    }
+    return out;
+}
+
+bool PictureHasSeconds(const wchar_t* picture) {
+    if (picture == nullptr) return false;
+    bool in_quote = false;
+    for (std::size_t i = 0; picture[i] != L'\0'; ++i) {
+        if (picture[i] == L'\'') in_quote = !in_quote;
+        if (!in_quote && (picture[i] == L's' || picture[i] == L'S')) return true;
+    }
+    return false;
+}
+
+}  // namespace
+
+BarClockText FormatBarClock(const SYSTEMTIME& now, const core::FinderBarClockConfig& clock,
+                            const wchar_t* time_picture, const wchar_t* date_picture) {
+    BarClockText out;
+
+    // Time picture: an explicit finderbar.clock.format takes the time shape over
+    // entirely (seconds are whatever the user wrote, show_seconds does not second-
+    // guess it); only the follow-the-system default gets the show_seconds add/strip
+    // pass. The bare "HH:mm" covers a machine that refuses the locale query.
+    std::wstring effective;
+    if (!clock.format.empty()) {
+        effective = core::Utf8ToWide(clock.format);
+    } else {
+        effective = time_picture != nullptr && *time_picture != L'\0'
+                        ? std::wstring(time_picture)
+                        : std::wstring(L"HH:mm");
+        if (clock.show_seconds && !PictureHasSeconds(effective.c_str())) {
+            effective = AppendSecondsPicture(effective.c_str());
+        } else if (!clock.show_seconds && PictureHasSeconds(effective.c_str())) {
+            effective = StripSecondsPicture(effective.c_str());
+        }
+    }
+    if (effective.empty()) effective = L"HH:mm";
+
+    wchar_t buffer[64]{};
+    if (GetTimeFormatEx(LOCALE_NAME_USER_DEFAULT, 0, &now, effective.c_str(), buffer, 64) > 0) {
+        out.time = buffer;
+    }
+
+    if (clock.show_date) {
+        std::wstring date = date_picture != nullptr && *date_picture != L'\0'
+                                ? std::wstring(date_picture)
+                                : std::wstring(L"yyyy/MM/dd");
+        if (GetDateFormatEx(LOCALE_NAME_USER_DEFAULT, 0, &now, date.c_str(), buffer, 64,
+                            nullptr) > 0) {
+            out.date = buffer;
+        }
+    }
+    return out;
+}
+
+std::wstring FormatBarClockText(const SYSTEMTIME& now, const core::FinderBarClockConfig& clock,
+                                const wchar_t* time_picture, const wchar_t* date_picture) {
+    const BarClockText parts = FormatBarClock(now, clock, time_picture, date_picture);
+    if (parts.date.empty()) return parts.time;
+    if (parts.time.empty()) return parts.date;
+    return parts.date + L" " + parts.time;
 }
 
 std::wstring FallbackNameFromPath(const std::wstring& exe_path) {
@@ -504,6 +709,22 @@ bool FinderBar::Initialize(HINSTANCE instance, const core::Config& config) {
     style_ = BarPlateStyle();
     if (!CreateWindowFor(display)) return false;
 
+    // Right-region surfaces (T-307). The forecast popup is the dock's GDI popover class
+    // (its window class registers idempotently); the calendar panel is the DComp card
+    // the clock opens. Both are created here so a click later just shows them - and a
+    // failure degrades to a logged warning with the bar itself still up, never a
+    // crash in the shell surface.
+    if (dock::WeatherPopup::RegisterWindowClass(instance) && weather_popup_.Create(instance)) {
+        weather_popup_ready_ = true;
+    } else {
+        DF_WARN(kModule, "weather popup unavailable; weather_brief clicks will no-op");
+    }
+    calendar_panel_ = std::make_unique<CalendarPanel>();
+    if (!CalendarPanel::RegisterWindowClass(instance) || !calendar_panel_->Create(instance)) {
+        DF_WARN(kModule, "calendar panel unavailable; clock clicks will no-op");
+        calendar_panel_.reset();
+    }
+
     // The bar spans the display edge to edge, so a rounded plate would show the desktop
     // through its corners at the top of the screen. Radius 0 is the macOS menu-bar shape.
     DF_INFO(kModule, "Finder Bar ready display=%s dpi=%u height_dip=%.1f tier=%d",
@@ -618,6 +839,15 @@ void FinderBar::Shutdown() {
         foreground_hook_ = nullptr;
     }
     if (g_active_bar == this) g_active_bar = nullptr;
+    // The right-region surfaces outlive the bar window (they are owned by this object,
+    // not by its HWND), so they go down with the bar here, not inside
+    // DestroyWindowAndSurface.
+    if (calendar_panel_) {
+        calendar_panel_->Destroy();
+        calendar_panel_.reset();
+    }
+    weather_popup_.Destroy();
+    weather_popup_ready_ = false;
     DestroyWindowAndSurface();
     ready_ = false;
     enabled_ = false;
@@ -627,6 +857,10 @@ void FinderBar::SetEnabled(bool enabled) {
     enabled_ = enabled;
     if (window_ == nullptr) return;
     if (!enabled) {
+        // A hidden bar must not leave a calendar card or a forecast floating above the
+        // desktop it was anchored to.
+        CloseCalendarPanel();
+        weather_popup_.Hide();
         capture_.Stop();
         // Give the strip back before hiding. A reservation left behind after the bar
         // is gone would keep every maximized window 28dip short of the top edge with
@@ -791,6 +1025,22 @@ void FinderBar::RefreshForeground() {
 }
 
 void FinderBar::Relayout() {
+    // Right region first (T-307): its measured width is what LayoutBar reserves as the
+    // status area. Passing 0 here was the T-301 placeholder - with the right region
+    // live, reserving nothing would let a long menu title run under the clock, which
+    // is exactly the overlap the reservation exists to prevent.
+    SYSTEMTIME now{};
+    GetLocalTime(&now);
+    std::wstring time_picture;
+    std::wstring date_picture;
+    LocalePictures(&time_picture, &date_picture);
+    clock_text_ = FormatBarClockText(now, config_.clock, time_picture.c_str(),
+                                     date_picture.c_str());
+    const std::vector<RightItem> right_items =
+        BuildRightItems(config_, weather_, now, time_picture, date_picture);
+    right_boxes_ = LayoutRightGroup(right_items, width_dip_, height_dip_, &MeasureBarText,
+                                    &right_summary_);
+
     BarLayoutParams params;
     params.width_dip = width_dip_;
     params.height_dip = height_dip_;
@@ -798,13 +1048,24 @@ void FinderBar::Relayout() {
     params.show_app_name = config_.show_app_name;
     params.show_app_menu = config_.show_app_menu;
     params.max_menu_items = config_.max_menu_items;
-    // Nothing is reserved at the trailing edge yet: T-302 owns that area and will pass a
-    // width once it exists. Reserving space for widgets that do not exist would leave a
-    // visible gap at the right edge for no reason.
-    params.status_width_dip = 0.0f;
+    params.status_width_dip = right_summary_.total_width_dip;
     params.app_name = foreground_.display_name;
 
     boxes_ = LayoutBar(params, menu_.titles, &MeasureBarText, &layout_);
+}
+
+// Recomputes only when the clock's rendered text actually changed: the tick loop runs
+// at frame cadence, and relaying out every frame would re-measure the whole bar for a
+// string that changes once a minute (or a second, when show_seconds is on).
+void FinderBar::UpdateRightItems() {
+    SYSTEMTIME now{};
+    GetLocalTime(&now);
+    std::wstring time_picture;
+    std::wstring date_picture;
+    LocalePictures(&time_picture, &date_picture);
+    const std::wstring text = FormatBarClockText(now, config_.clock, time_picture.c_str(),
+                                                 date_picture.c_str());
+    if (text != clock_text_) Relayout();
 }
 
 void FinderBar::ApplyRegion() {
@@ -906,6 +1167,32 @@ void FinderBar::Repaint() {
                                     render::TextAlign::Center);
             }
 
+            // Right region (T-307): glyph first, then text, the macOS order. The
+            // weather glyph reuses dock::DrawWeatherGlyph verbatim (dock_view.h:153 /
+            // dock_view.cpp:223 - the ask's grep shows this is the only renderer that
+            // exists; weather.cpp draws nothing). The Unknown kind draws its own
+            // placeholder ring, so an empty snapshot stays visibly occupied.
+            for (std::size_t i = 0; i < right_boxes_.size(); ++i) {
+                const RightBox& box = right_boxes_[i];
+                const render::RectF rect{box.rect.left, box.rect.top + offset, box.rect.right,
+                                         box.rect.bottom + offset};
+                if (static_cast<int>(i) == hover_right_ && !menu_running_) {
+                    backend_->FillRoundedRect(rect, 5.0f, hover_color);
+                }
+                if (box.has_icon && box.type == RightType::WeatherBrief) {
+                    const render::RectF icon{box.icon.left, box.icon.top + offset,
+                                             box.icon.right, box.icon.bottom + offset};
+                    dock::DrawWeatherGlyph(*backend_, icon,
+                                           weather_.valid && !weather_.failed
+                                               ? weather_.kind
+                                               : dock::weather::Kind::Unknown);
+                }
+                if (!box.text.empty()) {
+                    backend_->DrawLabel(box.text.c_str(), rect, kMenuFontDip, text_color,
+                                        render::TextAlign::Center);
+                }
+            }
+
             backend_->EndFrame();
         });
 
@@ -922,10 +1209,16 @@ bool FinderBar::Tick(double delta_ms, const core::Config& config) {
 
     // A config change normally arrives through ReloadConfig, but the foreground name and the
     // menu list also depend on finderbar keys, so a cheap identity check catches the case
-    // where a caller forgot.
+    // where a caller forgot. T-307 adds the right table and the clock settings to the
+    // same check: a user editing finderbar.right or finderbar.clock.* in the file must
+    // not wait for an unrelated finderbar key to change.
     if (config.finderbar.max_menu_items != config_.max_menu_items ||
         config.finderbar.show_app_menu != config_.show_app_menu ||
-        config.finderbar.height != config_.height) {
+        config.finderbar.height != config_.height ||
+        !core::SameRightItems(config.finderbar.right, config_.right) ||
+        config.finderbar.clock.format != config_.clock.format ||
+        config.finderbar.clock.show_date != config_.clock.show_date ||
+        config.finderbar.clock.show_seconds != config_.clock.show_seconds) {
         ReloadConfig(config);
     }
 
@@ -947,6 +1240,12 @@ bool FinderBar::Tick(double delta_ms, const core::Config& config) {
         RefreshForeground();
         Relayout();
     }
+
+    // The clock rolls over at most once per minute (per second with show_seconds);
+    // comparing the cached text is the cheap dirty check, and it runs BEFORE the hit
+    // tests so a rollover that re-lays the bar out never leaves this frame's hover
+    // index pointing into the previous layout.
+    if (!menu_running_) UpdateRightItems();
 
     // Pointer tracking is polled rather than event driven: a retracted bar has an empty
     // region, so Windows sends it no mouse messages at all.
@@ -972,14 +1271,24 @@ bool FinderBar::Tick(double delta_ms, const core::Config& config) {
     }
 
     const int previous_hover = hover_box_;
+    const int previous_right_hover = hover_right_;
     hover_box_ = -1;
+    hover_right_ = -1;
     if (pointer_in_bar_ && AutoHideInteractive(auto_hide_) && !menu_running_) {
-        const std::size_t index = BoxAtDip(cursor_x_dip, cursor_y_dip - offset);
-        if (index != kNoMenu) hover_box_ = static_cast<int>(index);
+        // The right region is queried first: its boxes live in the same row as the
+        // left group's but never overlap it (LayoutBar reserves right_summary_'s
+        // width), so at most one of the two hit tests can match.
+        const std::size_t right_index = RightBoxAtDip(cursor_x_dip, cursor_y_dip - offset);
+        if (right_index != kNoMenu) {
+            hover_right_ = static_cast<int>(right_index);
+        } else {
+            const std::size_t index = BoxAtDip(cursor_x_dip, cursor_y_dip - offset);
+            if (index != kNoMenu) hover_box_ = static_cast<int>(index);
+        }
     }
 
     const bool moved = std::abs(before.progress - auto_hide_.progress) > 0.0005f;
-    const bool hover_changed = previous_hover != hover_box_;
+    const bool hover_changed = previous_hover != hover_box_ || previous_right_hover != hover_right_;
     if (!moved && !hover_changed && !foreground_changed) return false;
 
     if (moved) ApplyRegion();
@@ -991,8 +1300,19 @@ std::size_t FinderBar::BoxAtDip(float x_dip, float y_dip) const {
     return BoxIndexAt(boxes_.data(), boxes_.size(), x_dip, y_dip);
 }
 
+std::size_t FinderBar::RightBoxAtDip(float x_dip, float y_dip) const {
+    return RightBoxIndexAt(right_boxes_.data(), right_boxes_.size(), x_dip, y_dip);
+}
+
 void FinderBar::OnClick(float x_dip, float y_dip) {
     if (menu_running_) return;
+    // Right region first: the boxes do not overlap the left group's, but the clock is
+    // the anchor macOS users aim at, so its path stays short and readable.
+    const std::size_t right_index = RightBoxAtDip(x_dip, y_dip);
+    if (right_index != kNoMenu) {
+        OnRightClick(right_boxes_[right_index]);
+        return;
+    }
     const std::size_t index = BoxAtDip(x_dip, y_dip);
     if (index == kNoMenu) return;
     const BarBox& box = boxes_[index];
@@ -1007,6 +1327,112 @@ void FinderBar::OnClick(float x_dip, float y_dip) {
     } else {
         OpenAppMenu(index);
     }
+}
+
+void FinderBar::OnRightClick(const RightBox& box) {
+    switch (box.type) {
+        case RightType::Clock: {
+            // macOS: the menu-bar clock drops a calendar card straight down. Toggled:
+            // a second click on the clock closes the open panel, matching the popup
+            // behaviour every macOS status item has.
+            if (calendar_panel_ != nullptr && calendar_panel_->Visible()) {
+                CloseCalendarPanel();
+                return;
+            }
+            if (calendar_panel_ == nullptr) {
+                DF_WARN(kModule, "calendar panel unavailable this run");
+                return;
+            }
+            const int bar_bottom_px = display_.monitor.top + height_px_;
+            const int inset_px = std::max(0, platform::DipToPixels(kTrailingInsetDip, dpi_));
+            calendar_panel_->Open(dpi_, display_.monitor, bar_bottom_px, inset_px);
+            break;
+        }
+        case RightType::WeatherBrief: {
+            if (!weather_popup_ready_) {
+                DF_WARN(kModule, "weather popup unavailable this run");
+                return;
+            }
+            // The popup's Show anchors its BOTTOM edge above `bottom_px`; the bar sits
+            // at the top of the screen, so the forecast must hang BELOW it. Passing
+            // bar_bottom + popup height + gap lands the top edge exactly on the bar's
+            // bottom. The height formula mirrors weather_popup.cpp's own constants
+            // (kHeaderHeightDip + 2*kPadDip + one row per forecast day); duplicating
+            // three DIP numbers beats reaching into that file's private namespace.
+            const int rows =
+                static_cast<int>(std::max<std::size_t>(weather_.days.size(), 1));
+            const float popup_dip = 36.0f + 12.0f * 2.0f + rows * 32.0f;
+            const float scale = Scale();
+            const float centre_x_dip = (box.rect.left + box.rect.right) * 0.5f;
+            const int anchor_x_px = display_.monitor.left +
+                                    static_cast<int>(centre_x_dip * scale);
+            const int bottom_px = display_.monitor.top + height_px_ +
+                                  static_cast<int>((popup_dip + 8.0f) * scale);
+            SYSTEMTIME now{};
+            GetLocalTime(&now);
+            char today[16]{};
+            std::snprintf(today, sizeof(today), "%04d-%02d-%02d", now.wYear, now.wMonth,
+                          now.wDay);
+            weather_popup_.Show(weather_, today, anchor_x_px, bottom_px, dpi_);
+            break;
+        }
+        default:
+            // Registered types whose panel belongs to a later task (none today) land
+            // here; clicking them is a no-op rather than a crash.
+            break;
+    }
+}
+
+void FinderBar::SetWeatherSnapshot(const dock::weather::Snapshot& snapshot) {
+    // Copy, never pointer (C-04b). A changed snapshot re-lays the right region so the
+    // temperature text and the glyph kind move together on the next paint.
+    const bool changed = snapshot.valid != weather_.valid || snapshot.failed != weather_.failed ||
+                         snapshot.temp_c != weather_.temp_c || snapshot.kind != weather_.kind ||
+                         snapshot.days.size() != weather_.days.size();
+    if (!changed && weather_.days.size() == snapshot.days.size()) return;
+    weather_ = snapshot;
+    Relayout();
+    Repaint();
+}
+
+bool FinderBar::WantsWeatherSnapshot() const {
+    for (const core::FinderBarRightItem& item : config_.right) {
+        const std::wstring type_name = core::Utf8ToWide(item.type);
+        const std::optional<RightType> type = RightTypeFromName(type_name.c_str());
+        if (type.has_value() && *type == RightType::WeatherBrief) return true;
+    }
+    return false;
+}
+
+bool FinderBar::OpenCalendarPanel() {
+    if (!ready_ || window_ == nullptr || !enabled_) return false;
+    if (calendar_panel_ == nullptr) return false;
+    // Toggle, matching the click path: a second probe "calendar" closes the open
+    // panel instead of re-showing it, exactly what a second click on the clock does.
+    if (calendar_panel_->Visible()) {
+        CloseCalendarPanel();
+        return false;
+    }
+    const int bar_bottom_px = display_.monitor.top + height_px_;
+    const int inset_px = std::max(0, platform::DipToPixels(kTrailingInsetDip, dpi_));
+    calendar_panel_->Open(dpi_, display_.monitor, bar_bottom_px, inset_px);
+    return calendar_panel_->Visible();
+}
+
+void FinderBar::CloseCalendarPanel() {
+    if (calendar_panel_ != nullptr) calendar_panel_->Close();
+}
+
+bool FinderBar::OpenWeatherPopup() {
+    if (!ready_ || window_ == nullptr || !enabled_) return false;
+    if (!weather_popup_ready_) return false;
+    for (const RightBox& box : right_boxes_) {
+        if (box.type == RightType::WeatherBrief) {
+            OnRightClick(box);
+            return weather_popup_.Visible();
+        }
+    }
+    return false;
 }
 
 bool FinderBar::OpenMenuForBox(std::size_t box_index) {
@@ -1317,6 +1743,21 @@ std::string FinderBar::SnapshotJson() const {
     j["foreground_name"] = core::WideToUtf8(foreground_.display_name);
     j["menu_readable"] = foreground_.menu_readable;
     j["hover_box"] = hover_box_;
+
+    // T-307: the right region, its measured width and the clock text a probe asserts
+    // on without a screenshot.
+    j["clock_text"] = core::WideToUtf8(clock_text_);
+    j["right_width_dip"] = right_summary_.total_width_dip;
+    j["calendar_visible"] = CalendarPanelVisible();
+    nlohmann::json right_boxes = nlohmann::json::array();
+    for (const RightBox& box : right_boxes_) {
+        right_boxes.push_back({{"type", core::WideToUtf8(RightTypeName(static_cast<int>(box.type)))},
+                               {"left", box.rect.left},
+                               {"right", box.rect.right},
+                               {"text", core::WideToUtf8(box.text)},
+                               {"icon", box.has_icon}});
+    }
+    j["right_boxes"] = right_boxes;
 
     nlohmann::json boxes = nlohmann::json::array();
     for (const BarBox& box : boxes_) {

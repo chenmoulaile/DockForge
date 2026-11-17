@@ -156,6 +156,54 @@ bool SameWeather(const WeatherConfig& a, const WeatherConfig& b);
 // declared here; the centre widgets (T-302) and the tray mirror (T-303..T-307)
 // add their own keys when they land, so no file ever carries a switch nothing
 // reads.
+// C-31: one entry of the finderbar.right table. `type` keeps the C-31 enum spelling
+// verbatim ("clock", "weather_brief", ...). An unknown or not-yet-registered type is
+// kept in the list unchanged - the renderer skips it (bar_layout.h) - so a config
+// written before the next task (T-303..T-306) registers its widget survives the
+// round-trip instead of silently dropping user data (C-01).
+struct FinderBarRightItem {
+    std::string type;
+    int order = 0;  // position FROM the right edge; 0 = rightmost (bar_layout.h)
+};
+
+bool operator==(const FinderBarRightItem& a, const FinderBarRightItem& b);
+bool SameRightItems(const std::vector<FinderBarRightItem>& a,
+                    const std::vector<FinderBarRightItem>& b);
+
+// The frozen default for finderbar.right. C-31 (P5) freezes the key shape but not the
+// default value, so T-307 pins it here (ADR-0053): the clock alone, at position 0 =
+// hard against the right edge, which is where macOS puts it. Later tasks extend this
+// table in place - control_center=1, notification_center=2, tray_mirror=3, network=4,
+// battery=5, ime=6 (see bar_layout.h for the full convention). weather_brief stays
+// out of the default table; the user opts in with [{type:"weather_brief",order:1}].
+// An empty or missing finderbar.right falls back to this table.
+std::vector<FinderBarRightItem> DefaultFinderBarRightItems();
+
+// finderbar.clock.* (T-307, new keys - C-31 has no clock section, ADR-0053 records the
+// addition). Format-string semantics are the Windows format-picture grammar used by
+// GetTimeFormatEx/GetDateFormatEx, because that is exactly what LOCALE_SSHORTTIME and
+// LOCALE_SDATE return: the user can copy what their region shows and edit it, and the
+// follow-the-system default needs no parser at all.
+//
+// T-207 对接裁决（TASKS.md T-207「数字式格式串」，T-207 未实装，本注释即对接点）：
+//   * T-207 实装前：仅 finderbar.clock.* 生效（本结构是唯一数据源）。
+//   * T-207 实装后：themes/<name>/calendar.json 的同义视觉字段（字体/大小/颜色）覆盖
+//     finderbar.clock.*（主题优先，随主题分发）；行为字段（格式串/显隐日期/显隐秒）
+//     仍以 finderbar.clock.* 为准，主题只接管观感不接管行为。
+//   * 冲突细节（哪些键算"视觉"）以 T-207 实装时的 ADR 为准，本包不预设更多规则。
+struct FinderBarClockConfig {
+    // Empty = follow the system region (GetLocaleInfoEx LOCALE_SSHORTTIME).
+    // Non-empty = a GetTimeFormatEx format picture, e.g. "HH:mm:ss" or "h:mm tt".
+    // Clamped to 64 bytes; longer strings are rejected at parse time.
+    std::string format;
+    // macOS shows the date left of the time on the menu bar by default, so the
+    // default is true (ADR-0053). The date text uses LOCALE_SDATE as-is.
+    bool show_date = true;
+    // Appends ":ss" when the effective time picture lacks a seconds field, and
+    // strips it when the picture has one but the user asked seconds off.
+    bool show_seconds = false;
+};
+
 struct FinderBarConfig {
     // C-31 freezes the default as true, and that is safe here because the bar changes
     // no system behaviour: it does not reserve the work area (Q8 proved that is
@@ -190,6 +238,14 @@ struct FinderBarConfig {
     // fails at runtime (another appbar owns the edge, the shell refuses), the bar sets
     // this true on itself rather than sitting on top of every title bar.
     bool auto_hide = false;
+    // C-31: the right-region widget table. The default IS the frozen default table
+    // (clock at 0) - not an empty vector, because an empty right region would blank
+    // the clock and break the quiet-file invariant that SerializeConfig(Config{})
+    // writes no finderbar key at all. See bar_layout.h for the order semantics; the
+    // renderer skips types whose widget task has not landed yet.
+    std::vector<FinderBarRightItem> right = DefaultFinderBarRightItems();
+    // T-207 对接点：见 FinderBarClockConfig 的注释（本包即写入处，ADR-0053）。
+    FinderBarClockConfig clock;
 };
 
 bool SameFinderBar(const FinderBarConfig& a, const FinderBarConfig& b);

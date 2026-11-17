@@ -68,6 +68,7 @@
 #include <windowsx.h>
 
 #include <cmath>
+#include <algorithm>
 #include <functional>
 #include <optional>
 #include <map>
@@ -972,7 +973,18 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     dock::weather::Host weather_host;
     dock::weather::Snapshot weather_snapshot;  // failed/invalid until the first fetch lands
     bool weather_host_started = false;
-    if (weather_tile_index() >= 0) {
+    // T-307: the Finder Bar's weather_brief entry shares the T-075 snapshot chain. The
+    // host already publishes immutable copies once per frame; the bar only ever
+    // receives one of those copies. No new provider here - open-meteo is the only
+    // implemented chain (T-075 honest boundary), so without it the bar's entry shows
+    // the same placeholder the dock tile does.
+    const bool finderbar_wants_weather =
+        std::any_of(config.finderbar.right.begin(), config.finderbar.right.end(),
+                    [](const core::FinderBarRightItem& item) {
+                        return item.type == "weather_brief";
+                    });
+    if (weather_tile_index() >= 0 ||
+        (finderbar_wants_weather && config.weather.enabled && !config.weather.city.empty())) {
         // Keyed-provider entry point (DoD 1): the AMap key is read from
         // secrets.json only - never from config.json, never logged, never
         // stored anywhere else. With a key present the provider stays
@@ -2051,6 +2063,16 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
             const bool opened = finder_bar.OpenMenuForBox(static_cast<std::size_t>(
                 index < 0 ? 0 : index));
             DF_INFO("finderbar", "probe menu index=%d opened=%d", index, opened ? 1 : 0);
+        } else if (command == "calendar") {
+            // T-307: opens the clock's month calendar through the same code path a real
+            // click takes. A probe cannot drive a foreground-claiming panel with
+            // synthetic mouse events reliably; this mirrors OpenMenuForBox's precedent.
+            const bool opened = finder_bar.OpenCalendarPanel();
+            DF_INFO("finderbar", "probe calendar opened=%d", opened ? 1 : 0);
+        } else if (command == "weather") {
+            // T-307: opens the 3-day forecast under the weather_brief box, same rule.
+            const bool opened = finder_bar.OpenWeatherPopup();
+            DF_INFO("finderbar", "probe weather opened=%d", opened ? 1 : 0);
         } else if (command == "cancel") {
             // The menu is modal on its own thread; a probe that opened one has to be
             // able to close it, or every later command waits behind a stuck popup.
@@ -3107,7 +3129,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         // here, and a published snapshot is adopted at most once per frame.
         // The fetch itself is on the host's worker thread; this branch only
         // ever copies - the C-04b capture rule (no pointers across threads).
-        if (weather_host_started && weather_tile_index() >= 0) {
+        // T-307: the Finder Bar's weather_brief entry consumes the same chain, so the
+        // tick condition widens from "the dock tile exists" to "any surface renders
+        // weather".
+        if (weather_host_started &&
+            (weather_tile_index() >= 0 ||
+             (finder_bar_ready && finder_bar.WantsWeatherSnapshot()))) {
             if (weather_host.Tick(delta_ms, weather_snapshot)) {
                 if (weather_snapshot.failed) {
                     DF_WARN("weather", "refresh failed: %s (showing placeholder)",
@@ -3147,6 +3174,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                                        window.Dpi());
                 }
             }
+        }
+        // T-307: the Finder Bar's weather_brief renders the same snapshot chain. A
+        // copy per changed frame, never a pointer (C-04b), and only when the bar
+        // actually configured the entry.
+        if (finder_bar_ready && finder_bar.WantsWeatherSnapshot()) {
+            finder_bar.SetWeatherSnapshot(weather_snapshot);
         }
         // The weather preview follows the hover, not a timer: the pointer
         // leaving the dock (or moving to another tile) dismisses it on the

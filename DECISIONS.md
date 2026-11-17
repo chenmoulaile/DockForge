@@ -851,3 +851,13 @@ P1/P2 阶段的任务书假设本项目是 WinUI 3 + Windows App SDK 应用，�
 - **原因**：这个仓库里所有发布者都先把新值写进 `config` 再 `bus.Publish(core::ConfigChanged{config})`（热重载是 `config = std::move(next)`，托盘处理器与热键分支是 `config = updated`）。所以订阅者里写 `if (config.x == event.config.x) return;` 永远命中，改动被静默丢弃。
 - **真实后果**：第一版就是这么写的，结果「config 说 hidden 而 dock 仍在屏幕上」，且「热重载后 auto_hide 被接受但永远到不了栏」。两个都是探针抓出来的，不是看出来的。
 - **同类陷阱**：「先清标志再读标志」（T-301 的 `foreground_dirty_`）。两者都属于「状态写在读之前」，都是静默失效，都只能靠端到端探针发现。
+
+## ADR-0053 · finderbar.clock.* 与 finderbar.right 默认表新增字段（T-307）
+- **决策**：C-31（P5 冻结）只冻结了 `finderbar.right` 的键形（`[{type,order}]`）而未给默认值，也没有 clock 子键。T-307 按仓库「冻结契约只能加字段并记 ADR」的规则新增三件事，语义全部冻结在本条：
+  1. **新配置键 `finderbar.clock.format / show_date / show_seconds`**（`config.h` `FinderBarClockConfig`）。默认：format 空、show_date=true、show_seconds=false（macOS 菜单栏默认显示日期、不显示秒）。
+  2. **`finderbar.right` 默认表 `[{type:"clock",order:0}]`**（`config.cpp` `DefaultFinderBarRightItems()`）。空配置（键缺失或显式 `[]`）回退默认表——空右区会让时钟消失，而 C-31 默认表存在的意义就是让最小配置文件仍然读起来像 macOS 菜单栏。
+  3. **`order` 语义**：从右往左的位次，0 = 最右（时钟贴 macOS 菜单栏最右端）。后续包插入约定固定为 control_center=1、notification_center=2、tray_mirror=3、network=4、battery=5、ime=6（macOS 观感序：时钟←控制中心←通知←托盘镜像←状态图标群）；weather_brief 默认不进表，用户配 `[{type:"weather_brief",order:1}]` 时显示在时钟左侧。同 order 冲突按 type 枚举序（C-31 声明序）稳定排序，序值小者靠右。全部注释冻结在 `bar_layout.h`。
+- **格式串语法**：Windows format picture（`GetTimeFormatEx`/`GetDateFormatEx` 的格式图纸语法）。选它而不是 strftime/.NET 语法的原因：`LOCALE_SSHORTTIME`/`LOCALE_SDATE` 返回的就是这种图纸，「跟随系统区域」默认值因此零解析成本，用户把自己区域图纸抄出来改一改就能用。`show_seconds` 只作用于 format 为空的「跟随系统区域」默认图纸（`:ss` 插在 AM/PM 设计符与它前面的空格之前；含秒图纸被要求关秒时剥掉 s token 与相邻分隔符）；format 非空时它完全接管时间形态，show_seconds 不二次改写。
+- **T-207 对接裁决**（TASKS.md T-207「数字式格式串」，T-207 未实装）：T-207 实装前仅 `finderbar.clock.*` 生效；实装后 `themes/<name>/calendar.json` 的同义视觉字段（字体/大小/颜色）覆盖 `finderbar.clock.*`（主题优先，随主题分发），行为字段（格式串/显隐日期/显隐秒）仍以 `finderbar.clock.*` 为准。冲突细节以 T-207 实装时的 ADR 为准，本包不预设更多规则。对接点注释同时写在 `config.h` `FinderBarClockConfig` 与 `finder_bar.h` `FormatBarClock`。
+- **未注册类型跳过**：本包只注册 `clock` / `weather_brief` 渲染器（`bar_layout.cpp` `RightTypeRegistered`）；`tray_mirror`/`control_center`/`notification_center`/`ime`/`battery`/`network` 六种未注册类型在布局层直接跳过，不画空占位（为不存在的控件预留空间是 T-301 明确避免过的可见 bug）。配置文件保留未注册 type 字符串不清洗（C-01：不丢用户数据），T-303..T-306 落地时只改 `RightTypeRegistered` 一处。
+- **日历面板材质**：`calendar_panel.{h,cpp}` 用 `WS_EX_NOREDIRECTIONBITMAP` + DComp 自绘 Solid 板（ADR-0008 自绘 tint、ADR-0045 不排除截图的同款理由——面板挂在桌面顶部，capture-exclude 档会让它从所有截图中消失，包括本任务的取证截图）。度量取 Beautiful `NotificationCenterWindow.xaml`：面板 360×640 DIP、根圆角 12、内容卡圆角 10、今日蓝圈（Apple systemBlue：浅 #007AFF / 深 #0A84FF），颜色 token 对照 Beautiful `MacTokens.cs` 深/浅两套；仅取参数与度量，代码自绘（ASSETS.md）。

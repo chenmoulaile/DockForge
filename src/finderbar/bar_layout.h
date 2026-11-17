@@ -11,14 +11,17 @@
 //   [apple] [AppName]  [File] [Edit] [View] .......... [status]
 //   ^------------- left group, owned by this task ----------^
 //
-// The trailing status group belongs to T-302..T-307. This module only reports where
-// it starts, so the centre can be added later without re-deriving the left side.
+// The trailing status group is the right region (T-307, `finderbar.right`): its
+// layout function lives in this file too, so both halves of the bar stay pure
+// arithmetic and the width the right region occupies flows into the left group's
+// usable-space computation through BarLayoutParams::status_width_dip.
 #pragma once
 
 #include "platform/win_common.h"
 #include "render/backend.h"
 
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -179,5 +182,151 @@ float AutoHideOffsetDip(const AutoHideState& state, float height_dip);
 // visible part is a hairline the user is aiming at, and eating that click is the
 // difference between "the bar is there" and "the desktop is broken".
 bool AutoHideInteractive(const AutoHideState& state);
+
+// ---------------------------------------------------------------------------
+// Right group (T-307, CONTRACTS.md C-31 `finderbar.right`).
+//
+// The right region is a second row of DIP-space boxes laid out from the RIGHT edge
+// inwards. C-31 enumerates eight widget types:
+//
+//   tray_mirror, control_center, notification_center, ime, battery, network, clock,
+//   weather_brief
+//
+// which is exactly the order the enum below keeps: C-31 declares the type set, and
+// (per the T-307 spec) two entries that claim the same `order` are ordered by that
+// declaration sequence, so the rendered result is deterministic no matter how the
+// user wrote their file.
+//
+// ORDER SEMANTICS (frozen wording, also recorded in DECISIONS.md ADR-0053):
+//
+//   `order` is a position counted FROM THE RIGHT EDGE. 0 = rightmost. The default
+//   table is [{type:clock,order:0}] - the clock sits hard against the right edge,
+//   which is where macOS puts its clock.
+//
+//   Insertion convention for the later tasks (T-303..T-306), so every task writes
+//   the same defaults without re-deriving them:
+//
+//     control_center       = 1
+//     notification_center  = 2
+//     tray_mirror          = 3
+//     network              = 4
+//     battery              = 5
+//     ime                  = 6
+//
+//   i.e. the macOS reading order, left to right: clock <- control center <-
+//   notifications <- tray mirror <- status icons. weather_brief stays OUT of the
+//   default table; a user who wants it writes [{type:"weather_brief",order:1}] and
+//   it appears to the LEFT of the clock. A type claiming an order outside 0..6
+//   still lays out - the convention pins only the defaults, not the range.
+//
+//   Same-order conflicts: the entry whose type comes first in C-31's declaration
+//   sequence (lower enum value) is placed further RIGHT. Ties therefore resolve as
+//   if the file had listed them in declaration order - deterministic, and stable
+//   under std::stable_sort semantics for equal (order, type) pairs.
+//
+// Not every type is renderable yet. Registration is explicit so a type whose task
+// has not landed is SKIPPED, never drawn as an empty placeholder slot: a gap for a
+// widget that does not exist is exactly the "reserved for nothing" damage T-301's
+// status area avoided. Later tasks flip their type to registered here and nowhere
+// else.
+// ---------------------------------------------------------------------------
+
+enum class RightType {
+    TrayMirror = 0,        // T-303
+    ControlCenter,         // T-304
+    NotificationCenter,    // T-305
+    Ime,                   // T-306
+    Battery,               // T-306
+    Network,               // T-306
+    Clock,                 // T-307
+    WeatherBrief,          // T-307
+};
+
+// The C-31 spelling of each type ("clock", "weather_brief", ...). Declaration order,
+// so a caller can iterate [0, Count) to enumerate in C-31 order.
+constexpr int kRightTypeCount = 8;
+const wchar_t* RightTypeName(int type_index);
+std::optional<RightType> RightTypeFromName(const wchar_t* name);
+
+// True when a renderer exists for this type in the current build. T-307 registers
+// exactly Clock and WeatherBrief; the other six flip when their tasks land.
+bool RightTypeRegistered(RightType type);
+
+// One right-region entry, already rendered into its display form. The layout is a
+// pure function over these: a renderer (finder_bar.cpp) produces the text/icon flags
+// from live state, the layout only positions. An entry with neither icon nor text
+// still gets a box (an icon-only entry carries its glyph in the painter); a caller
+// that wants a type skipped filters it out before calling, which is what
+// RightTypeRegistered is for.
+struct RightItem {
+    RightType type = RightType::Clock;
+    int order = 0;          // 0 = rightmost (see the block comment above)
+    std::wstring text;      // display text drawn at 13 DIP; empty = no text
+    bool has_icon = false;  // draw a 16 DIP square glyph box (kRightIconBoxDip)
+};
+
+// One laid-out right-region box. Like BarBox, the box spans the full bar height so
+// the whole row is clickable; `icon` is the inner glyph square, valid when
+// has_icon, vertically centred.
+struct RightBox {
+    render::RectF rect{};
+    RightType type = RightType::Clock;
+    std::wstring text;
+    bool has_icon = false;
+    render::RectF icon{};
+};
+
+struct RightGroupSummary {
+    // Width the right group occupies from the right edge inwards, NOT counting
+    // kTrailingInsetDip (LayoutBar subtracts that itself). Feed this straight into
+    // BarLayoutParams::status_width_dip so the left group can never run under it.
+    float total_width_dip = 0.0f;
+    std::size_t placed = 0;
+    // Entries dropped because their width did not fit between the left group and the
+    // leading edge. Reported, not hidden - same honesty rule as BarLayoutSummary.
+    std::size_t dropped = 0;
+};
+
+// Lays out the right group from the right edge inwards and reports its total width.
+//
+// `items` are sorted by (order ascending, type ascending) with a stable sort, placed
+// from the right edge (width_dip - kTrailingInsetDip) leftwards with
+// kRightItemGapDip between boxes, and returned in left-to-right order so a paint loop
+// and the hit test read naturally. An entry wider than the free space left of the
+// left group is dropped and counted in `dropped` rather than drawn overlapping.
+//
+// Writes at most `capacity` boxes into `out` and returns how many were written.
+std::size_t LayoutRightGroup(const RightItem* items, std::size_t count, float width_dip,
+                             float height_dip, MeasureFn measure, RightBox* out,
+                             std::size_t capacity, RightGroupSummary* summary);
+
+// Convenience overload for callers that want a vector.
+std::vector<RightBox> LayoutRightGroup(const std::vector<RightItem>& items, float width_dip,
+                                       float height_dip, MeasureFn measure,
+                                       RightGroupSummary* summary);
+
+// Index of the right-region box containing the point, or kNoMenu. Same half-open
+// scan as BoxIndexAt so no point ever matches two boxes.
+std::size_t RightBoxIndexAt(const RightBox* boxes, std::size_t count, float x_dip, float y_dip);
+
+// Gap between adjacent right-region boxes. macOS spaces its status items at roughly
+// one icon width; 12 DIP matches kSystemMenuGapDip, keeping one rhythm across the
+// bar instead of two.
+constexpr float kRightItemGapDip = 12.0f;
+
+// Side padding of a right-region box around its content. Text-only entries (the
+// clock) and icon entries share it, so a hover highlight has equal breathing room
+// on both shapes.
+constexpr float kRightContentPaddingDip = 6.0f;
+
+// Inner square that carries a widget glyph, 16 DIP on a side: the same raster family
+// as kSystemMenuGlyphDip (14 DIP) - one notch larger because status icons sit next to
+// 13 DIP text, and 14 would read small against it. Beautiful's top bar uses 16x16
+// status images for the same reason (TopBarWindow.xaml.cs NewStatusImage).
+constexpr float kRightIconBoxDip = 16.0f;
+
+// Gap between a glyph box and its text inside one entry (weather_brief: glyph +
+// temperature).
+constexpr float kRightIconTextGapDip = 4.0f;
 
 }  // namespace dockforge::finderbar

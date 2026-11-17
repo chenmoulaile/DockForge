@@ -397,3 +397,402 @@ TEST_CASE("T-301 bar: a null measurer falls back to the approximation") {
     REQUIRE(boxes.size() == 3);
     CHECK(boxes[2].rect.Width() > 0.0f);
 }
+
+// ---------------------------------------------------------------------------
+// T-307: the right region, the clock format and the config default table.
+// ---------------------------------------------------------------------------
+
+#include "core/config.h"
+#include "finderbar/calendar_panel.h"
+#include "finderbar/finder_bar.h"
+
+#include <string>
+#include <vector>
+
+namespace {
+
+using dockforge::finderbar::RightItem;
+using dockforge::finderbar::RightType;
+
+// Builds one right-region entry with a text of a known fake width.
+RightItem Item(RightType type, int order, const std::wstring& text, bool icon = false) {
+    RightItem item;
+    item.type = type;
+    item.order = order;
+    item.text = text;
+    item.has_icon = icon;
+    return item;
+}
+
+}  // namespace
+
+TEST_CASE("T-307 right: a single clock sits hard against the right edge at order 0") {
+    // The default table is [{clock, 0}] and the spec freezes 0 = rightmost.
+    std::vector<RightItem> items = {Item(RightType::Clock, 0, L"17:27")};
+    dockforge::finderbar::RightGroupSummary summary;
+    const auto boxes =
+        dockforge::finderbar::LayoutRightGroup(items, 1200.0f, 28.0f, &FixedWidth, &summary);
+
+    REQUIRE(boxes.size() == 1);
+    // Width: 2 * 6 DIP padding + 5 chars * 13 DIP * 0.5 = 12 + 32.5 = 44.5.
+    const float expected_width =
+        2.0f * dockforge::finderbar::kRightContentPaddingDip + 5.0f * 13.0f * 0.5f;
+    CHECK(boxes[0].rect.Width() == expected_width);
+    // Right edge lands exactly on width - kTrailingInsetDip; 0 = rightmost means the
+    // box's right edge is the group's right edge, never a gap further in.
+    CHECK(boxes[0].rect.right == 1200.0f - dockforge::finderbar::kTrailingInsetDip);
+    CHECK(boxes[0].rect.left == boxes[0].rect.right - expected_width);
+    // The summary is what LayoutBar's status_width_dip consumes (DoD: no longer 0).
+    CHECK(summary.total_width_dip == expected_width);
+    CHECK(summary.placed == 1);
+    CHECK(summary.dropped == 0);
+    // Full bar height, like every left-group box.
+    CHECK(boxes[0].rect.top == 0.0f);
+    CHECK(boxes[0].rect.bottom == 28.0f);
+}
+
+TEST_CASE("T-307 right: order counts from the right edge, so 1 lands left of 0") {
+    // The documented insertion convention: weather_brief at order 1 shows on the
+    // LEFT of the clock at order 0.
+    std::vector<RightItem> items = {Item(RightType::Clock, 0, L"17:27"),
+                                    Item(RightType::WeatherBrief, 1, L"23\u00B0", true)};
+    dockforge::finderbar::RightGroupSummary summary;
+    const auto boxes =
+        dockforge::finderbar::LayoutRightGroup(items, 1200.0f, 28.0f, &FixedWidth, &summary);
+    REQUIRE(boxes.size() == 2);
+    CHECK(boxes[1].type == RightType::Clock);  // rightmost in left-to-right order
+    CHECK(boxes[0].type == RightType::WeatherBrief);
+    CHECK(boxes[0].rect.right < boxes[1].rect.left);  // weather sits left of the clock
+    // Exactly one gap between them.
+    CHECK(boxes[1].rect.left - boxes[0].rect.right == dockforge::finderbar::kRightItemGapDip);
+}
+
+TEST_CASE("T-307 right: the insertion convention yields the macOS reading order") {
+    // Full default plan (later tasks extend the default table to this): the sequence
+    // from the right edge reads clock <- control_center <- notification_center <-
+    // tray_mirror <- network <- battery <- ime.
+    std::vector<RightItem> items = {
+        Item(RightType::Ime, 6, L"EN"),
+        Item(RightType::Battery, 5, L"87%"),
+        Item(RightType::Network, 4, L""),
+        Item(RightType::TrayMirror, 3, L""),
+        Item(RightType::NotificationCenter, 2, L""),
+        Item(RightType::ControlCenter, 1, L""),
+        Item(RightType::Clock, 0, L"17:27"),
+    };
+    dockforge::finderbar::RightGroupSummary summary;
+    const auto boxes =
+        dockforge::finderbar::LayoutRightGroup(items, 2400.0f, 28.0f, &FixedWidth, &summary);
+    REQUIRE(boxes.size() == 7);
+    // Left-to-right output: ime, battery, network, tray, notification, control, clock.
+    CHECK(boxes[0].type == RightType::Ime);
+    CHECK(boxes[1].type == RightType::Battery);
+    CHECK(boxes[2].type == RightType::Network);
+    CHECK(boxes[3].type == RightType::TrayMirror);
+    CHECK(boxes[4].type == RightType::NotificationCenter);
+    CHECK(boxes[5].type == RightType::ControlCenter);
+    CHECK(boxes[6].type == RightType::Clock);
+    // The clock is still hard against the right edge.
+    CHECK(boxes[6].rect.right == 2400.0f - dockforge::finderbar::kTrailingInsetDip);
+    // Every box advances strictly rightwards with one gap between neighbours.
+    for (std::size_t i = 1; i < boxes.size(); ++i) {
+        CHECK(boxes[i].rect.left - boxes[i - 1].rect.right ==
+              dockforge::finderbar::kRightItemGapDip);
+    }
+}
+
+TEST_CASE("T-307 right: same-order conflicts resolve by the C-31 declaration order") {
+    // clock (declared 7th, enum 6) vs weather_brief (declared 8th, enum 7) at the same
+    // order: the earlier declaration goes further RIGHT, deterministically.
+    std::vector<RightItem> items = {Item(RightType::WeatherBrief, 0, L"23\u00B0", true),
+                                    Item(RightType::Clock, 0, L"17:27")};
+    dockforge::finderbar::RightGroupSummary summary;
+    const auto boxes =
+        dockforge::finderbar::LayoutRightGroup(items, 1200.0f, 28.0f, &FixedWidth, &summary);
+    REQUIRE(boxes.size() == 2);
+    CHECK(boxes[1].type == RightType::Clock);  // earlier in C-31's list -> right
+    CHECK(boxes[0].type == RightType::WeatherBrief);
+}
+
+TEST_CASE("T-307 right: unregistered types are skipped, never drawn as placeholders") {
+    // The ask's rule: this task registers exactly clock and weather_brief; the other
+    // six wait for T-303..T-306 and cost no box, no gap, no width.
+    CHECK(dockforge::finderbar::RightTypeRegistered(RightType::Clock));
+    CHECK(dockforge::finderbar::RightTypeRegistered(RightType::WeatherBrief));
+    CHECK_FALSE(dockforge::finderbar::RightTypeRegistered(RightType::TrayMirror));
+    CHECK_FALSE(dockforge::finderbar::RightTypeRegistered(RightType::ControlCenter));
+    CHECK_FALSE(dockforge::finderbar::RightTypeRegistered(RightType::NotificationCenter));
+    CHECK_FALSE(dockforge::finderbar::RightTypeRegistered(RightType::Ime));
+    CHECK_FALSE(dockforge::finderbar::RightTypeRegistered(RightType::Battery));
+    CHECK_FALSE(dockforge::finderbar::RightTypeRegistered(RightType::Network));
+
+    // An entry that no renderer produced (a caller filtered it out before layout)
+    // must also be invisible here - layout sees only what it is given.
+    std::vector<RightItem> items = {Item(RightType::Clock, 0, L"17:27")};
+    dockforge::finderbar::RightGroupSummary summary;
+    const auto boxes =
+        dockforge::finderbar::LayoutRightGroup(items, 1200.0f, 28.0f, &FixedWidth, &summary);
+    REQUIRE(boxes.size() == 1);
+    CHECK(boxes[0].type == RightType::Clock);
+}
+
+TEST_CASE("T-307 right: the type names round-trip through the C-31 spellings") {
+    using dockforge::finderbar::RightTypeFromName;
+    using dockforge::finderbar::RightTypeName;
+    for (int i = 0; i < dockforge::finderbar::kRightTypeCount; ++i) {
+        const auto parsed = RightTypeFromName(RightTypeName(i));
+        REQUIRE(parsed.has_value());
+        CHECK(static_cast<int>(*parsed) == i);
+    }
+    CHECK_FALSE(RightTypeFromName(L"widget").has_value());
+    CHECK_FALSE(RightTypeFromName(L"").has_value());
+    CHECK_FALSE(RightTypeFromName(nullptr).has_value());
+}
+
+TEST_CASE("T-307 right: an entry that crosses the left edge is dropped, not squeezed") {
+    // One clock on a bar too narrow to hold it: the box is refused and reported.
+    std::vector<RightItem> items = {Item(RightType::Clock, 0, L"17:27")};
+    dockforge::finderbar::RightGroupSummary summary;
+    const auto boxes =
+        dockforge::finderbar::LayoutRightGroup(items, 30.0f, 28.0f, &FixedWidth, &summary);
+    CHECK(boxes.empty());
+    CHECK(summary.dropped == 1);
+    CHECK(summary.placed == 0);
+    // Nothing placed means nothing reserved: the left group gets the whole bar back.
+    CHECK(summary.total_width_dip == 0.0f);
+}
+
+TEST_CASE("T-307 right: hit testing finds the clock and nothing outside it") {
+    std::vector<RightItem> items = {Item(RightType::Clock, 0, L"17:27")};
+    dockforge::finderbar::RightGroupSummary summary;
+    const auto boxes =
+        dockforge::finderbar::LayoutRightGroup(items, 1200.0f, 28.0f, &FixedWidth, &summary);
+    REQUIRE(boxes.size() == 1);
+    CHECK(dockforge::finderbar::RightBoxIndexAt(boxes.data(), boxes.size(),
+                                                boxes[0].rect.CenterX(), 14.0f) == 0);
+    // Outside the box (in the gap, above, below, left) is nobody's.
+    CHECK(dockforge::finderbar::RightBoxIndexAt(boxes.data(), boxes.size(), boxes[0].rect.right,
+                                                14.0f) == kNoMenu);
+    CHECK(dockforge::finderbar::RightBoxIndexAt(boxes.data(), boxes.size(),
+                                                boxes[0].rect.CenterX(), 40.0f) == kNoMenu);
+}
+
+TEST_CASE("T-307 clock: the default follows the injected region pictures") {
+    // Production passes the LOCALE_SSHORTTIME / LOCALE_SDATE lookups; a test pins
+    // them so the host machine's region cannot leak in.
+    dockforge::core::FinderBarClockConfig clock;  // format empty, show_date true, seconds off
+    SYSTEMTIME now{};                             // 2026-11-18 (a Wednesday) 17:27:56
+    now.wYear = 2026;
+    now.wMonth = 11;
+    now.wDay = 18;
+    now.wHour = 17;
+    now.wMinute = 27;
+    now.wSecond = 56;
+
+    const dockforge::finderbar::BarClockText parts =
+        dockforge::finderbar::FormatBarClock(now, clock, L"HH:mm", L"yyyy/MM/dd");
+    CHECK(parts.time == L"17:27");
+    CHECK(parts.date == L"2026/11/18");
+    CHECK(dockforge::finderbar::FormatBarClockText(now, clock, L"HH:mm", L"yyyy/MM/dd") ==
+          L"2026/11/18 17:27");
+}
+
+TEST_CASE("T-307 clock: a custom format string wins over the region picture") {
+    dockforge::core::FinderBarClockConfig clock;
+    clock.format = "HH:mm:ss";  // explicit seconds
+    clock.show_date = false;
+    SYSTEMTIME now{};
+    now.wYear = 2026;
+    now.wMonth = 11;
+    now.wDay = 18;
+    now.wHour = 17;
+    now.wMinute = 27;
+    now.wSecond = 56;
+    CHECK(dockforge::finderbar::FormatBarClockText(now, clock, L"HH:mm", L"yyyy/MM/dd") ==
+          L"17:27:56");
+}
+
+TEST_CASE("T-307 clock: show_seconds can add and remove seconds over the picture") {
+    dockforge::core::FinderBarClockConfig on;
+    on.show_seconds = true;  // picture "HH:mm" gains ":ss"
+    on.show_date = false;
+    dockforge::core::FinderBarClockConfig off;  // picture "HH:mm:ss" loses its seconds
+    off.show_date = false;
+    SYSTEMTIME now{};
+    now.wYear = 2026;
+    now.wMonth = 11;
+    now.wDay = 18;
+    now.wHour = 17;
+    now.wMinute = 27;
+    now.wSecond = 56;
+    CHECK(dockforge::finderbar::FormatBarClockText(now, on, L"HH:mm", L"yyyy/MM/dd") ==
+          L"17:27:56");
+    CHECK(dockforge::finderbar::FormatBarClockText(now, off, L"HH:mm:ss", L"yyyy/MM/dd") ==
+          L"17:27");
+    // The seconds insert BEFORE an AM/PM designator, never after it. The designator's
+    // own text is locale-dependent ("PM" / "下午"), so the assertion pins the numeric
+    // prefix only: whatever the region calls it, the seconds come first.
+    dockforge::core::FinderBarClockConfig meridiem;
+    meridiem.show_seconds = true;
+    meridiem.show_date = false;
+    const std::wstring text =
+        dockforge::finderbar::FormatBarClockText(now, meridiem, L"h:mm tt", L"yyyy/MM/dd");
+    CHECK(text.rfind(L"5:27:56", 0) == 0);
+    CHECK(text.size() > std::wstring(L"5:27:56").size());  // the designator is still there
+}
+
+TEST_CASE("T-307 clock: show_date off removes the date part entirely") {
+    dockforge::core::FinderBarClockConfig clock;
+    clock.show_date = false;
+    SYSTEMTIME now{};
+    now.wYear = 2026;
+    now.wMonth = 11;
+    now.wDay = 18;
+    now.wHour = 17;
+    now.wMinute = 27;
+    CHECK(dockforge::finderbar::FormatBarClockText(now, clock, L"HH:mm", L"yyyy/MM/dd") ==
+          L"17:27");
+}
+
+TEST_CASE("T-307 config: an empty right table falls back to the frozen default") {
+    // The frozen default (ADR-0053): [{type:clock, order:0}].
+    dockforge::core::Config config;
+    std::string error;
+    REQUIRE(dockforge::core::ParseConfig("{}", config, &error));
+    CHECK(error.empty());
+    REQUIRE(config.finderbar.right.size() == 1);
+    CHECK(config.finderbar.right[0].type == "clock");
+    CHECK(config.finderbar.right[0].order == 0);
+    CHECK(dockforge::core::SameRightItems(config.finderbar.right,
+                                          dockforge::core::DefaultFinderBarRightItems()));
+
+    // An explicit empty array falls back too (the spec's "empty config" rule).
+    dockforge::core::Config empty_table;
+    REQUIRE(dockforge::core::ParseConfig("{\"finderbar\":{\"right\":[]}}", empty_table, &error));
+    CHECK(dockforge::core::SameRightItems(empty_table.finderbar.right,
+                                          dockforge::core::DefaultFinderBarRightItems()));
+}
+
+TEST_CASE("T-307 config: finderbar.right and finderbar.clock round-trip") {
+    // A table referencing a not-yet-registered type must survive untouched (C-01:
+    // never drop user data) - T-303..T-306 will find it already in the file.
+    const std::string json =
+        "{\"finderbar\":{\"right\":[{\"type\":\"clock\",\"order\":0},"
+        "{\"type\":\"weather_brief\",\"order\":1},{\"type\":\"control_center\",\"order\":2}],"
+        "\"clock\":{\"format\":\"HH:mm:ss\",\"show_date\":false,\"show_seconds\":true}}}";
+    dockforge::core::Config config;
+    std::string error;
+    REQUIRE(dockforge::core::ParseConfig(json, config, &error));
+    REQUIRE(config.finderbar.right.size() == 3);
+    CHECK(config.finderbar.right[0].type == "clock");
+    CHECK(config.finderbar.right[0].order == 0);
+    CHECK(config.finderbar.right[1].type == "weather_brief");
+    CHECK(config.finderbar.right[1].order == 1);
+    CHECK(config.finderbar.right[2].type == "control_center");
+    CHECK(config.finderbar.right[2].order == 2);
+    CHECK(config.finderbar.clock.format == "HH:mm:ss");
+    CHECK_FALSE(config.finderbar.clock.show_date);
+    CHECK(config.finderbar.clock.show_seconds);
+
+    // Serialize -> parse again: the exact table comes back, including the unknown
+    // type string.
+    dockforge::core::Config round_trip;
+    REQUIRE(dockforge::core::ParseConfig(dockforge::core::SerializeConfig(config), round_trip,
+                                         &error));
+    CHECK(dockforge::core::SameRightItems(round_trip.finderbar.right, config.finderbar.right));
+    CHECK(round_trip.finderbar.clock.format == config.finderbar.clock.format);
+    CHECK(round_trip.finderbar.clock.show_date == config.finderbar.clock.show_date);
+    CHECK(round_trip.finderbar.clock.show_seconds == config.finderbar.clock.show_seconds);
+}
+
+TEST_CASE("T-307 config: default finderbar values write no finderbar key at all") {
+    // The C-01 quiet-file rule the T-301 section established; the T-307 keys obey it.
+    dockforge::core::Config config;
+    std::string error;
+    REQUIRE(dockforge::core::ParseConfig("{}", config, &error));
+    const std::string serialized = dockforge::core::SerializeConfig(config);
+    CHECK(serialized.find("\"finderbar\"") == std::string::npos);
+    // ...but a single clock tweak brings exactly the changed fields back.
+    config.finderbar.clock.show_seconds = true;
+    const std::string tweaked = dockforge::core::SerializeConfig(config);
+    CHECK(tweaked.find("\"finderbar\"") != std::string::npos);
+    CHECK(tweaked.find("\"show_seconds\": true") != std::string::npos);
+    CHECK(tweaked.find("\"right\"") == std::string::npos);  // still the default table
+}
+
+TEST_CASE("T-307 calendar grid: month arithmetic is exact and locale-free") {
+    using dockforge::finderbar::CalendarGrid;
+    // November 2026: the 1st is a Sunday, so with a Sunday-first grid the first day
+    // lands in column 0 and 30 days fill rows one to five.
+    CalendarGrid grid = CalendarGrid::Compute(2026, 11, 0, 2026, 11, 18);
+    REQUIRE(grid.cells.size() == 42);
+    CHECK(grid.first_day_col == 0);
+    CHECK(grid.cells[0].day == 1);
+    CHECK(grid.cells[0].in_month);
+    CHECK(grid.cells[17].day == 18);  // index == day - 1 only because col == 0
+    CHECK(grid.cells[17].is_today);
+    CHECK(grid.cells[29].day == 30);
+    CHECK(grid.cells[30].day == 1);  // December 1st trails
+    CHECK_FALSE(grid.cells[30].in_month);
+
+    // February 2026 (28 days) with Monday first: the 1st is a Sunday, so it lands in
+    // column 6 after a six-cell leading run of January days.
+    CalendarGrid feb = CalendarGrid::Compute(2026, 2, 1, 2026, 11, 18);
+    CHECK(feb.first_day_col == 6);
+    CHECK(feb.cells[0].day == 26);  // January 26th leads
+    CHECK_FALSE(feb.cells[0].in_month);
+    CHECK(feb.cells[6].day == 1);
+    CHECK(feb.cells[33].day == 28);
+    CHECK(feb.cells[34].day == 1);  // March trails
+
+    // Leap year: February 2024 has 29 days. The 1st is a Thursday, so it sits in
+    // column 4 and the 29th lands at index 4 + 28 = 32.
+    CalendarGrid leap = CalendarGrid::Compute(2024, 2, 0, 2024, 2, 29);
+    CHECK(leap.first_day_col == 4);  // 2024-02-01 is a Thursday
+    CHECK(leap.cells[32].day == 29);
+    CHECK(leap.cells[32].is_today);
+    CHECK(leap.cells[33].day == 1);  // March trails
+    CHECK_FALSE(leap.cells[33].in_month);
+
+    // Weekday spot checks through Sakamoto's method.
+    CHECK(CalendarGrid::WeekdayOf(2026, 11, 18) == 3);  // Wednesday
+    CHECK(CalendarGrid::WeekdayOf(2026, 11, 1) == 0);   // Sunday
+    CHECK(CalendarGrid::WeekdayOf(2000, 1, 1) == 6);    // Saturday
+    CHECK(CalendarGrid::WeekdayOf(2024, 2, 29) == 4);   // Thursday
+    CHECK(CalendarGrid::DaysInMonth(2024, 2) == 29);
+    CHECK(CalendarGrid::DaysInMonth(2026, 2) == 28);
+    CHECK(CalendarGrid::DaysInMonth(2026, 11) == 30);
+}
+
+TEST_CASE("T-307 calendar layout: hit test maps arrows and day cells") {
+    using dockforge::finderbar::CalendarPanelHit;
+    using dockforge::finderbar::CalendarPanelLayout;
+    const CalendarPanelLayout layout = CalendarPanelLayout::Compute();
+
+    // Arrow hot zones are 32 DIP squares at the card's inner edges.
+    const float arrow_y = layout.nav_top_dip + 16.0f;
+    CalendarPanelHit prev = layout.HitTest(layout.nav_left_dip + 8.0f, arrow_y, 42);
+    CHECK(prev.kind == CalendarPanelHit::Kind::PrevMonth);
+    CalendarPanelHit next = layout.HitTest(layout.nav_right_dip + 8.0f, arrow_y, 42);
+    CHECK(next.kind == CalendarPanelHit::Kind::NextMonth);
+
+    // The title strip between the arrows is inert.
+    CalendarPanelHit title = layout.HitTest(
+        layout.nav_left_dip + layout.nav_arrow_size_dip + 20.0f, arrow_y, 42);
+    CHECK(title.kind == CalendarPanelHit::Kind::None);
+
+    // The cell at the grid's exact centre is index 3*7+3 = 24.
+    CalendarPanelHit centre = layout.HitTest(
+        layout.grid_origin_x_dip + 3.5f * layout.cell_dip,
+        layout.grid_origin_y_dip + 3.5f * layout.cell_dip, 42);
+    REQUIRE(centre.kind == CalendarPanelHit::Kind::Day);
+    CHECK(centre.cell == 24);
+
+    // Below the grid and left of the grid are both nobody's.
+    CHECK(layout.HitTest(layout.grid_origin_x_dip - 1.0f,
+                         layout.grid_origin_y_dip + 2.0f * layout.cell_dip, 42)
+              .kind == CalendarPanelHit::Kind::None);
+    CHECK(layout.HitTest(layout.grid_origin_x_dip + 2.0f * layout.cell_dip,
+                         layout.grid_origin_y_dip + 6.5f * layout.cell_dip, 42)
+              .kind == CalendarPanelHit::Kind::None);
+}

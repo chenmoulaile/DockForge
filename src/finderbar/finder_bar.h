@@ -38,7 +38,10 @@
 #include <vector>
 
 #include "core/config.h"
+#include "dock/weather.h"
+#include "dock/weather_popup.h"
 #include "finderbar/bar_layout.h"
+#include "finderbar/calendar_panel.h"
 #include "platform/composition.h"
 #include "platform/display.h"
 #include "render/backend.h"
@@ -130,6 +133,41 @@ AppMenuSnapshot ReadAppMenu(HWND hwnd, int max_items);
 // the bar's numbers against the real text metrics.
 float MeasureBarText(const wchar_t* text, float size_dip);
 
+// ---------------------------------------------------------------------------
+// Right region, clock half (T-307, finderbar.clock.* - ADR-0053 records the new
+// config keys).
+//
+// Format-string grammar: Windows format pictures, the same grammar GetTimeFormatEx
+// and GetDateFormatEx speak and the very thing LOCALE_SSHORTTIME / LOCALE_SDATE
+// return. An empty finderbar.clock.format therefore follows the system region with
+// no parsing at all; a non-empty one is handed to GetTimeFormatEx verbatim.
+//
+// T-207 对接裁决（TASKS.md T-207「数字式格式串」；对接点注释在 config.h
+// FinderBarClockConfig，本函数是实现侧的镜像）：T-207 实装前仅 finderbar.clock.*
+// 生效；实装后 themes/<name>/calendar.json 的视觉字段（字体/大小/颜色）覆盖
+// finderbar.clock.*，行为字段（格式串/显隐日期/显隐秒）仍以 finderbar.clock.* 为准。
+// ---------------------------------------------------------------------------
+
+// One rendered clock label: `date` ("2026/11/18" per LOCALE_SDATE) and `time`
+// ("17:27" per LOCALE_SSHORTTIME or the user's picture). Either part may be empty
+// per the show_date flag; the caller joins them with a single space, date first -
+// macOS's menu bar reads "周六 11月18日 17:27".
+struct BarClockText {
+    std::wstring date;
+    std::wstring time;
+};
+
+// Renders the clock for `now`. `time_picture` / `date_picture` are injected so a test
+// pins the output without depending on the host machine's region (production passes
+// the LOCALE_SSHORTTIME / LOCALE_SDATE lookups). `show_seconds` adjusts the effective
+// time picture: ":ss" appended when missing and asked for, the seconds token removed
+// when present but not asked for - both flags must be able to win over what the
+// region happens to default to.
+BarClockText FormatBarClock(const SYSTEMTIME& now, const core::FinderBarClockConfig& clock,
+                            const wchar_t* time_picture, const wchar_t* date_picture);
+std::wstring FormatBarClockText(const SYSTEMTIME& now, const core::FinderBarClockConfig& clock,
+                                const wchar_t* time_picture, const wchar_t* date_picture);
+
 class FinderBar {
 public:
     FinderBar();
@@ -206,6 +244,29 @@ public:
     // probe returned true and the bar still saw Windows Terminal).
     void SetForegroundOverride(HWND hwnd);
 
+    // Pushes the weather snapshot the bar's weather_brief entry renders. The host lives
+    // in main.cpp and already ticks once per frame; the bar only ever receives copies
+    // (the C-04b rule - no pointers across threads, no callbacks into the bar).
+    void SetWeatherSnapshot(const dock::weather::Snapshot& snapshot);
+
+    // True while the configured right region contains a weather_brief entry - main.cpp
+    // reads this to decide whether the weather host must run for the bar at all.
+    bool WantsWeatherSnapshot() const;
+
+    // Opens the month calendar under the clock box, exactly as a click would. Public so
+    // the probe channel can drive the panel without synthetic mouse events (same
+    // precedent as OpenMenuForBox).
+    bool OpenCalendarPanel();
+    void CloseCalendarPanel();
+    bool CalendarPanelVisible() const { return calendar_panel_ && calendar_panel_->Visible(); }
+
+    // Opens the 3-day forecast under the weather_brief box, exactly as a click would.
+    // Probe-path mirror of OpenCalendarPanel: a probe cannot reliably drive a
+    // foreground-claiming surface with synthetic mouse events.
+    bool OpenWeatherPopup();
+
+    const std::vector<RightBox>& RightBoxes() const { return right_boxes_; }
+
     // One-line JSON for the probe channel. Everything a probe needs to assert on without a
     // screenshot.
     std::string SnapshotJson() const;
@@ -223,8 +284,11 @@ private:
     void OpenOverflowMenu(std::size_t box_index);
     void HandleSystemCommand(int command_id);
     void OnClick(float x_dip, float y_dip);
+    void OnRightClick(const RightBox& box);
     void OnMenuClosed();
+    void UpdateRightItems();
     std::size_t BoxAtDip(float x_dip, float y_dip) const;
+    std::size_t RightBoxAtDip(float x_dip, float y_dip) const;
     float OffsetDip() const;
     // Whether the bar is currently in auto-hide mode. True when the user asked for it, and
     // also when the top-strip reservation failed: in that case the bar must retract rather
@@ -253,6 +317,19 @@ private:
     ForegroundApp foreground_{};
     AppMenuSnapshot menu_{};
     std::vector<BarBox> boxes_;
+    // Right region (T-307): rendered entries for the configured finderbar.right table,
+    // laid out from the right edge inwards. total_width_dip feeds LayoutBar's
+    // status_width_dip so the left group can never run under the right region.
+    std::vector<RightBox> right_boxes_;
+    RightGroupSummary right_summary_{};
+    // The displayed clock text, cached so the tick loop only relayouts when a minute
+    // (or second, if shown) actually rolled over.
+    std::wstring clock_text_;
+    // Weather snapshot pushed in by main.cpp; a copy, never a pointer (C-04b).
+    dock::weather::Snapshot weather_{};
+    // The calendar panel the clock opens. Created lazily on first use; hidden on Esc /
+    // click-outside / deactivation (calendar_panel.h documents the dismissal rule).
+    std::unique_ptr<CalendarPanel> calendar_panel_;
     BarLayoutSummary layout_{};
     float width_dip_ = 0.0f;
     float height_dip_ = kDefaultBarHeightDip;
@@ -273,6 +350,13 @@ private:
     bool pointer_in_trigger_ = false;
     bool pointer_in_bar_ = false;
     int hover_box_ = -1;
+    int hover_right_ = -1;  // hover index into right_boxes_, same polled rule
+
+    // The forecast popup a weather_brief click opens. The bar owns its own instance:
+    // the dock's popup belongs to the dock tile's hover path, and the two surfaces
+    // must not fight over one popup window.
+    dock::WeatherPopup weather_popup_;
+    bool weather_popup_ready_ = false;
 
     bool menu_running_ = false;
     HANDLE menu_thread_ = nullptr;
