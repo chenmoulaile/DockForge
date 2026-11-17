@@ -71,7 +71,7 @@ TEST_CASE("T-302 grade: the alert colours are the frozen HIG hex values") {
     CHECK(normal.a == 0.0f);
 }
 
-TEST_CASE("T-302 registry: the eight C-31 names round-trip; five render today") {
+TEST_CASE("T-302 registry: the eight C-31 names round-trip; all eight render since T-302d") {
     using dockforge::finderbar::WidgetTypeFromName;
     using dockforge::finderbar::WidgetTypeName;
     for (int i = 0; i < dockforge::finderbar::kWidgetTypeCount; ++i) {
@@ -83,16 +83,16 @@ TEST_CASE("T-302 registry: the eight C-31 names round-trip; five render today") 
     CHECK_FALSE(WidgetTypeFromName(L"").has_value());
     CHECK_FALSE(WidgetTypeFromName(nullptr).has_value());
 
-    // This package registers exactly the five monitoring widgets; weather /
-    // media / calendar_brief wait for T-302d and cost no box until then.
+    // T-302 registered the five monitoring widgets; T-302d flips weather /
+    // media / calendar_brief - the C-31 type set is now fully renderable.
     CHECK(dockforge::finderbar::WidgetTypeRegistered(WidgetType::Cpu));
     CHECK(dockforge::finderbar::WidgetTypeRegistered(WidgetType::Memory));
     CHECK(dockforge::finderbar::WidgetTypeRegistered(WidgetType::Disk));
     CHECK(dockforge::finderbar::WidgetTypeRegistered(WidgetType::Network));
     CHECK(dockforge::finderbar::WidgetTypeRegistered(WidgetType::Temperature));
-    CHECK_FALSE(dockforge::finderbar::WidgetTypeRegistered(WidgetType::Weather));
-    CHECK_FALSE(dockforge::finderbar::WidgetTypeRegistered(WidgetType::Media));
-    CHECK_FALSE(dockforge::finderbar::WidgetTypeRegistered(WidgetType::CalendarBrief));
+    CHECK(dockforge::finderbar::WidgetTypeRegistered(WidgetType::Weather));
+    CHECK(dockforge::finderbar::WidgetTypeRegistered(WidgetType::Media));
+    CHECK(dockforge::finderbar::WidgetTypeRegistered(WidgetType::CalendarBrief));
 }
 
 TEST_CASE("T-302 text: the labels are compact single lines in the bar's font size") {
@@ -118,8 +118,6 @@ TEST_CASE("T-302 text: the labels are compact single lines in the bar's font siz
     // An unusable sensor renders NOTHING - never a fabricated number.
     s.temperature_valid = false;
     CHECK(WidgetDisplayText(WidgetType::Temperature, s).empty());
-    // T-302d types render nothing this package.
-    CHECK(WidgetDisplayText(WidgetType::Weather, s).empty());
 }
 
 TEST_CASE("T-302 sampling: disk percent and network rate are pure and edge-safe") {
@@ -145,10 +143,15 @@ TEST_CASE("T-302 build: unregistered types and empty labels produce no item") {
     dockforge::finderbar::WidgetSnapshot s;
     s.cpu_percent = 10.0f;
     // Temperature invalid -> its label is empty -> the item is dropped, so an
-    // unavailable sensor renders as nothing at all (DoD).
+    // unavailable sensor renders as nothing at all (DoD). Since T-302d the
+    // weather entry is no longer "unregistered" - it renders its placeholder
+    // box instead (the ask's 无数据占位 rule), so the row here is cpu+weather.
     const auto items = dockforge::finderbar::BuildWidgetItems(config, s);
-    REQUIRE(items.size() == 1);
+    REQUIRE(items.size() == 2);
     CHECK(items[0].type == WidgetType::Cpu);
+    CHECK(items[1].type == WidgetType::Weather);
+    CHECK(items[1].text == L"--\xB0");
+    CHECK(items[1].has_icon);
 
     // A valid sensor turns the temperature item back on, with the grade the
     // snapshot implies (85C is the Warn tier; the same thresholds as percent,
@@ -156,11 +159,17 @@ TEST_CASE("T-302 build: unregistered types and empty labels produce no item") {
     s.temperature_valid = true;
     s.temperature_c = 85.0f;
     const auto with_temp = dockforge::finderbar::BuildWidgetItems(config, s);
-    REQUIRE(with_temp.size() == 2);
-    CHECK(with_temp[1].type == WidgetType::Temperature);
-    CHECK(with_temp[1].grade == UsageGrade::Warn);
-    CHECK(dockforge::finderbar::WidgetTypeName(static_cast<int>(with_temp[1].type)) ==
+    REQUIRE(with_temp.size() == 3);
+    CHECK(with_temp[2].type == WidgetType::Temperature);
+    CHECK(with_temp[2].grade == UsageGrade::Warn);
+    CHECK(dockforge::finderbar::WidgetTypeName(static_cast<int>(with_temp[2].type)) ==
           std::wstring(L"temperature"));
+
+    // An unknown type string still produces nothing (and stays in the file,
+    // C-01) - the empty-label rule and the unknown-type rule are independent.
+    config.widgets = {ConfigWidget("garbage", 0)};
+    const auto unknown = dockforge::finderbar::BuildWidgetItems(config, s);
+    CHECK(unknown.empty());
 }
 
 TEST_CASE("T-302 build: percent widgets carry the grade of their snapshot") {
@@ -359,4 +368,157 @@ TEST_CASE("T-302 config: default widgets write no finderbar key at all") {
     const std::string tweaked = dockforge::core::SerializeConfig(config);
     CHECK(tweaked.find("\"widgets_refresh_ms\"") != std::string::npos);
     CHECK(tweaked.find("\"widgets\"") == std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// T-302d: weather / media / calendar_brief renderers, the placeholder contract,
+// the media read-only display rules and the weather glyph layout.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("T-302d weather: valid readings and the no-data placeholder") {
+    using dockforge::finderbar::WidgetDisplayText;
+    using dockforge::finderbar::WidgetSnapshot;
+    WidgetSnapshot s;
+    // Never fetched (startup state): the placeholder, not an empty slot - the
+    // ask pins 无数据占位, same contract as dock_view.cpp WeatherTextFor.
+    CHECK(WidgetDisplayText(WidgetType::Weather, s) == L"--\x00B0");
+    // A failed attempt keeps the placeholder.
+    s.weather_failed = true;
+    CHECK(WidgetDisplayText(WidgetType::Weather, s) == L"--\x00B0");
+    // A valid reading renders like the dock tile: rounded whole degrees.
+    s.weather_failed = false;
+    s.weather_valid = true;
+    s.weather_temp_c = 4.4f;
+    CHECK(WidgetDisplayText(WidgetType::Weather, s) == L"4\x00B0");
+    s.weather_temp_c = -7.6f;
+    CHECK(WidgetDisplayText(WidgetType::Weather, s) == L"-8\xB0");
+}
+
+TEST_CASE("T-302d calendar: month/day, numeric and locale-neutral") {
+    using dockforge::finderbar::WidgetDisplayText;
+    using dockforge::finderbar::WidgetSnapshot;
+    WidgetSnapshot s;
+    s.calendar_month = 11;
+    s.calendar_day = 18;
+    CHECK(WidgetDisplayText(WidgetType::CalendarBrief, s) == L"11/18");
+    s.calendar_month = 3;
+    s.calendar_day = 7;
+    CHECK(WidgetDisplayText(WidgetType::CalendarBrief, s) == L"3/7");
+}
+
+TEST_CASE("T-302d media: read-only display, session presence decides the box") {
+    using dockforge::finderbar::WidgetDisplayText;
+    using dockforge::finderbar::WidgetSnapshot;
+    WidgetSnapshot s;
+    // No poll answer yet: no widget at all.
+    CHECK(WidgetDisplayText(WidgetType::Media, s).empty());
+    // An answer without a session (nothing playing on the machine): no widget.
+    s.media_valid = true;
+    CHECK(WidgetDisplayText(WidgetType::Media, s).empty());
+    // A session with a title: play glyph + title.
+    s.media_has_session = true;
+    s.media_playing = true;
+    s.media_title = L"Song A";
+    CHECK(WidgetDisplayText(WidgetType::Media, s) == L"\u25B6 Song A");
+    // Paused: the pause glyph, same title.
+    s.media_playing = false;
+    CHECK(WidgetDisplayText(WidgetType::Media, s) == L"\u23F8 Song A");
+    // A session with no title still shows the state glyph (never empty, so the
+    // box survives; the state is the information, not the content).
+    s.media_title.clear();
+    CHECK(WidgetDisplayText(WidgetType::Media, s) == L"\u23F8 ");
+}
+
+TEST_CASE("T-302d media: long titles truncate to a bounded label") {
+    using dockforge::finderbar::TruncateMediaTitle;
+    const std::wstring short_title = L"Short";
+    CHECK(TruncateMediaTitle(short_title) == short_title);
+    // Exactly at the cap: whole.
+    std::wstring exact(dockforge::finderbar::kMediaTitleMaxChars, L'a');
+    CHECK(TruncateMediaTitle(exact) == exact);
+    // One over: capped with an ellipsis appended.
+    std::wstring over = exact + L'b';
+    const std::wstring cut = TruncateMediaTitle(over);
+    CHECK(cut.size() == dockforge::finderbar::kMediaTitleMaxChars + 1);
+    CHECK(cut.back() == L'\u2026');
+    // The kept part is exactly the title's first 24 code units.
+    CHECK(cut.compare(0, dockforge::finderbar::kMediaTitleMaxChars, over, 0,
+                      dockforge::finderbar::kMediaTitleMaxChars) == 0);
+    // A surrogate pair must never be split: a high surrogate landing on the cut
+    // point backs the cut off one unit, so the pair travels whole or not at all.
+    std::wstring paired(dockforge::finderbar::kMediaTitleMaxChars - 1, L'a');
+    paired.push_back(static_cast<wchar_t>(0xD83D));  // high surrogate (as in U+1F600)
+    paired.push_back(static_cast<wchar_t>(0xDE00));  // low surrogate
+    const std::wstring pair_cut = TruncateMediaTitle(paired);
+    REQUIRE(pair_cut.size() == dockforge::finderbar::kMediaTitleMaxChars);
+    CHECK(pair_cut.back() == L'\u2026');
+    for (const wchar_t unit : pair_cut) {
+        CHECK_FALSE(unit == static_cast<wchar_t>(0xD83D));
+        CHECK_FALSE(unit == static_cast<wchar_t>(0xDE00));
+    }
+}
+
+TEST_CASE("T-302d build: the weather placeholder is a box, media absence is not") {
+    using dockforge::finderbar::BuildWidgetItems;
+    using dockforge::finderbar::WidgetItem;
+    using dockforge::finderbar::WidgetSnapshot;
+    dockforge::core::Config config;
+    std::string error;
+    REQUIRE(dockforge::core::ParseConfig(
+        "{\"finderbar\":{\"widgets\":[{\"type\":\"weather\",\"order\":0},"
+        "{\"type\":\"media\",\"order\":1},{\"type\":\"calendar_brief\",\"order\":2}]}}",
+        config, &error));
+    WidgetSnapshot s;
+    s.calendar_month = 11;
+    s.calendar_day = 18;
+    // Weather with no data: still a box (placeholder), with the glyph flag.
+    const std::vector<WidgetItem> items = BuildWidgetItems(config.finderbar, s);
+    REQUIRE(items.size() == 2);  // weather + calendar; media has no session
+    CHECK(items[0].type == WidgetType::Weather);
+    CHECK(items[0].text == L"--\x00B0");
+    CHECK(items[0].has_icon);
+    CHECK(items[0].grade == dockforge::finderbar::UsageGrade::Normal);
+    CHECK(items[1].type == WidgetType::CalendarBrief);
+    CHECK(items[1].text == L"11/18");
+    CHECK_FALSE(items[1].has_icon);
+    // Media with a session joins the row.
+    s.media_valid = true;
+    s.media_has_session = true;
+    s.media_playing = true;
+    s.media_title = L"Track";
+    const std::vector<WidgetItem> with_media = BuildWidgetItems(config.finderbar, s);
+    REQUIRE(with_media.size() == 3);
+    CHECK(with_media[1].type == WidgetType::Media);
+    CHECK(with_media[1].text == L"\u25B6 Track");
+    CHECK_FALSE(with_media[1].has_icon);
+}
+
+TEST_CASE("T-302d layout: the weather glyph square sits left of the text, centred") {
+    std::vector<WidgetItem> items;
+    WidgetItem weather;
+    weather.type = WidgetType::Weather;
+    weather.order = 0;
+    weather.text = L"4\xB0";
+    weather.has_icon = true;
+    items.push_back(weather);
+    dockforge::finderbar::WidgetGroupSummary summary;
+    const auto boxes = dockforge::finderbar::LayoutWidgetGroup(items, 28.0f, 0.0f, 800.0f,
+                                                               &FixedWidth, &summary);
+    REQUIRE(boxes.size() == 1);
+    const auto& box = boxes[0];
+    CHECK(box.has_icon);
+    // 16 DIP square (kRightIconBoxDip), vertically centred in the 28 DIP bar.
+    CHECK(box.icon.Width() == dockforge::finderbar::kRightIconBoxDip);
+    CHECK(box.icon.Height() == dockforge::finderbar::kRightIconBoxDip);
+    CHECK(box.icon.top == (28.0f - dockforge::finderbar::kRightIconBoxDip) * 0.5f);
+    // The glyph starts one inner padding in from the box edge.
+    CHECK(box.icon.left == box.rect.left + dockforge::finderbar::kWidgetContentPaddingDip);
+    // The box is wide enough that the text (drawn centred on the box, the same
+    // idiom the right region uses) clears the glyph: width = padding + icon +
+    // gap + text + padding.
+    const float expected = dockforge::finderbar::kWidgetContentPaddingDip +
+                           dockforge::finderbar::kRightIconBoxDip +
+                           dockforge::finderbar::kRightIconTextGapDip + 2 * 6.5f +
+                           dockforge::finderbar::kWidgetContentPaddingDip;
+    CHECK(box.rect.Width() == expected);
 }

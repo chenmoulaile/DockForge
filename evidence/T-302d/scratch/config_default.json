@@ -1,0 +1,8 @@
+{
+  "finderbar": {
+    "enabled": true,
+    "height": 28,
+    "widgets": [{"type":"cpu","order":0},{"type":"memory","order":1},{"type":"disk","order":2},{"type":"network","order":3},{"type":"temperature","order":4}],
+    "auto_hide": false
+  }
+}

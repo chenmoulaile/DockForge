@@ -982,6 +982,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         std::any_of(config.finderbar.right.begin(), config.finderbar.right.end(),
                     [](const core::FinderBarRightItem& item) {
                         return item.type == "weather_brief";
+                    }) ||
+        // T-302d: the centre table's weather widget shares the same chain. The
+        // gate stays startup-scoped (T-307's boundary): a widget added by a
+        // config hot reload shows its placeholder until the next restart.
+        std::any_of(config.finderbar.widgets.begin(), config.finderbar.widgets.end(),
+                    [](const core::FinderBarWidgetItem& item) {
+                        return item.type == "weather";
                     });
     if (weather_tile_index() >= 0 ||
         (finderbar_wants_weather && config.weather.enabled && !config.weather.city.empty())) {

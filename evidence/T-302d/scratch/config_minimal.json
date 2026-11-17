@@ -1,0 +1,14 @@
+{
+  "weather": {
+    "enabled": true,
+    "provider": "open_meteo",
+    "city": "Beijing",
+    "refresh_minutes": 30
+  },
+  "finderbar": {
+    "enabled": true,
+    "height": 28,
+    "widgets": [{"type":"calendar_brief","order":0},{"type":"weather","order":1}],
+    "auto_hide": false
+  }
+}

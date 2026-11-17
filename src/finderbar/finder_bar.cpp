@@ -1229,10 +1229,16 @@ void FinderBar::Repaint() {
                 }
             }
 
-            // Centre widgets (T-302): one compact label per box, drawn at the same
-            // 13 DIP as every other text on the bar. Normal-grade boxes take the
-            // theme foreground; the two alarm grades take the frozen HIG constants
-            // (systemOrange / systemRed) - the mapping is bar_widgets' alone.
+            // Centre widgets (T-302/T-302d): one compact label per box, drawn at
+            // the same 13 DIP as every other text on the bar. Normal-grade boxes
+            // take the theme foreground; the two alarm grades take the frozen HIG
+            // constants (systemOrange / systemRed) - the mapping is bar_widgets'
+            // alone. Weather carries a glyph first (the right region's order:
+            // symbol, then value), drawn by the SAME dock::DrawWeatherGlyph the
+            // dock tile and the weather_brief entry use (dock_view.h:153 /
+            // dock_view.cpp:223 - the ask's mandated drawing reuse); an
+            // unread snapshot passes Kind::Unknown, whose own placeholder ring
+            // pairs with the "--°" text.
             for (const WidgetBox& box : widget_boxes_) {
                 const render::RectF rect{box.rect.left, box.rect.top + offset, box.rect.right,
                                          box.rect.bottom + offset};
@@ -1240,6 +1246,14 @@ void FinderBar::Repaint() {
                     box.grade == UsageGrade::Normal
                         ? text_color
                         : WidgetGradeColor(box.grade);
+                if (box.has_icon && box.type == WidgetType::Weather) {
+                    const render::RectF icon{box.icon.left, box.icon.top + offset,
+                                             box.icon.right, box.icon.bottom + offset};
+                    dock::DrawWeatherGlyph(*backend_, icon,
+                                           weather_.valid && !weather_.failed
+                                               ? weather_.kind
+                                               : dock::weather::Kind::Unknown);
+                }
                 backend_->DrawLabel(box.text.c_str(), rect, kWidgetFontDip, color,
                                     render::TextAlign::Center);
             }
@@ -1453,6 +1467,9 @@ void FinderBar::SetWeatherSnapshot(const dock::weather::Snapshot& snapshot) {
                          snapshot.days.size() != weather_.days.size();
     if (!changed && weather_.days.size() == snapshot.days.size()) return;
     weather_ = snapshot;
+    // T-302d: the centre weather widget consumes the same chain - the host's
+    // change detection compares its own copy of these scalars on the next Tick.
+    widgets_.SetWeatherSnapshot(snapshot);
     Relayout();
     Repaint();
 }
@@ -1462,6 +1479,13 @@ bool FinderBar::WantsWeatherSnapshot() const {
         const std::wstring type_name = core::Utf8ToWide(item.type);
         const std::optional<RightType> type = RightTypeFromName(type_name.c_str());
         if (type.has_value() && *type == RightType::WeatherBrief) return true;
+    }
+    // T-302d: the centre table's weather widget shares the same chain. A type
+    // string that is not registered (impossible today - weather renders) still
+    // wants the snapshot: the widget would show its placeholder either way, and
+    // real data is strictly better than a permanent "--°".
+    for (const core::FinderBarWidgetItem& item : config_.widgets) {
+        if (item.type == "weather") return true;
     }
     return false;
 }
@@ -1837,7 +1861,8 @@ std::string FinderBar::SnapshotJson() const {
                                 {"left", box.rect.left},
                                 {"right", box.rect.right},
                                 {"text", core::WideToUtf8(box.text)},
-                                {"grade", GradeName(box.grade)}});
+                                {"grade", GradeName(box.grade)},
+                                {"icon", box.has_icon}});
     }
     j["widgets"]["boxes"] = widget_boxes;
 

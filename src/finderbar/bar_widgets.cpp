@@ -3,6 +3,8 @@
 
 #include "core/log.h"
 #include "core/paths.h"
+#include "finderbar/media_sidecar.h"
+#include "platform/line_process.h"
 
 // MinGW include-order shim for the MIB2 APIs. iphlpapi.h includes netioapi.h
 // with __IPHLPAPI_H__ already set, so netioapi.h's own else-branch (which would
@@ -57,19 +59,21 @@ std::optional<WidgetType> WidgetTypeFromName(const wchar_t* name) {
 }
 
 bool WidgetTypeRegistered(WidgetType type) {
-    // T-302 (this package) registers the five monitoring widgets. weather /
-    // media / calendar_brief stay unrenderable until T-302d flips them here -
-    // an unregistered type is skipped, never drawn as an empty placeholder.
+    // T-302 registered the five monitoring widgets; T-302d (this package) flips
+    // the remaining three. An unregistered type would be skipped, never drawn as
+    // an empty placeholder - the rule stays for any future unregistration.
     switch (type) {
         case WidgetType::Cpu:
         case WidgetType::Memory:
         case WidgetType::Disk:
         case WidgetType::Network:
         case WidgetType::Temperature:
+        case WidgetType::Weather:
+        case WidgetType::Media:
+        case WidgetType::CalendarBrief:
             return true;
-        default:
-            return false;
     }
+    return false;
 }
 
 // ---- grade -------------------------------------------------------------------
@@ -124,6 +128,21 @@ double ComputeNetworkRate(std::uint64_t prev_octets, std::uint64_t cur_octets,
     return static_cast<double>(cur_octets - prev_octets) / elapsed_seconds;
 }
 
+std::wstring TruncateMediaTitle(const std::wstring& title) {
+    // At or under the cap the title is shown whole; over it, the first
+    // kMediaTitleMaxChars code units plus one ellipsis. Code units, not
+    // graphemes: splitting a surrogate pair would render U+FFFD, which is
+    // worse than a slightly early truncation, so the cap is checked on
+    // whole UTF-16 code units and the cut point is backed off to keep any
+    // surrogate pair intact.
+    if (title.size() <= kMediaTitleMaxChars) return title;
+    std::size_t cut = kMediaTitleMaxChars;
+    // A high surrogate at the cut would leave a lone low surrogate after it;
+    // back off one unit so the pair travels whole or not at all.
+    if (cut > 0 && title[cut - 1] >= 0xD800 && title[cut - 1] <= 0xDBFF) --cut;
+    return title.substr(0, cut) + L"\u2026";
+}
+
 std::wstring WidgetDisplayText(WidgetType type, const WidgetSnapshot& snapshot) {
     wchar_t buffer[64]{};
     switch (type) {
@@ -155,16 +174,44 @@ std::wstring WidgetDisplayText(WidgetType type, const WidgetSnapshot& snapshot) 
             if (!snapshot.temperature_valid) return {};
             swprintf_s(buffer, L"TEMP %.0f\u00B0C", snapshot.temperature_c);
             return buffer;
-        default:
-            return {};  // T-302d types render nothing this package
+        case WidgetType::Weather:
+            // Same contract as the dock tile (dock_view.cpp WeatherTextFor,
+            // dock_view.cpp:217): a valid snapshot renders "{temp}°", anything
+            // else renders the "--°" placeholder. The ask pins 无数据占位 for
+            // this widget, so unlike temperature it NEVER goes empty - an
+            // unconfigured city shows the placeholder rather than a vanished
+            // box the user configured and cannot find.
+            if (!snapshot.weather_valid || snapshot.weather_failed) return L"--\u00B0";
+            swprintf_s(buffer, L"%.0f\u00B0",
+                       static_cast<double>(snapshot.weather_temp_c));
+            return buffer;
+        case WidgetType::Media:
+            // Read-only GSMTC display: play-state glyph + title. No answer yet,
+            // or no session: nothing at all (the widget disappears - the same
+            // "nothing to show" rule as temperature). A session with an empty
+            // title still shows the glyph, which is the state, not the content.
+            // The ▶/⏸ glyphs are the exact pair hardware_panel.cpp:717 already
+            // draws, so the font coverage is a measured fact on this host.
+            if (!snapshot.media_valid || !snapshot.media_has_session) return {};
+            return (snapshot.media_playing ? L"\u25B6 " : L"\u23F8 ") +
+                   TruncateMediaTitle(snapshot.media_title);
+        case WidgetType::CalendarBrief:
+            // Month/day, the ask's 月/日, numeric and locale-neutral: the
+            // right region's clock already renders the localized date, so the
+            // centre brief only disambiguates "what day is it" at a glance.
+            swprintf_s(buffer, L"%d/%d", snapshot.calendar_month, snapshot.calendar_day);
+            return buffer;
     }
+    return {};
 }
 
 namespace {
 
 // The grade a given widget renders at, from one snapshot. Documented in the
 // header: percentages grade by the frozen thresholds, temperature grades by the
-// same numbers read as degrees Celsius, network always stays Normal.
+// same numbers read as degrees Celsius, and everything else - network (a rate),
+// weather, media, calendar_brief (none of them is a fraction of anything) -
+// always stays Normal.
 UsageGrade WidgetGrade(WidgetType type, const WidgetSnapshot& snapshot) {
     switch (type) {
         case WidgetType::Cpu: return GradeForPercent(snapshot.cpu_percent);
@@ -174,6 +221,9 @@ UsageGrade WidgetGrade(WidgetType type, const WidgetSnapshot& snapshot) {
             return snapshot.temperature_valid ? GradeForPercent(snapshot.temperature_c)
                                               : UsageGrade::Normal;
         case WidgetType::Network:
+        case WidgetType::Weather:
+        case WidgetType::Media:
+        case WidgetType::CalendarBrief:
         default:
             return UsageGrade::Normal;
     }
@@ -373,12 +423,90 @@ DWORD WINAPI ThermalThreadMain(LPVOID param) {
     return 0;
 }
 
+// ---- media worker (read-only GSMTC poll, its own thread + process) -----------
+
+// Milliseconds between hw_sidecar spawn attempts while the exe is missing or
+// the child keeps dying. A healthy poll costs milliseconds; a missing exe must
+// not be retried every refresh period, and the widget renders nothing meanwhile.
+constexpr int kMediaRetryMs = 15000;
+// PollSync cap for one read. The sidecar answers in well under this on a live
+// session; the cap only bounds a hung child, and this thread - not the Tick
+// chain - pays the wait.
+constexpr unsigned kMediaPollTimeoutMs = 1000;
+
+struct MediaRuntime {
+    std::atomic<bool>* stop = nullptr;
+    std::mutex* mutex = nullptr;
+    MediaWidgetState* out = nullptr;  // guarded by *mutex
+    std::atomic<int>* refresh_ms = nullptr;
+};
+
+// One T-302d media worker. The MediaSidecarBridge it owns spawns the .NET
+// sidecar exe (T-068's GSMTC transport; MinGW cannot complete WinRT async -
+// spikes/T-068/winrt_mingw.cpp) and speaks the one-JSON-per-line protocol. This
+// thread only ever SENDS "poll" - there is no code path to "media <action>",
+// which is how the DoD's read-only rule is enforced structurally, not by
+// discipline. A poll that answers publishes {has_session, playing, title}; a
+// poll that fails leaves the previous state standing until the child is
+// declared dead and respawned, and nothing ever reaches the bar as an error.
+void MediaThreadMain(MediaRuntime* runtime) {
+    MediaSidecarBridge bridge;
+    const std::wstring exe = platform::SiblingExecutablePath(L"", L"hw_sidecar.exe");
+
+    bool started = false;
+    bool logged_missing = false;
+    std::uint64_t next_retry_ms = 0;
+
+    while (!runtime->stop->load(std::memory_order_relaxed)) {
+        const std::uint64_t now = GetTickCount64();
+        if ((!started || bridge.ChildDied()) && now >= next_retry_ms) {
+            // Existence check before Start(): a missing exe is a deployment
+            // fact, not a per-retry failure, and bridge.Start would WARN every
+            // 15s about it. Logged once at widget level instead.
+            const DWORD attrs = GetFileAttributesW(exe.c_str());
+            const bool exe_present =
+                attrs != INVALID_FILE_ATTRIBUTES && !(attrs & FILE_ATTRIBUTE_DIRECTORY);
+            if (exe_present) {
+                started = bridge.Start(exe);
+            } else if (!logged_missing) {
+                logged_missing = true;
+                DF_WARN(kModule,
+                        "hw_sidecar.exe not found next to the app binary; the media "
+                        "widget renders nothing on this machine");
+            }
+            next_retry_ms = now + kMediaRetryMs;
+        }
+
+        if (started && bridge.running()) {
+            const SidecarState state = bridge.PollSync(kMediaPollTimeoutMs);
+            if (state.valid) {
+                std::lock_guard<std::mutex> lock(*runtime->mutex);
+                runtime->out->poll_valid = true;
+                runtime->out->has_session = state.media.has_session;
+                runtime->out->playing = state.media.playing;
+                runtime->out->title = state.media.title;
+            }
+        }
+
+        // Sleep in 100ms slices so Stop() never waits a full period.
+        const int period = (started && bridge.running())
+                               ? runtime->refresh_ms->load(std::memory_order_relaxed)
+                               : kMediaRetryMs;
+        for (int waited = 0; waited < period && !runtime->stop->load(std::memory_order_relaxed);
+             waited += 100) {
+            Sleep(100);
+        }
+    }
+    bridge.Stop();
+}
+
 // ---- evidence demo mode ------------------------------------------------------
 
-// DOCKFORGE_WIDGETS_DEMO=<normal|warn|critical>: replaces sampled values with
-// fixed ones so the three grade tiers can be screenshotted deterministically.
-// Same precedent as DOCKFORGE_FORCE_MATERIAL / DOCKFORGE_WEATHER_API_HOST: the
-// hook replaces an input, never the rendering or layout path.
+// DOCKFORGE_WIDGETS_DEMO=<normal|warn|critical|media>: replaces sampled values
+// with fixed ones so the three grade tiers and a media session can be
+// screenshotted deterministically. Same precedent as DOCKFORGE_FORCE_MATERIAL /
+// DOCKFORGE_WEATHER_API_HOST: the hook replaces an input, never the rendering or
+// layout path.
 struct DemoValues {
     float cpu = 0.0f;
     float memory = 0.0f;
@@ -386,6 +514,13 @@ struct DemoValues {
     double network_bps = 0.0;
     float temperature = 0.0f;
     bool temperature_valid = false;
+    // T-302d: a synthetic GSMTC session (no real player needs to run for the
+    // full-table screenshot; the media widget otherwise renders nothing on a
+    // machine with no active playback, which is honest but unphotographable).
+    bool media_valid = false;
+    bool media_has_session = false;
+    bool media_playing = false;
+    std::wstring media_title;
 };
 
 bool ParseDemoMode(const char* mode, DemoValues* out) {
@@ -396,6 +531,11 @@ bool ParseDemoMode(const char* mode, DemoValues* out) {
         *out = DemoValues{85.0f, 82.0f, 88.0f, 2400000.0, 85.0f, true};
     } else if (strcmp(mode, "critical") == 0) {
         *out = DemoValues{95.0f, 93.0f, 96.0f, 12800000.0, 95.0f, true};
+    } else if (strcmp(mode, "media") == 0) {
+        // Monitoring readings from the "normal" tier (all Normal grade) plus a
+        // playing session, so one run photographs every T-302d widget at once.
+        *out = DemoValues{42.0f, 63.0f, 55.0f, 375000.0, 45.0f, true,
+                          true, true, true, L"Demo Track"};
     } else {
         return false;
     }
@@ -421,13 +561,17 @@ std::vector<WidgetItem> BuildWidgetItems(const core::FinderBarConfig& config,
                      entry.type.c_str());
             continue;
         }
-        if (!WidgetTypeRegistered(*type)) continue;  // T-302d lands here
+        if (!WidgetTypeRegistered(*type)) continue;
         WidgetItem item;
         item.type = *type;
         item.order = entry.order;
         item.text = WidgetDisplayText(*type, snapshot);
-        // An empty label (an unavailable sensor) renders nothing: no box, no gap.
+        // An empty label (an unavailable sensor, a media poll without a session)
+        // renders nothing: no box, no gap.
         if (item.text.empty()) continue;
+        // Weather is the only icon carrier today: dock::DrawWeatherGlyph left of
+        // the temperature, the right region's weather_brief order (glyph, value).
+        item.has_icon = *type == WidgetType::Weather;
         item.grade = WidgetGrade(*type, snapshot);
         items.push_back(std::move(item));
     }
@@ -438,7 +582,13 @@ namespace {
 
 float WidgetItemWidth(const WidgetItem& item, MeasureFn measure) {
     const float text_width = measure(item.text.c_str(), kWidgetFontDip);
-    return kWidgetContentPaddingDip * 2.0f + text_width;
+    float width = kWidgetContentPaddingDip * 2.0f + text_width;
+    // Same glyph accounting as the right region's entries (bar_layout.cpp
+    // RightItemWidth): one 16 DIP square plus its gap to the text.
+    if (item.has_icon) {
+        width += kRightIconBoxDip + (text_width > 0.0f ? kRightIconTextGapDip : 0.0f);
+    }
+    return width;
 }
 
 }  // namespace
@@ -499,6 +649,16 @@ std::vector<WidgetBox> LayoutWidgetGroup(const std::vector<WidgetItem>& items,
         box.type = item->type;
         box.text = item->text;
         box.grade = item->grade;
+        box.has_icon = item->has_icon;
+        if (item->has_icon) {
+            // Identical geometry to the right region's icon boxes: the glyph sits
+            // left of the text (macOS order: symbol, then value), vertically
+            // centred in the bar - the painter draws into this exact square.
+            const float glyph_left = cursor + kWidgetContentPaddingDip;
+            const float glyph_top = (bar_height - kRightIconBoxDip) * 0.5f;
+            box.icon = render::RectF{glyph_left, glyph_top, glyph_left + kRightIconBoxDip,
+                                     glyph_top + kRightIconBoxDip};
+        }
         out.push_back(box);
         cursor += box_width + kWidgetGapDip;
     }
@@ -530,41 +690,126 @@ bool AnyRegisteredWidget(const std::vector<core::FinderBarWidgetItem>& widgets) 
 WidgetHost::~WidgetHost() { Stop(); }
 
 void WidgetHost::Start(const core::FinderBarConfig& config) {
-    if (running_) return;
     refresh_ms_ = std::max(2000, config.widgets_refresh_ms);
 
     any_registered_ = AnyRegisteredWidget(config.widgets);
     // Nothing configured that we render -> nothing to run. The A/B baseline in
     // evidence/T-302 relies on this being a true zero.
-    if (!any_registered_) return;
+    if (!any_registered_) {
+        if (running_) Stop();
+        return;
+    }
 
-    running_ = true;
-    thermal_stop_.store(false, std::memory_order_relaxed);
-    thermal_refresh_ms_.store(refresh_ms_, std::memory_order_relaxed);
-    auto* runtime = new ThermalRuntime{&thermal_stop_, &thermal_milli_c_, &thermal_refresh_ms_};
-    thermal_thread_ = std::thread([runtime] {
-        ThermalThreadMain(reinterpret_cast<LPVOID>(runtime));
-        delete runtime;
-    });
-    DF_INFO(kModule, "widget host started: %zu entries, refresh %dms (thermal on its own thread)",
-            config.widgets.size(), refresh_ms_);
+    // Which blocking workers the table needs. Each starts only when its widget
+    // is configured: a weather-only table must not pay for a WMI thread, a
+    // media-free table must not spawn a sidecar process.
+    bool thermal_want = false;
+    bool media_want = false;
+    for (const core::FinderBarWidgetItem& entry : config.widgets) {
+        const std::optional<WidgetType> type =
+            WidgetTypeFromName(core::Utf8ToWide(entry.type).c_str());
+        if (!type.has_value()) continue;
+        if (*type == WidgetType::Temperature) thermal_want = true;
+        if (*type == WidgetType::Media) media_want = true;
+    }
+
+    if (running_) {
+        if (thermal_want == thermal_registered_ && media_want == media_registered_) {
+            // Same worker set (the common hot-reload: reordering or editing
+            // monitoring entries): the running threads learn a new period
+            // through their refresh atomics on the next wake-up. Nothing to
+            // restart - this is the path ReloadConfig hits on every edit.
+            thermal_refresh_ms_.store(refresh_ms_, std::memory_order_relaxed);
+            media_refresh_ms_.store(refresh_ms_, std::memory_order_relaxed);
+            return;
+        }
+    } else {
+        running_ = true;
+    }
+
+    // Which workers are alive right now. A worker whose want-flag did not flip
+    // stays untouched - move-assigning a std::thread over a joinable one calls
+    // std::terminate, so "start" must mean "start the ones that are not alive".
+    bool thermal_alive = running_ && thermal_registered_;
+    bool media_alive = running_ && media_registered_;
+
+    // The table gained or lost a blocking widget. ReloadConfig's Start() is not
+    // a fresh construction, so a set change must JOIN the workers whose flag
+    // flipped here - the original code early-returned on running_ and a media
+    // widget added at runtime would never start polling (and a removed
+    // temperature would keep its WMI thread forever). Both are real reload
+    // paths, hit by editing config.json while the bar is up.
+    if (thermal_alive && !thermal_want) {
+        thermal_stop_.store(true, std::memory_order_relaxed);
+        if (thermal_thread_.joinable()) thermal_thread_.join();
+        thermal_thread_ = std::thread{};
+        thermal_alive = false;
+    }
+    if (media_alive && !media_want) {
+        media_stop_.store(true, std::memory_order_relaxed);
+        if (media_thread_.joinable()) media_thread_.join();
+        media_thread_ = std::thread{};
+        media_alive = false;
+    }
+    thermal_registered_ = thermal_want;
+    media_registered_ = media_want;
+
+    if (thermal_want && !thermal_alive) {
+        thermal_stop_.store(false, std::memory_order_relaxed);
+        thermal_refresh_ms_.store(refresh_ms_, std::memory_order_relaxed);
+        auto* runtime = new ThermalRuntime{&thermal_stop_, &thermal_milli_c_, &thermal_refresh_ms_};
+        thermal_thread_ = std::thread([runtime] {
+            ThermalThreadMain(reinterpret_cast<LPVOID>(runtime));
+            delete runtime;
+        });
+    }
+    if (media_want && !media_alive) {
+        media_stop_.store(false, std::memory_order_relaxed);
+        media_refresh_ms_.store(refresh_ms_, std::memory_order_relaxed);
+        auto* media_runtime = new MediaRuntime{&media_stop_, &media_mutex_, &media_state_,
+                                               &media_refresh_ms_};
+        media_thread_ = std::thread([media_runtime] {
+            MediaThreadMain(media_runtime);
+            delete media_runtime;
+        });
+    }
+    DF_INFO(kModule,
+            "widget host started: %zu entries, refresh %dms (thermal=%d media=%d)",
+            config.widgets.size(), refresh_ms_, thermal_registered_ ? 1 : 0,
+            media_registered_ ? 1 : 0);
 }
 
 void WidgetHost::Stop() {
     if (!running_) return;
     thermal_stop_.store(true, std::memory_order_relaxed);
     if (thermal_thread_.joinable()) thermal_thread_.join();
+    thermal_thread_ = std::thread{};
+    media_stop_.store(true, std::memory_order_relaxed);
+    if (media_thread_.joinable()) media_thread_.join();
+    media_thread_ = std::thread{};
+    thermal_registered_ = false;
+    media_registered_ = false;
     running_ = false;
     DF_INFO(kModule, "widget host stopped");
 }
 
+void WidgetHost::SetWeatherSnapshot(const dock::weather::Snapshot& snapshot) {
+    // Copy, never pointer (C-04b). Only the scalars the display text and the
+    // change detection consume; the glyph kind keeps coming from the bar's own
+    // member at paint time (finder_bar.cpp, same source the right region uses).
+    snapshot_.weather_valid = snapshot.valid;
+    snapshot_.weather_failed = snapshot.failed;
+    snapshot_.weather_temp_c = static_cast<float>(snapshot.temp_c);
+}
+
 bool WidgetHost::Tick(double delta_ms, const core::FinderBarConfig& config) {
     if (!running_) return false;
-    // A config reload can change the period mid-run; the thermal thread learns it
-    // through the same atomic the next time it wakes up.
+    // A config reload can change the period mid-run; both worker threads learn
+    // it through the same atomics the next time they wake up.
     if (config.widgets_refresh_ms != refresh_ms_) {
         refresh_ms_ = std::max(2000, config.widgets_refresh_ms);
         thermal_refresh_ms_.store(refresh_ms_, std::memory_order_relaxed);
+        media_refresh_ms_.store(refresh_ms_, std::memory_order_relaxed);
     }
 
     accumulator_ms_ += std::max(0.0, delta_ms);
@@ -572,6 +817,24 @@ bool WidgetHost::Tick(double delta_ms, const core::FinderBarConfig& config) {
     accumulator_ms_ = 0.0;
 
     SampleLight();
+
+    // T-302d media: the worker's latest poll answer, under its mutex. A poll
+    // that never answered (poll_valid false) leaves the widget absent; there is
+    // no error state to report because there is no write path to fail.
+    {
+        std::lock_guard<std::mutex> lock(media_mutex_);
+        snapshot_.media_valid = media_state_.poll_valid;
+        snapshot_.media_has_session = media_state_.has_session;
+        snapshot_.media_playing = media_state_.playing;
+        snapshot_.media_title = media_state_.title;
+    }
+
+    // T-302d calendar_brief: the local month/day at this tick. Day rollover is
+    // detected at the refresh cadence (2s), which is plenty for a date.
+    SYSTEMTIME now{};
+    GetLocalTime(&now);
+    snapshot_.calendar_month = now.wMonth;
+    snapshot_.calendar_day = now.wDay;
 
     // Publish the thermal slot: one atomic load, no lock. Invalid stays invalid.
     // This runs BEFORE the demo override so DOCKFORGE_WIDGETS_DEMO can present a
@@ -659,18 +922,39 @@ void WidgetHost::ApplyDemoIfAny() {
     snapshot_.network_bytes_per_sec = values.network_bps;
     snapshot_.temperature_valid = values.temperature_valid;
     snapshot_.temperature_c = values.temperature;
+    // T-302d: the synthetic media session (mode "media"). Overrides the poll
+    // answer wholesale - the sidecar thread keeps running but its data is not
+    // what the evidence run photographs.
+    snapshot_.media_valid = values.media_valid;
+    snapshot_.media_has_session = values.media_has_session;
+    snapshot_.media_playing = values.media_playing;
+    snapshot_.media_title = values.media_title;
 }
 
 std::string WidgetHost::SnapshotJson() const {
-    char buffer[256]{};
+    // The media title is JSON-escaped by the caller (nlohmann in finder_bar.cpp
+    // parses this string), so only ASCII-safe fields go through snprintf here;
+    // the title would need real escaping and is exposed through the widget boxes
+    // array in the bar's state JSON instead.
+    char buffer[320]{};
     const int written = std::snprintf(
         buffer, sizeof(buffer),
         "{\"cpu_percent\":%.2f,\"memory_percent\":%.2f,\"disk_percent\":%.2f,"
-        "\"network_bps\":%.1f,\"temperature_valid\":%s,\"temperature_c\":%.1f}",
+        "\"network_bps\":%.1f,\"temperature_valid\":%s,\"temperature_c\":%.1f,"
+        "\"weather_valid\":%s,\"weather_failed\":%s,\"weather_temp_c\":%.1f,"
+        "\"media_valid\":%s,\"media_has_session\":%s,\"media_playing\":%s,"
+        "\"calendar_month\":%d,\"calendar_day\":%d}",
         static_cast<double>(snapshot_.cpu_percent), static_cast<double>(snapshot_.memory_percent),
         static_cast<double>(snapshot_.disk_percent), snapshot_.network_bytes_per_sec,
         snapshot_.temperature_valid ? "true" : "false",
-        static_cast<double>(snapshot_.temperature_c));
+        static_cast<double>(snapshot_.temperature_c),
+        snapshot_.weather_valid ? "true" : "false",
+        snapshot_.weather_failed ? "true" : "false",
+        static_cast<double>(snapshot_.weather_temp_c),
+        snapshot_.media_valid ? "true" : "false",
+        snapshot_.media_has_session ? "true" : "false",
+        snapshot_.media_playing ? "true" : "false", snapshot_.calendar_month,
+        snapshot_.calendar_day);
     return written > 0 ? std::string(buffer) : std::string("{}");
 }
 

@@ -11,7 +11,7 @@
 |---|---|---|---|
 | M0 | 骨架与验证 | 构建链路、窗口、渲染、配置、图标、布局数学全部跑通 | DONE（T-006a 帧尾延迟仍 TODO P1） |
 | M1 | Dock 核心 | 可用的 Dock 栏（放大、启动、指示、拖拽、缩略图） | DONE（T-009..T-016 全部 DONE） |
-| M2 | Finder Bar | 顶部栏 | IN PROGRESS（左区 T-301 DONE、常驻与预留 T-302b DONE；中区 T-302 / 右区 T-303..T-307 TODO） |
+| M2 | Finder Bar | 顶部栏 | IN PROGRESS（左区 T-301 DONE、常驻与预留 T-302b DONE；中区 T-302 DONE；右区 T-307 DONE、T-303..T-306 TODO） |
 | M3 | Launchpad | 全屏网格启动器 | DONE (T-040/T-041/T-042 全部完成) |
 | M4 | 配置与主题 | 热重载 + 主题包 | DONE（T-050/T-051/T-052 全部 DONE；T-085 主题分发属 P1.5 队列） |
 | M5 | 系统集成 | 自启、隐藏任务栏、转储、日志轮转 | DONE（T-060/T-061/T-062 全部 DONE） |
@@ -1233,7 +1233,8 @@ GitHub: 已 push 至 <url> | 最新 commit <sha> | tag: <无/xxx>
 - 备注: 三条不可绕过的实测事实。① **Win11 通知区已是 XAML island**：`Shell_TrayWnd` 下只有 `Windows.UI.Composition.DesktopWindowContentBridge` 与 `TrayNotifyWnd`，没有 `SysPager`、没有 `ToolbarWindow32`，`TB_BUTTONCOUNT` 恒为 -1，所以存在性只能用 `Shell_NotifyIconGetRect` 证明。② **`NIM_ADD` 对已存在图标返回 0**，重注册必须回落 `NIM_MODIFY`。③ **菜单能否被外部点击/Escape 关闭取决于 owner 是否拿到前台**：`SetForegroundWindow=0` 时菜单不进菜单模式，外部点击无效且卡 17 秒后返回默认项。
 
 ### T-302 · Finder 栏中间：常驻小组件区
-- 状态: TODO / 优先级: P5 / 依赖: T-300 / 预估: 1–2 会话
+- 状态: DONE / 优先级: P5 / 依赖: T-300 / 预估: 1–2 会话
+- 完成: 五类监控组件 T-302（2026-11-01，ADR-0054）+ 天气/媒体/日历简略与增删排序收口 T-302d（2026-11-18，ADR-0055）；截图三张（默认/精简/全量）见 evidence/T-302/widgets_t302d_*.png
 - DoD: 可配置小组件（CPU/内存/磁盘/网络/温度/天气/媒体/日历简略，增删排序）；栏内常驻紧凑布局；监控色阶 <80% 默认 / 80–90% 橙 / >90% 红；刷新默认 2s，空闲 CPU 增量 < 0.3%；配置持久化 `finderbar.widgets`（C-31）；截图三张（默认/精简/全量）
 - 证据: `evidence/T-302/`
 
