@@ -44,10 +44,11 @@ const std::unordered_set<std::string> kNotificationsKeys = {"enabled", "banner_e
 // T-301: the Finder Bar section. Deliberately narrow - the centre widgets and the
 // tray mirror add their own keys when they land, so nothing here is a switch that
 // no code reads. T-307 added "right" (C-31 finderbar.right table) and "clock"
-// (finderbar.clock.*, ADR-0053).
+// (finderbar.clock.*, ADR-0053). T-302 added "widgets" (C-31 finderbar.widgets
+// table) and "widgets_refresh_ms" (ADR-0054).
 const std::unordered_set<std::string> kFinderBarKeys = {
     "enabled", "height", "show_system_menu", "show_app_name", "show_app_menu",
-    "max_menu_items", "auto_hide", "right", "clock"};
+    "max_menu_items", "auto_hide", "right", "clock", "widgets", "widgets_refresh_ms"};
 
 // T-307: bounds for the hand-editable right-region table and clock format string,
 // same reasoning as kMaxTileListEntries: a hand-written file must not be able to
@@ -56,6 +57,8 @@ const std::unordered_set<std::string> kFinderBarKeys = {
 // is 9) while still rejecting garbage.
 constexpr std::size_t kMaxFinderBarRightItems = 32;
 constexpr std::size_t kMaxFinderBarClockFormatBytes = 64;
+// T-302: the same bound for the centre table (same eight types, same reasoning).
+constexpr std::size_t kMaxFinderBarWidgetItems = 32;
 
 // Upper bound on the persisted tile list.
 //
@@ -651,6 +654,12 @@ IntRange FinderBarHeightRange() { return {18, 96}; }
 // where a menu bar becomes unreadable on a 1366-wide laptop.
 IntRange FinderBarMaxMenuItemsRange() { return {2, 16}; }
 
+// T-302: centre-widget refresh period. Floor 2000 = C-23's 0.5Hz sampling ceiling
+// (the widgets self-sample on the bar's Tick chain, and nothing may beat that
+// rate by editing the file); ceiling 60000 keeps a fat-fingered value from
+// freezing the widgets for a minute.
+IntRange FinderBarWidgetsRefreshRange() { return {2000, 60000}; }
+
 bool SameWeather(const WeatherConfig& a, const WeatherConfig& b) {
     return a.enabled == b.enabled && a.provider == b.provider && a.city == b.city &&
            a.refresh_minutes == b.refresh_minutes;
@@ -682,11 +691,35 @@ std::vector<FinderBarRightItem> DefaultFinderBarRightItems() {
     return {FinderBarRightItem{"clock", 0}};
 }
 
+bool operator==(const FinderBarWidgetItem& a, const FinderBarWidgetItem& b) {
+    return a.type == b.type && a.order == b.order;
+}
+
+bool SameWidgetItems(const std::vector<FinderBarWidgetItem>& a,
+                     const std::vector<FinderBarWidgetItem>& b) {
+    if (a.size() != b.size()) return false;
+    // Order-preserving comparison, same reasoning as SameRightItems: the centre
+    // layout sorts stably by (order, type), so the file's entry order only decides
+    // the tie-break - keeping it intact keeps that reproducible.
+    return std::equal(a.begin(), a.end(), b.begin());
+}
+
+// T-302 (ADR-0054): the frozen default centre table - the five monitoring widgets
+// in C-31's own declaration order, which is their natural left-to-right reading
+// order. weather / media / calendar_brief stay out until T-302d renders them.
+std::vector<FinderBarWidgetItem> DefaultFinderBarWidgets() {
+    return {FinderBarWidgetItem{"cpu", 0}, FinderBarWidgetItem{"memory", 1},
+            FinderBarWidgetItem{"disk", 2}, FinderBarWidgetItem{"network", 3},
+            FinderBarWidgetItem{"temperature", 4}};
+}
+
 bool SameFinderBar(const FinderBarConfig& a, const FinderBarConfig& b) {
     return a.enabled == b.enabled && a.height == b.height &&
            a.show_system_menu == b.show_system_menu && a.show_app_name == b.show_app_name &&
            a.show_app_menu == b.show_app_menu && a.max_menu_items == b.max_menu_items &&
            a.auto_hide == b.auto_hide && SameRightItems(a.right, b.right) &&
+           SameWidgetItems(a.widgets, b.widgets) &&
+           a.widgets_refresh_ms == b.widgets_refresh_ms &&
            a.clock.format == b.clock.format && a.clock.show_date == b.clock.show_date &&
            a.clock.show_seconds == b.clock.show_seconds;
 }
@@ -920,6 +953,22 @@ bool ClampConfig(Config& config) {
                     kMaxFinderBarClockFormatBytes);
             changed = true;
         }
+        // T-302: the centre table gets the same entry ceiling as `right`; the
+        // refresh period's floor IS C-23's 0.5Hz ceiling - a faster sampling
+        // period may not be hand-edited in.
+        if (config.finderbar.widgets.size() > kMaxFinderBarWidgetItems) {
+            config.finderbar.widgets.resize(kMaxFinderBarWidgetItems);
+            DF_WARN("core", "config finderbar.widgets has more than %zu entries, extras dropped",
+                    kMaxFinderBarWidgetItems);
+            changed = true;
+        }
+        const int refresh = ClampInt(config.finderbar.widgets_refresh_ms,
+                                     FinderBarWidgetsRefreshRange(),
+                                     "finderbar.widgets_refresh_ms");
+        if (refresh != config.finderbar.widgets_refresh_ms) {
+            config.finderbar.widgets_refresh_ms = refresh;
+            changed = true;
+        }
     }
     return changed;
 }
@@ -1123,6 +1172,48 @@ bool ParseConfig(const std::string& json_text, Config& out, std::string* error) 
             if (parsed.finderbar.right.empty()) {
                 parsed.finderbar.right = DefaultFinderBarRightItems();
             }
+            // T-302 (ADR-0054): the C-31 centre-zone table, same parse rules as
+            // `right` with one deliberate difference - an explicit empty array
+            // STAYS empty. The centre zone is optional chrome (a user writing
+            // "widgets": [] is asking for no widgets), while an empty right
+            // region would blank the clock, which is why that table falls back
+            // to its default above. Overflows are dropped here and ClampConfig
+            // re-checks the surviving count.
+            if (node.contains("widgets")) {
+                const auto& widgets = node.at("widgets");
+                if (widgets.is_array()) {
+                    // An explicit table REPLACES the member's default rows, it
+                    // does not append to them.
+                    parsed.finderbar.widgets.clear();
+                    bool widgets_dirty = false;
+                    for (const auto& item : widgets) {
+                        if (parsed.finderbar.widgets.size() >= kMaxFinderBarWidgetItems) {
+                            widgets_dirty = true;
+                            break;
+                        }
+                        if (!item.is_object()) {
+                            DF_WARN("core", "config finderbar.widgets has a non-object entry, dropped");
+                            widgets_dirty = true;
+                            continue;
+                        }
+                        FinderBarWidgetItem entry;
+                        bad_value |= ReadStringField(item, "type", entry.type);
+                        bad_value |= ReadNumber(item, "order", entry.order);
+                        if (entry.type.empty()) {
+                            DF_WARN("core", "config finderbar.widgets entry has no type, dropped");
+                            widgets_dirty = true;
+                            continue;
+                        }
+                        parsed.finderbar.widgets.push_back(std::move(entry));
+                    }
+                    bad_value |= widgets_dirty;
+                } else if (!widgets.is_null()) {
+                    DF_WARN("core", "config finderbar.widgets is not an array, keeping default");
+                    bad_value = true;
+                }
+            }
+            bad_value |= ReadNumber(node, "widgets_refresh_ms",
+                                    parsed.finderbar.widgets_refresh_ms);
             // T-307: finderbar.clock.* (ADR-0053). Empty format keeps following the
             // system region; everything else is read as-is and clamped in ClampConfig.
             if (node.contains("clock")) {
@@ -1308,15 +1399,21 @@ std::string SerializeConfig(const Config& config) {
     // table, "clock" only when any of its fields differs from its default. Unknown
     // type strings survive this path untouched, so a table referencing a widget a
     // later task will register round-trips without loss.
+    // T-302 (ADR-0054): "widgets" / "widgets_refresh_ms" follow the same rule. An
+    // explicitly emptied centre table is NOT the default and is written as [] -
+    // "user removed every widget" is a fact worth persisting, not a gap to refill.
     const bool right_default =
         SameRightItems(config.finderbar.right, DefaultFinderBarRightItems());
+    const bool widgets_default =
+        SameWidgetItems(config.finderbar.widgets, DefaultFinderBarWidgets());
     const bool clock_default = config.finderbar.clock.format.empty() &&
                                config.finderbar.clock.show_date &&
                                !config.finderbar.clock.show_seconds;
     if (!config.finderbar.enabled || config.finderbar.height != 28 ||
         !config.finderbar.show_system_menu || !config.finderbar.show_app_name ||
         !config.finderbar.show_app_menu || config.finderbar.max_menu_items != 6 ||
-        config.finderbar.auto_hide || !right_default || !clock_default) {
+        config.finderbar.auto_hide || !right_default || !clock_default ||
+        !widgets_default || config.finderbar.widgets_refresh_ms != 2000) {
         json finderbar = {
             {"enabled", config.finderbar.enabled},
             {"height", config.finderbar.height},
@@ -1332,6 +1429,16 @@ std::string SerializeConfig(const Config& config) {
                 right.push_back({{"type", item.type}, {"order", item.order}});
             }
             finderbar["right"] = std::move(right);
+        }
+        if (!widgets_default) {
+            json widgets = json::array();
+            for (const FinderBarWidgetItem& item : config.finderbar.widgets) {
+                widgets.push_back({{"type", item.type}, {"order", item.order}});
+            }
+            finderbar["widgets"] = std::move(widgets);
+        }
+        if (config.finderbar.widgets_refresh_ms != 2000) {
+            finderbar["widgets_refresh_ms"] = config.finderbar.widgets_refresh_ms;
         }
         if (!clock_default) {
             json clock = {{"show_date", config.finderbar.clock.show_date},

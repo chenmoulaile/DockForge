@@ -861,3 +861,16 @@ P1/P2 阶段的任务书假设本项目是 WinUI 3 + Windows App SDK 应用，�
 - **T-207 对接裁决**（TASKS.md T-207「数字式格式串」，T-207 未实装）：T-207 实装前仅 `finderbar.clock.*` 生效；实装后 `themes/<name>/calendar.json` 的同义视觉字段（字体/大小/颜色）覆盖 `finderbar.clock.*`（主题优先，随主题分发），行为字段（格式串/显隐日期/显隐秒）仍以 `finderbar.clock.*` 为准。冲突细节以 T-207 实装时的 ADR 为准，本包不预设更多规则。对接点注释同时写在 `config.h` `FinderBarClockConfig` 与 `finder_bar.h` `FormatBarClock`。
 - **未注册类型跳过**：本包只注册 `clock` / `weather_brief` 渲染器（`bar_layout.cpp` `RightTypeRegistered`）；`tray_mirror`/`control_center`/`notification_center`/`ime`/`battery`/`network` 六种未注册类型在布局层直接跳过，不画空占位（为不存在的控件预留空间是 T-301 明确避免过的可见 bug）。配置文件保留未注册 type 字符串不清洗（C-01：不丢用户数据），T-303..T-306 落地时只改 `RightTypeRegistered` 一处。
 - **日历面板材质**：`calendar_panel.{h,cpp}` 用 `WS_EX_NOREDIRECTIONBITMAP` + DComp 自绘 Solid 板（ADR-0008 自绘 tint、ADR-0045 不排除截图的同款理由——面板挂在桌面顶部，capture-exclude 档会让它从所有截图中消失，包括本任务的取证截图）。度量取 Beautiful `NotificationCenterWindow.xaml`：面板 360×640 DIP、根圆角 12、内容卡圆角 10、今日蓝圈（Apple systemBlue：浅 #007AFF / 深 #0A84FF），颜色 token 对照 Beautiful `MacTokens.cs` 深/浅两套；仅取参数与度量，代码自绘（ASSETS.md）。
+
+## ADR-0054 · finderbar.widgets 中央区数据通道与 finderbar.widgets_refresh_ms 新键（T-302）
+- **决策**：C-31（P5 冻结）已冻结 `finderbar.widgets` 键形 `[{type,order}]`，键形不变；本包按「冻结契约只能加字段并记 ADR」的规则新增两件事，语义冻结在本条：
+  1. **`finderbar.widgets` 默认表 `[{cpu,0},{memory,1},{disk,2},{network,3},{temperature,4}]`**（`config.cpp` `DefaultFinderBarWidgets()`）。键缺失回退默认表；与 `finderbar.right` 不同，**显式 `[]` 保持空**——中央区是可选装饰，用户写空表就是不要组件（右区空表回退默认是因为空右区会让时钟消失，中央区没有等价论证）。
+  2. **新配置键 `finderbar.widgets_refresh_ms`**（默认 2000，钳制 [2000, 60000]）。钳制下限就是 C-23 的 0.5Hz 采样上限——手改文件也不能突破节律。
+  3. **中央区 `order` 语义**：从左往右的位次（升序 = 左→右），中央行是横排读序，与右区「从右往左」相反；同 order 冲突按 type 枚举序（C-31 声明序）稳定排序，序值小者靠左。语义注释冻结在 `bar_widgets.h`。
+- **数据通道裁定（本 ADR 的核心）**：**不扩 C-23 冻结载荷、不改其采样节律**，`bar_widgets` 自持采样。依据：C-23 `SystemStatsUpdated` 仅面板打开时广播（`hardware_panel.h:47` `Open() // show + start ticking`），栏内小组件需要常驻数据流；扩载荷需契约变更，收益不抵成本。采样归属全部不在渲染路径：
+  - 轻量四类（CPU/内存/磁盘/网络）归 finderbar Tick 链（`WidgetHost::Tick`），2s 周期，单次调用微秒级（GetSystemTimes 差分复用 system_stats 采样函数 / GlobalMemoryStatusEx / GetDiskFreeSpaceExW / GetIfTable2）。C-23 禁令针对渲染路径，Tick 链采样与其精神一致（hardware_panel 自身的采样也挂在 Tick 上）。
+  - 温度 WMI（`MSAcpi_ThermalZoneTemperature`，禁 WinRing0——T-206 DoD 明令）查询有阻塞成本，放独立工作线程（`std::thread`），结果经 `std::atomic<int32_t>`（毫摄氏度）无锁快照交换给渲染读取；失败退避 15s 重连，不可用时该组件不显示（Beautiful AppSettings.cs:354「没有任何数据源时芯片整体隐藏」同规则）。`CurrentTemperature` 单位 0.1K（TemperatureReader.cs:59 同口径）。
+  - 降级方案（未触发）：若 CPU 预算超标则 CPU/内存改读共享快照、仅磁盘/网络/温度自采样。实测双采样点增量 +0.046pp < 0.3%（evidence/T-302/cpu_budget.txt）。
+- **色阶三档**：<80% 主题前景白 / 80–90% 橙 **#FF9F0A** / >90% 红 **#FF453A**（macOS HIG systemOrange/systemRed dark 值；栏板固定深 tint，两主题共用）。Beautiful `MacOS.xaml` 经 grep（9F0A/453A/Orange/Red 各 0 命中）确认无任何橙/红警示色键，不从此色板取值。温度复用同三档读作摄氏度（<80/80-90/>90°C）；network 是速率不是占比，恒用主题前景色（对 B/s 分档是编造刻度）。映射函数 `GradeForPercent` 独立可单测。
+- **未注册类型跳过**（与 ADR-0053 同规则）：本包只注册 cpu/memory/disk/network/temperature 五类渲染器（`WidgetTypeRegistered`）；weather/media/calendar_brief 三类等 T-302d 落地，配置文件保留未注册 type 字符串不清洗（C-01）。
+- **取证专用钩子**：`DOCKFORGE_WIDGETS_DEMO=<normal|warn|critical>` 用固定读数替换采样值，仅为三档色阶截图确定化（同 DOCKFORGE_FORCE_MATERIAL / DOCKFORGE_WEATHER_API_HOST 先例：替换输入源，不替换渲染/布局路径），默认不启用，启用时打 WARN。

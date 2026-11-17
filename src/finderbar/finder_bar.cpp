@@ -834,6 +834,9 @@ void FinderBar::DestroyWindowAndSurface() {
 
 void FinderBar::Shutdown() {
     if (!ready_ && window_ == nullptr) return;
+    // The widget host spawns a worker thread (T-302); it must be joined before
+    // any other teardown touches shared state.
+    widgets_.Stop();
     if (foreground_hook_ != nullptr) {
         UnhookWinEvent(foreground_hook_);
         foreground_hook_ = nullptr;
@@ -868,6 +871,9 @@ void FinderBar::SetEnabled(bool enabled) {
         // people distrust a desktop tweak.
         appbar::ReleaseTopStrip();
         reserved_strip_px_ = 0;
+        // Sampling stops with the bar: a hidden bar must not keep a WMI thread
+        // polling a surface nobody can see (T-302).
+        widgets_.Stop();
         // A hidden window keeps its region, which would still be a hit target. Reset it to
         // empty before hiding so nothing is left behind if the window is shown again by
         // another path.
@@ -912,6 +918,10 @@ void FinderBar::SetEnabled(bool enabled) {
     auto_hide_.progress = retracting ? 0.0f : 1.0f;
     auto_hide_.shown = !retracting;
     region_height_px_ = -1;
+    // The centre widgets' sampling follows the bar's visibility (T-302): a
+    // visible bar runs the Tick-chain sampler and the thermal worker; a table
+    // with no registered type starts nothing at all.
+    widgets_.Start(config_);
     ApplyRegion();
     Repaint();
 }
@@ -986,6 +996,21 @@ void FinderBar::ReloadConfig(const core::Config& config) {
         menu_ = ReadAppMenu(foreground_.hwnd, config_.max_menu_items);
         foreground_.menu_readable = menu_.readable;
     }
+    // T-302: the host's liveness depends on the centre table having at least one
+    // registered type, so a reload that adds or removes widgets must re-arm it.
+    // Start() is idempotent; Stop() is a no-op when idle. The refresh period the
+    // running host picks up on its next Tick. Logged: the reload chain crosses
+    // watcher -> parse -> publish -> subscribe, and a wrong table must be
+    // attributable to a stage from the log alone.
+    DF_INFO(kModule, "reload: widgets=%zu refresh_ms=%d", config_.widgets.size(),
+            config_.widgets_refresh_ms);
+    if (enabled_) {
+        if (AnyRegisteredWidget(config_.widgets)) {
+            widgets_.Start(config_);
+        } else {
+            widgets_.Stop();
+        }
+    }
     Relayout();
     ApplyRegion();
     Repaint();
@@ -1052,6 +1077,17 @@ void FinderBar::Relayout() {
     params.app_name = foreground_.display_name;
 
     boxes_ = LayoutBar(params, menu_.titles, &MeasureBarText, &layout_);
+
+    // Centre widgets (T-302): display items from the latest snapshot, laid into
+    // the span between the left group (just measured by LayoutBar above) and the
+    // right region. The span's ends come from the two groups' own geometry, so
+    // the centre can never overlap either - it degrades by dropping entries from
+    // the row's right end, which the summary reports.
+    const std::vector<WidgetItem> widget_items = BuildWidgetItems(config_, widgets_.Snapshot());
+    const float right_start_dip =
+        width_dip_ - kTrailingInsetDip - right_summary_.total_width_dip;
+    widget_boxes_ = LayoutWidgetGroup(widget_items, height_dip_, layout_.left_group_width_dip,
+                                      right_start_dip, &MeasureBarText, &widget_summary_);
 }
 
 // Recomputes only when the clock's rendered text actually changed: the tick loop runs
@@ -1193,6 +1229,21 @@ void FinderBar::Repaint() {
                 }
             }
 
+            // Centre widgets (T-302): one compact label per box, drawn at the same
+            // 13 DIP as every other text on the bar. Normal-grade boxes take the
+            // theme foreground; the two alarm grades take the frozen HIG constants
+            // (systemOrange / systemRed) - the mapping is bar_widgets' alone.
+            for (const WidgetBox& box : widget_boxes_) {
+                const render::RectF rect{box.rect.left, box.rect.top + offset, box.rect.right,
+                                         box.rect.bottom + offset};
+                const render::ColorF color =
+                    box.grade == UsageGrade::Normal
+                        ? text_color
+                        : WidgetGradeColor(box.grade);
+                backend_->DrawLabel(box.text.c_str(), rect, kWidgetFontDip, color,
+                                    render::TextAlign::Center);
+            }
+
             backend_->EndFrame();
         });
 
@@ -1211,11 +1262,14 @@ bool FinderBar::Tick(double delta_ms, const core::Config& config) {
     // menu list also depend on finderbar keys, so a cheap identity check catches the case
     // where a caller forgot. T-307 adds the right table and the clock settings to the
     // same check: a user editing finderbar.right or finderbar.clock.* in the file must
-    // not wait for an unrelated finderbar key to change.
+    // not wait for an unrelated finderbar key to change. T-302 adds the centre table
+    // and its refresh period for the same reason.
     if (config.finderbar.max_menu_items != config_.max_menu_items ||
         config.finderbar.show_app_menu != config_.show_app_menu ||
         config.finderbar.height != config_.height ||
         !core::SameRightItems(config.finderbar.right, config_.right) ||
+        !core::SameWidgetItems(config.finderbar.widgets, config_.widgets) ||
+        config.finderbar.widgets_refresh_ms != config_.widgets_refresh_ms ||
         config.finderbar.clock.format != config_.clock.format ||
         config.finderbar.clock.show_date != config_.clock.show_date ||
         config.finderbar.clock.show_seconds != config_.clock.show_seconds) {
@@ -1246,6 +1300,14 @@ bool FinderBar::Tick(double delta_ms, const core::Config& config) {
     // tests so a rollover that re-lays the bar out never leaves this frame's hover
     // index pointing into the previous layout.
     if (!menu_running_) UpdateRightItems();
+
+    // Centre widgets (T-302): the four light quantities are sampled HERE, on the
+    // bar's tick chain at the refresh period (microsecond APIs, never inside
+    // Paint - the C-23 rule the ADR-0054 data-channel ruling keeps). A changed
+    // label or grade re-lays the centre row; the thermal slot arrives through an
+    // atomic the worker thread publishes.
+    const bool widgets_changed = widgets_.Tick(delta_ms, config_);
+    if (widgets_changed) Relayout();
 
     // Pointer tracking is polled rather than event driven: a retracted bar has an empty
     // region, so Windows sends it no mouse messages at all.
@@ -1289,7 +1351,7 @@ bool FinderBar::Tick(double delta_ms, const core::Config& config) {
 
     const bool moved = std::abs(before.progress - auto_hide_.progress) > 0.0005f;
     const bool hover_changed = previous_hover != hover_box_ || previous_right_hover != hover_right_;
-    if (!moved && !hover_changed && !foreground_changed) return false;
+    if (!moved && !hover_changed && !foreground_changed && !widgets_changed) return false;
 
     if (moved) ApplyRegion();
     Repaint();
@@ -1758,6 +1820,26 @@ std::string FinderBar::SnapshotJson() const {
                                {"icon", box.has_icon}});
     }
     j["right_boxes"] = right_boxes;
+
+    // T-302: the centre widget row, its snapshot and its summary - everything a
+    // probe needs to assert on the widgets without a screenshot.
+    j["widgets"] = {
+        {"refresh_ms", config_.widgets_refresh_ms},
+        {"snapshot", nlohmann::json::parse(widgets_.SnapshotJson())},
+        {"start_dip", widget_summary_.start_dip},
+        {"total_width_dip", widget_summary_.total_width_dip},
+        {"placed", widget_summary_.placed},
+        {"dropped", widget_summary_.dropped},
+    };
+    nlohmann::json widget_boxes = nlohmann::json::array();
+    for (const WidgetBox& box : widget_boxes_) {
+        widget_boxes.push_back({{"type", core::WideToUtf8(WidgetTypeName(static_cast<int>(box.type)))},
+                                {"left", box.rect.left},
+                                {"right", box.rect.right},
+                                {"text", core::WideToUtf8(box.text)},
+                                {"grade", GradeName(box.grade)}});
+    }
+    j["widgets"]["boxes"] = widget_boxes;
 
     nlohmann::json boxes = nlohmann::json::array();
     for (const BarBox& box : boxes_) {

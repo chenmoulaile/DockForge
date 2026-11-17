@@ -1,0 +1,7 @@
+WMI QUERY FAILED: �ܾ����� 
+
+复核（本任务实际执行）:
+  command: grep -ci 9F0A|453A|Orange|Red D:/Beautiful/src/Beautiful.App/Themes/MacOS.xaml
+  result:  9F0A=0  453A=0  Orange=0  Red=0
+  → Beautiful MacOS.xaml 无任何橙/红警示色键，#FF9F0A/#FF453A 取 macOS HIG
+    systemOrange/systemRed 标准值（与 data_channel_ruling.md 第二节一致）。

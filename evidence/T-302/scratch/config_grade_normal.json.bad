@@ -1,0 +1,7 @@
+{
+  "finderbar": {
+    "enabled": true,
+    "height": 28,
+    "widgets": default
+  }
+}

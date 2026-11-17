@@ -170,6 +170,32 @@ bool operator==(const FinderBarRightItem& a, const FinderBarRightItem& b);
 bool SameRightItems(const std::vector<FinderBarRightItem>& a,
                     const std::vector<FinderBarRightItem>& b);
 
+// T-302: one entry of the finderbar.widgets table (C-31's centre zone). The key
+// shape [{type, order}] is C-31-frozen and shared with the right table; `type`
+// keeps the C-31 enum spelling verbatim ("cpu", "temperature", ...). An unknown
+// or not-yet-registered type is kept in the list unchanged - the renderer skips
+// it (bar_widgets.h) - so a config written before T-302d registers weather /
+// media / calendar_brief survives the round-trip instead of dropping user data
+// (C-01, the same rule FinderBarRightItem obeys).
+//
+// Order semantics for the centre row (documented in bar_widgets.h): order counts
+// FROM THE LEFT, ascending = left to right (the natural reading for a centre
+// row); ties resolve by C-31's declaration sequence, deterministically.
+struct FinderBarWidgetItem {
+    std::string type;
+    int order = 0;
+};
+
+bool operator==(const FinderBarWidgetItem& a, const FinderBarWidgetItem& b);
+bool SameWidgetItems(const std::vector<FinderBarWidgetItem>& a,
+                     const std::vector<FinderBarWidgetItem>& b);
+
+// The frozen default for finderbar.widgets (T-302; ADR-0054 records the new key).
+// The five monitoring widgets in their natural left-to-right reading order, i.e.
+// the order C-31 itself declares them in. weather / media / calendar_brief stay
+// OUT of the default table until T-302d can render them.
+std::vector<FinderBarWidgetItem> DefaultFinderBarWidgets();
+
 // The frozen default for finderbar.right. C-31 (P5) freezes the key shape but not the
 // default value, so T-307 pins it here (ADR-0053): the clock alone, at position 0 =
 // hard against the right edge, which is where macOS puts it. Later tasks extend this
@@ -244,6 +270,19 @@ struct FinderBarConfig {
     // writes no finderbar key at all. See bar_layout.h for the order semantics; the
     // renderer skips types whose widget task has not landed yet.
     std::vector<FinderBarRightItem> right = DefaultFinderBarRightItems();
+    // T-302 (ADR-0054): the centre-zone monitoring table, C-31's finderbar.widgets.
+    // Same quiet-file rule as `right`: the member starts at the frozen default
+    // table, not at empty. One deliberate difference from `right`: an explicit
+    // empty array here STAYS empty - the centre zone is optional chrome, and a
+    // user writing "widgets": [] is asking for no widgets (the clock on the right
+    // has no equivalent argument, which is why `right` falls back there). See
+    // bar_widgets.h for the sampling/colour rules; the renderer skips types whose
+    // task has not landed yet.
+    std::vector<FinderBarWidgetItem> widgets = DefaultFinderBarWidgets();
+    // T-302 (ADR-0054): centre-widget refresh period in milliseconds. Default 2000
+    // = C-23's 0.5Hz ceiling; the clamp floor is 2000 so the ceiling can never be
+    // violated by hand-editing the file. Range 2000..60000.
+    int widgets_refresh_ms = 2000;
     // T-207 对接点：见 FinderBarClockConfig 的注释（本包即写入处，ADR-0053）。
     FinderBarClockConfig clock;
 };
@@ -338,6 +377,8 @@ IntRange NotificationPollRange();
 // eat a third of the screen (a hand-edited 400 would).
 IntRange FinderBarHeightRange();
 IntRange FinderBarMaxMenuItemsRange();
+// T-302: centre-widget refresh period; the floor IS C-23's 0.5Hz ceiling.
+IntRange FinderBarWidgetsRefreshRange();
 
 // Hotspot enum <-> string helpers (C-24 canonical spellings).
 const char* ToString(HotspotEdge value);

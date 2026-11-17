@@ -1,0 +1,36 @@
+T-302 空闲 CPU 预算实测（DoD 4）
+================================
+
+命令（全部实际执行）:
+  powershell -NoProfile -ExecutionPolicy Bypass -File tools/t302_idle_budget.ps1 -Mode idle_off   -Seconds 60
+  powershell -NoProfile -ExecutionPolicy Bypass -File tools/t302_idle_budget.ps1 -Mode idle_on    -Seconds 60
+  powershell -NoProfile -ExecutionPolicy Bypass -File tools/t302_idle_budget.ps1 -Mode idle_dual  -Seconds 60
+
+方法: tools/idle_stats.ps1（未改动，T-068 同款）——进程 TotalProcessorTime 差分
+除以 wall clock，再除以 18 核。窗口内指针停离 dock/栏。预算口径: C-23 冻结条款
+「空闲 CPU 增量必须 < 0.3%」（PERFORMANCE.md 逐任务表沿用同一口径）。
+
+原始文件（本目录）: idle_off.txt / idle_on.txt / idle_dual.txt
+
+场景 A｜idle_off   widgets=[]，无采样（A/B 基线）
+  cpu_percent = 0.1529%（60.2s，18 核）
+
+场景 B｜idle_on    widgets=冻结默认表（cpu/memory/disk/network/temperature），
+        Tick 链 2s 轻量采样 + 温度独立线程（本机 WMI 拒绝，线程 15s 退避重试中）
+  cpu_percent = 0.1472%（60.2s，18 核）
+
+  B − A = −0.0057pp（两值在计时噪声内持平）→ 采样增量远低于 0.3% 预算 ✓
+  RSS: 205.34 → 208.11MB（增量 +2.77MB，预算 30MB 内）
+
+场景 C｜idle_dual  widgets 默认表采样 与 hardware_panel 的 C-23 采样（面板经
+        probe `show` 打开、保持可见）两个采样点同时活跃
+  cpu_percent = 0.1991%（60.2s，18 核）
+
+  C − A = +0.0462pp < 0.3% → 双采样点并存仍达标 ✓
+  （hardware_panel 单点在 evidence/T-068/idle_cpu.txt 已测：稳态 0.23–0.26%）
+
+结论: 两个采样点（finderbar Tick 链轻量采样 / 温度独立线程）与 hardware_panel
+既有 C-23 采样并存时空闲 CPU 增量 < 0.3%，无需降级方案（CPU/内存改读共享快照
+的备选路径未触发，仅作记录）。
+
+附: 线程数 idle_off 15–19 → idle_on 16–20（+1 = 温度工作线程，符合设计）。

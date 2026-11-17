@@ -44,7 +44,11 @@ target_link_libraries(dockforge_lib PUBLIC thirdparty_nlohmann)
 target_link_libraries(dockforge_lib PUBLIC
   user32 gdi32 shell32 shlwapi ole32 oleaut32 uuid dwmapi
   d2d1 dwrite dcomp psapi advapi32 d3d11 dxgi shcore taskschd dbghelp oleacc
-  winhttp version)
+  winhttp version
+  # T-302: centre-widget sampling - GetIfTable2 (network octets) and the WMI COM
+  # plumbing for MSAcpi_ThermalZoneTemperature (the only allowed temperature
+  # source; WinRing0 is forbidden by the T-206 DoD).
+  iphlpapi wbemuuid)
 
 # ---------------------------------------------------------------- executable
 add_executable(DockForge ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp)

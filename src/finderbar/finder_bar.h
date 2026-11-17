@@ -41,6 +41,7 @@
 #include "dock/weather.h"
 #include "dock/weather_popup.h"
 #include "finderbar/bar_layout.h"
+#include "finderbar/bar_widgets.h"
 #include "finderbar/calendar_panel.h"
 #include "platform/composition.h"
 #include "platform/display.h"
@@ -267,6 +268,13 @@ public:
 
     const std::vector<RightBox>& RightBoxes() const { return right_boxes_; }
 
+    // Centre widgets (T-302): the laid-out monitoring row and its host. The host
+    // owns the sampling (light four on this bar's Tick chain, temperature on its
+    // own worker thread); the boxes are what Repaint draws.
+    const std::vector<WidgetBox>& WidgetBoxes() const { return widget_boxes_; }
+    const WidgetSnapshot& WidgetSnapshot() const { return widgets_.Snapshot(); }
+    std::string WidgetsJson() const { return widgets_.SnapshotJson(); }
+
     // One-line JSON for the probe channel. Everything a probe needs to assert on without a
     // screenshot.
     std::string SnapshotJson() const;
@@ -322,6 +330,11 @@ private:
     // status_width_dip so the left group can never run under the right region.
     std::vector<RightBox> right_boxes_;
     RightGroupSummary right_summary_{};
+    // Centre widgets (T-302): sampling host + the laid-out monitoring row between
+    // the left group and the right region.
+    WidgetHost widgets_;
+    std::vector<WidgetBox> widget_boxes_;
+    WidgetGroupSummary widget_summary_{};
     // The displayed clock text, cached so the tick loop only relayouts when a minute
     // (or second, if shown) actually rolled over.
     std::wstring clock_text_;

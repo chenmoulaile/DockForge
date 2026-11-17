@@ -796,3 +796,7 @@ TEST_CASE("T-307 calendar layout: hit test maps arrows and day cells") {
                          layout.grid_origin_y_dip + 6.5f * layout.cell_dip, 42)
               .kind == CalendarPanelHit::Kind::None);
 }
+
+// T-302 widget-zone tests live in t302_widget_tests.inc (kept out of the CMake
+// test GLOB so it compiles exactly once, inside this translation unit).
+#include "t302_widget_tests.inc"
