@@ -1,4 +1,4 @@
-# TASKS.md · 任务板
+﻿# TASKS.md · 任务板
 
 > 状态：TODO / IN_PROGRESS / DONE / PARTIAL / BLOCKED
 > 规则：DoD ≤ 8 条；预估 > 1 会话必拆；无依赖标 `[P]` 可并行；禁止不可验收命名。
@@ -11,7 +11,7 @@
 |---|---|---|---|
 | M0 | 骨架与验证 | 构建链路、窗口、渲染、配置、图标、布局数学全部跑通 | DONE（T-006a 帧尾延迟仍 TODO P1） |
 | M1 | Dock 核心 | 可用的 Dock 栏（放大、启动、指示、拖拽、缩略图） | DONE（T-009..T-016 全部 DONE） |
-| M2 | Finder Bar | 顶部栏 | IN PROGRESS（左区 T-301 DONE、常驻与预留 T-302b DONE；中区 T-302 DONE；右区 T-307 DONE、T-303..T-306 TODO） |
+| M2 | Finder Bar | 顶部栏 | IN PROGRESS（左区 T-301 DONE、常驻与预留 T-302b DONE；中区 T-302 DONE；右区 T-307/T-306 DONE、T-303..T-305 TODO） |
 | M3 | Launchpad | 全屏网格启动器 | DONE (T-040/T-041/T-042 全部完成) |
 | M4 | 配置与主题 | 热重载 + 主题包 | DONE（T-050/T-051/T-052 全部 DONE；T-085 主题分发属 P1.5 队列） |
 | M5 | 系统集成 | 自启、隐藏任务栏、转储、日志轮转 | DONE（T-060/T-061/T-062 全部 DONE） |
@@ -1254,7 +1254,7 @@ GitHub: 已 push 至 <url> | 最新 commit <sha> | tag: <无/xxx>
 - 证据: `evidence/T-305/`
 
 ### T-306 · 输入法/电池/网络状态指示
-- 状态: TODO / 优先级: P5 / 依赖: T-300 / 预估: 1 会话
+- 状态: DONE（2026-11-18，ADR-0056；默认表收编 network=4/battery=5/ime=6，1s 采样实测 0.85-0.90Hz，七模式取证全 PASS，八张截图落 evidence/T-306/） / 优先级: P5 / 依赖: T-300 / 预估: 1 会话
 - DoD: 输入法状态（ImmGetDefaultIMEWnd + WM_IME_CONTROL，点击切换）；电池（GetSystemPowerStatus，<20% 变红）；网络（连接类型与强度）；刷新 ≤ 1Hz；无电池隐藏；点击展开对应面板
 - 证据: `evidence/T-306/`
 

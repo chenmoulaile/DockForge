@@ -514,17 +514,18 @@ TEST_CASE("T-307 right: same-order conflicts resolve by the C-31 declaration ord
     CHECK(boxes[0].type == RightType::WeatherBrief);
 }
 
-TEST_CASE("T-307 right: unregistered types are skipped, never drawn as placeholders") {
-    // The ask's rule: this task registers exactly clock and weather_brief; the other
-    // six wait for T-303..T-306 and cost no box, no gap, no width.
+TEST_CASE("T-307/T-306 right: unregistered types are skipped, never drawn as placeholders") {
+    // The ask's rule, updated as the tasks land: T-307 registered clock and
+    // weather_brief; T-306 flipped the three status indicators (ime/battery/
+    // network). The rest wait for T-303..T-305 and cost no box, no gap, no width.
     CHECK(dockforge::finderbar::RightTypeRegistered(RightType::Clock));
     CHECK(dockforge::finderbar::RightTypeRegistered(RightType::WeatherBrief));
+    CHECK(dockforge::finderbar::RightTypeRegistered(RightType::Ime));
+    CHECK(dockforge::finderbar::RightTypeRegistered(RightType::Battery));
+    CHECK(dockforge::finderbar::RightTypeRegistered(RightType::Network));
     CHECK_FALSE(dockforge::finderbar::RightTypeRegistered(RightType::TrayMirror));
     CHECK_FALSE(dockforge::finderbar::RightTypeRegistered(RightType::ControlCenter));
     CHECK_FALSE(dockforge::finderbar::RightTypeRegistered(RightType::NotificationCenter));
-    CHECK_FALSE(dockforge::finderbar::RightTypeRegistered(RightType::Ime));
-    CHECK_FALSE(dockforge::finderbar::RightTypeRegistered(RightType::Battery));
-    CHECK_FALSE(dockforge::finderbar::RightTypeRegistered(RightType::Network));
 
     // An entry that no renderer produced (a caller filtered it out before layout)
     // must also be invisible here - layout sees only what it is given.
@@ -654,15 +655,23 @@ TEST_CASE("T-307 clock: show_date off removes the date part entirely") {
           L"17:27");
 }
 
-TEST_CASE("T-307 config: an empty right table falls back to the frozen default") {
-    // The frozen default (ADR-0053): [{type:clock, order:0}].
+TEST_CASE("T-307/T-306 config: an empty right table falls back to the frozen default") {
+    // The frozen default: ADR-0053 pinned the clock at 0; ADR-0056 inserted the
+    // three status indicators at the pre-agreed positions - network=4, battery=5,
+    // ime=6 (order counts from the right edge, macOS reading order).
     dockforge::core::Config config;
     std::string error;
     REQUIRE(dockforge::core::ParseConfig("{}", config, &error));
     CHECK(error.empty());
-    REQUIRE(config.finderbar.right.size() == 1);
+    REQUIRE(config.finderbar.right.size() == 4);
     CHECK(config.finderbar.right[0].type == "clock");
     CHECK(config.finderbar.right[0].order == 0);
+    CHECK(config.finderbar.right[1].type == "network");
+    CHECK(config.finderbar.right[1].order == 4);
+    CHECK(config.finderbar.right[2].type == "battery");
+    CHECK(config.finderbar.right[2].order == 5);
+    CHECK(config.finderbar.right[3].type == "ime");
+    CHECK(config.finderbar.right[3].order == 6);
     CHECK(dockforge::core::SameRightItems(config.finderbar.right,
                                           dockforge::core::DefaultFinderBarRightItems()));
 
@@ -800,3 +809,6 @@ TEST_CASE("T-307 calendar layout: hit test maps arrows and day cells") {
 // T-302 widget-zone tests live in t302_widget_tests.inc (kept out of the CMake
 // test GLOB so it compiles exactly once, inside this translation unit).
 #include "t302_widget_tests.inc"
+
+// T-306 right-region status tests, same include-once rule.
+#include "t306_status_tests.inc"

@@ -197,11 +197,12 @@ bool SameWidgetItems(const std::vector<FinderBarWidgetItem>& a,
 std::vector<FinderBarWidgetItem> DefaultFinderBarWidgets();
 
 // The frozen default for finderbar.right. C-31 (P5) freezes the key shape but not the
-// default value, so T-307 pins it here (ADR-0053): the clock alone, at position 0 =
-// hard against the right edge, which is where macOS puts it. Later tasks extend this
-// table in place - control_center=1, notification_center=2, tray_mirror=3, network=4,
-// battery=5, ime=6 (see bar_layout.h for the full convention). weather_brief stays
-// out of the default table; the user opts in with [{type:"weather_brief",order:1}].
+// default value, so T-307 pinned the clock (ADR-0053: position 0 = hard against the
+// right edge, which is where macOS puts it) and T-306 inserted the three status
+// indicators at the pre-agreed positions (ADR-0056: network=4, battery=5, ime=6).
+// Later tasks extend this table in place - control_center=1, notification_center=2,
+// tray_mirror=3 (see bar_layout.h for the full convention). weather_brief stays out
+// of the default table; the user opts in with [{type:"weather_brief",order:1}].
 // An empty or missing finderbar.right falls back to this table.
 std::vector<FinderBarRightItem> DefaultFinderBarRightItems();
 

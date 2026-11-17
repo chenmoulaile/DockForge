@@ -1,0 +1,10 @@
+﻿T-306 evidence run mode=offline date=2026-11-18 03:09:58
+machine: Microsoft Windows 11 家庭版 中文版
+right_boxes: ime, battery, network, clock (total_width_dip=253.46484375)
+  [PASS] default right table renders clock+network+battery+ime (ADR-0056)
+  [PASS] left-to-right = ime < battery < network < clock (order 6/5/4/0 from right)
+  [PASS] battery item carries the 25 DIP icon beside percent text
+status: ime(valid=True label=A mode=0) battery(present=True pct=99 charging=True) network(connected=False online=False kind=无网络 bars=0)
+  [PASS] demo offline: not connected, no online
+saved D:\MacDock\evidence\T-306\bar_status_offline.png (780x320)
+verdict: ALL PASS

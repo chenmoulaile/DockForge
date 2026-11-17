@@ -281,12 +281,16 @@ std::optional<RightType> RightTypeFromName(const wchar_t* name) {
 }
 
 bool RightTypeRegistered(RightType type) {
-    // T-307 registers exactly these two. The rest flip here task by task (T-303
-    // tray_mirror, T-304 control_center, T-305 notification_center, T-306 ime /
-    // battery / network); until then they are skipped, never drawn as placeholders.
+    // T-307 registered Clock and WeatherBrief; T-306 flips the three status
+    // indicators. The rest flip here task by task (T-303 tray_mirror, T-304
+    // control_center, T-305 notification_center); until then they are skipped,
+    // never drawn as placeholders.
     switch (type) {
         case RightType::Clock:
         case RightType::WeatherBrief:
+        case RightType::Ime:
+        case RightType::Battery:
+        case RightType::Network:
             return true;
         default:
             return false;
@@ -300,7 +304,11 @@ namespace {
 float RightItemWidth(const RightItem& item, MeasureFn measure) {
     const float text_width = item.text.empty() ? 0.0f : measure(item.text.c_str(), kMenuFontDip);
     float width = kRightContentPaddingDip * 2.0f + text_width;
-    if (item.has_icon) width += kRightIconBoxDip + (text_width > 0.0f ? kRightIconTextGapDip : 0.0f);
+    if (item.has_icon) {
+        const float glyph_w = item.icon_width_dip > 0.0f ? item.icon_width_dip
+                                                         : kRightIconBoxDip;
+        width += glyph_w + (text_width > 0.0f ? kRightIconTextGapDip : 0.0f);
+    }
     return width;
 }
 
@@ -355,12 +363,17 @@ std::size_t LayoutRightGroup(const RightItem* items, std::size_t count, float wi
         box.type = item->type;
         box.text = item->text;
         box.has_icon = item->has_icon;
+        box.alert = item->alert;
         if (item->has_icon) {
             // The glyph sits left of the text (macOS order: symbol, then value) and is
-            // vertically centred in the bar - the painter draws into this exact square.
+            // vertically centred in the bar - the painter draws into this exact rect.
+            // The width follows the entry's own icon_width_dip (the battery's 25 DIP
+            // frame), the height stays the 16 DIP icon box.
+            const float glyph_w =
+                item->icon_width_dip > 0.0f ? item->icon_width_dip : kRightIconBoxDip;
             const float glyph_left = box_left + kRightContentPaddingDip;
             const float glyph_top = (bar_height - kRightIconBoxDip) * 0.5f;
-            box.icon = render::RectF{glyph_left, glyph_top, glyph_left + kRightIconBoxDip,
+            box.icon = render::RectF{glyph_left, glyph_top, glyph_left + glyph_w,
                                      glyph_top + kRightIconBoxDip};
         }
         out[written++] = box;

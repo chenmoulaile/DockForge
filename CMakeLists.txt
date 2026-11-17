@@ -48,7 +48,10 @@ target_link_libraries(dockforge_lib PUBLIC
   # T-302: centre-widget sampling - GetIfTable2 (network octets) and the WMI COM
   # plumbing for MSAcpi_ThermalZoneTemperature (the only allowed temperature
   # source; WinRing0 is forbidden by the T-206 DoD).
-  iphlpapi wbemuuid)
+  # T-306: right-region status indicators - imm32 (ImmGetDefaultIMEWnd for the
+  # WM_IME_CONTROL conversion-mode read/toggle) and wlanapi (WlanQueryInterface
+  # current-connection signal strength).
+  iphlpapi wbemuuid imm32 wlanapi)
 
 # ---------------------------------------------------------------- executable
 add_executable(DockForge ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp)

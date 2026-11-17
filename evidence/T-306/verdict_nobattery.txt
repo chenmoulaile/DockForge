@@ -1,0 +1,9 @@
+﻿T-306 evidence run mode=nobattery date=2026-11-18 03:10:37
+machine: Microsoft Windows 11 家庭版 中文版
+right_boxes: ime, network, clock (total_width_dip=173.27783203125)
+  [PASS] nobattery: battery box gone, ime+network+clock remain
+  [PASS] left-to-right = ime < network < clock (battery absent by design)
+status: ime(valid=True label=A mode=0) battery(present=False pct=0 charging=False) network(connected=True online=True kind=Wi-Fi bars=3)
+  [PASS] demo nobattery: battery item not rendered
+saved D:\MacDock\evidence\T-306\bar_status_nobattery.png (780x320)
+verdict: ALL PASS

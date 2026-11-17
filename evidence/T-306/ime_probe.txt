@@ -1,0 +1,6 @@
+foreground: P hwnd=00000000000102b8
+default IME window: 0000000000020200
+GETCONVERSIONMODE sent=1 mode=0x401 (native=1)
+GETSENTENCEMODE(0x0003) sent=1 mode=0x8
+GETOPENSTATUS(0x0005) sent=1 open=1
+SETCONVERSIONMODE sent=1 result=0 target=0x400 -> mode2=0x400 (F)

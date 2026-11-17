@@ -685,10 +685,15 @@ bool SameRightItems(const std::vector<FinderBarRightItem>& a,
     return std::equal(a.begin(), a.end(), b.begin());
 }
 
-// T-307 (ADR-0053): the frozen default right-region table. C-31 freezes the key shape
-// but not the default value, so this is where the default lives. See config.h.
+// The frozen default right-region table. T-307 (ADR-0053) pinned the clock at 0 and
+// the insertion convention; T-306 (ADR-0056) inserts the three status indicators at
+// their pre-agreed positions - network=4, battery=5, ime=6, i.e. leftmost of the
+// right group, the macOS reading order. See config.h for the semantics.
 std::vector<FinderBarRightItem> DefaultFinderBarRightItems() {
-    return {FinderBarRightItem{"clock", 0}};
+    return {FinderBarRightItem{"clock", 0},
+            FinderBarRightItem{"network", 4},
+            FinderBarRightItem{"battery", 5},
+            FinderBarRightItem{"ime", 6}};
 }
 
 bool operator==(const FinderBarWidgetItem& a, const FinderBarWidgetItem& b) {

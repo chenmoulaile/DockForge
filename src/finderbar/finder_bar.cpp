@@ -4,6 +4,7 @@
 #include "core/paths.h"
 #include "dock/dock_view.h"
 #include "finderbar/appbar.h"
+#include "finderbar/status_icons.h"
 #include "platform/win_common.h"
 #include "platform/window.h"
 
@@ -86,13 +87,24 @@ void LocalePictures(std::wstring* time_picture, std::wstring* date_picture) {
     }
 }
 
+// The battery's outer frame is ~25 DIP wide on the macOS menu bar (round10 top-bar
+// measurement, the number the ask pins); the icon box's height stays the shared 16.
+constexpr float kBatteryIconWidthDip = 25.0f;
+
 // Renders the configured finderbar.right table into layout inputs. Types without a
 // renderer (RightTypeRegistered) are skipped entirely - no box, no gap - so a config
 // referencing a widget a later task will register costs nothing today, and each task
 // flips its type live by extending RightTypeRegistered alone.
+//
+// T-306 status entries (ime / battery / network) render from the StatusHost sample.
+// Empty results drop the entry entirely, the same rule the centre zone uses: a
+// machine without a battery shows no battery item, a machine whose IME window does
+// not answer shows no input item - a slot for a thing that does not exist is
+// exactly the reserved-for-nothing damage T-301 avoided.
 std::vector<RightItem> BuildRightItems(const core::FinderBarConfig& config,
                                        const dock::weather::Snapshot& weather,
-                                       const SYSTEMTIME& now, const std::wstring& time_picture,
+                                       const StatusSample& status, const SYSTEMTIME& now,
+                                       const std::wstring& time_picture,
                                        const std::wstring& date_picture) {
     std::vector<RightItem> items;
     items.reserve(config.right.size());
@@ -109,7 +121,7 @@ std::vector<RightItem> BuildRightItems(const core::FinderBarConfig& config,
                      entry.type.c_str());
             continue;
         }
-        if (!RightTypeRegistered(*type)) continue;  // T-303..T-306 land here
+        if (!RightTypeRegistered(*type)) continue;  // T-303..T-305 land here
         RightItem item;
         item.type = *type;
         item.order = entry.order;
@@ -125,6 +137,31 @@ std::vector<RightItem> BuildRightItems(const core::FinderBarConfig& config,
                 // shows its own Unknown placeholder ring.
                 item.has_icon = true;
                 item.text = dock::WeatherTextFor(weather);
+                break;
+            case RightType::Ime:
+                // The conversion-mode label ("A" / "中"), text only - macOS's input
+                // item is a glyph on real hardware but the ask pins the mode text.
+                if (!status.ime_valid) continue;
+                item.text = ImeConversionLabel(status.ime_conversion_mode);
+                item.has_icon = false;
+                break;
+            case RightType::Battery:
+                // Hidden entirely when BatteryFlag says there is no battery (the
+                // T-306 "无电池隐藏"); otherwise the percent text rides beside the
+                // 25 DIP battery frame.
+                if (!status.battery_present) continue;
+                item.has_icon = true;
+                item.icon_width_dip = kBatteryIconWidthDip;
+                item.text = std::to_wstring(std::max(0, std::min(100, status.battery_percent))) +
+                            L"%";
+                item.alert = BatteryGradeForPercent(status.battery_percent) ==
+                             UsageGrade::Critical;
+                break;
+            case RightType::Network:
+                // Icon-only, like macOS: the type reads from the glyph (arcs vs
+                // plug) and the strength from how many arcs are lit.
+                item.has_icon = true;
+                item.text.clear();
                 break;
             default:
                 break;
@@ -724,6 +761,19 @@ bool FinderBar::Initialize(HINSTANCE instance, const core::Config& config) {
         DF_WARN(kModule, "calendar panel unavailable; clock clicks will no-op");
         calendar_panel_.reset();
     }
+    // The status detail popup (T-306): battery/network clicks drop this card. Same
+    // degrade-to-warning rule as the other two surfaces.
+    status_popup_ = std::make_unique<StatusPopup>();
+    if (!StatusPopup::RegisterWindowClass(instance) || !status_popup_->Create(instance)) {
+        DF_WARN(kModule, "status popup unavailable; battery/network clicks will no-op");
+        status_popup_.reset();
+    } else {
+        status_popup_ready_ = true;
+    }
+
+    // The 1s status sampler (T-306): starts only when the right table renders one
+    // of the three status types; a clock-only table pays nothing.
+    status_host_.Start(config_);
 
     // The bar spans the display edge to edge, so a rounded plate would show the desktop
     // through its corners at the top of the screen. Radius 0 is the macOS menu-bar shape.
@@ -837,6 +887,9 @@ void FinderBar::Shutdown() {
     // The widget host spawns a worker thread (T-302); it must be joined before
     // any other teardown touches shared state.
     widgets_.Stop();
+    // The status host holds a COM object and a wlanapi handle (T-306); released
+    // before the window goes down.
+    status_host_.Stop();
     if (foreground_hook_ != nullptr) {
         UnhookWinEvent(foreground_hook_);
         foreground_hook_ = nullptr;
@@ -849,6 +902,11 @@ void FinderBar::Shutdown() {
         calendar_panel_->Destroy();
         calendar_panel_.reset();
     }
+    if (status_popup_) {
+        status_popup_->Destroy();
+        status_popup_.reset();
+    }
+    status_popup_ready_ = false;
     weather_popup_.Destroy();
     weather_popup_ready_ = false;
     DestroyWindowAndSurface();
@@ -863,6 +921,7 @@ void FinderBar::SetEnabled(bool enabled) {
         // A hidden bar must not leave a calendar card or a forecast floating above the
         // desktop it was anchored to.
         CloseCalendarPanel();
+        CloseStatusPopup();
         weather_popup_.Hide();
         capture_.Stop();
         // Give the strip back before hiding. A reservation left behind after the bar
@@ -872,8 +931,10 @@ void FinderBar::SetEnabled(bool enabled) {
         appbar::ReleaseTopStrip();
         reserved_strip_px_ = 0;
         // Sampling stops with the bar: a hidden bar must not keep a WMI thread
-        // polling a surface nobody can see (T-302).
+        // polling a surface nobody can see (T-302), nor a status sampler reading
+        // adapters for a bar nobody can see (T-306).
         widgets_.Stop();
+        status_host_.Stop();
         // A hidden window keeps its region, which would still be a hit target. Reset it to
         // empty before hiding so nothing is left behind if the window is shown again by
         // another path.
@@ -920,8 +981,10 @@ void FinderBar::SetEnabled(bool enabled) {
     region_height_px_ = -1;
     // The centre widgets' sampling follows the bar's visibility (T-302): a
     // visible bar runs the Tick-chain sampler and the thermal worker; a table
-    // with no registered type starts nothing at all.
+    // with no registered type starts nothing at all. The T-306 status host
+    // follows the same rule.
     widgets_.Start(config_);
+    status_host_.Start(config_);
     ApplyRegion();
     Repaint();
 }
@@ -1010,6 +1073,10 @@ void FinderBar::ReloadConfig(const core::Config& config) {
         } else {
             widgets_.Stop();
         }
+        // T-306: the status host re-arms the same way - a reload that removes the
+        // last status entry from finderbar.right stops the sampler, one that adds
+        // the first starts it.
+        status_host_.Start(config_);
     }
     Relayout();
     ApplyRegion();
@@ -1061,8 +1128,8 @@ void FinderBar::Relayout() {
     LocalePictures(&time_picture, &date_picture);
     clock_text_ = FormatBarClockText(now, config_.clock, time_picture.c_str(),
                                      date_picture.c_str());
-    const std::vector<RightItem> right_items =
-        BuildRightItems(config_, weather_, now, time_picture, date_picture);
+    const std::vector<RightItem> right_items = BuildRightItems(
+        config_, weather_, status_host_.Sample(), now, time_picture, date_picture);
     right_boxes_ = LayoutRightGroup(right_items, width_dip_, height_dip_, &MeasureBarText,
                                     &right_summary_);
 
@@ -1203,11 +1270,16 @@ void FinderBar::Repaint() {
                                     render::TextAlign::Center);
             }
 
-            // Right region (T-307): glyph first, then text, the macOS order. The
-            // weather glyph reuses dock::DrawWeatherGlyph verbatim (dock_view.h:153 /
-            // dock_view.cpp:223 - the ask's grep shows this is the only renderer that
-            // exists; weather.cpp draws nothing). The Unknown kind draws its own
-            // placeholder ring, so an empty snapshot stays visibly occupied.
+            // Right region (T-307/T-306): glyph first, then text, the macOS order.
+            // The weather glyph reuses dock::DrawWeatherGlyph verbatim
+            // (dock_view.h:153 / dock_view.cpp:223 - the ask's grep shows this is
+            // the only renderer that exists; weather.cpp draws nothing). The
+            // Unknown kind draws its own placeholder ring, so an empty snapshot
+            // stays visibly occupied. The T-306 status glyphs are self-drawn
+            // geometry from status_icons.cpp - the battery's level bar turns the
+            // frozen HIG systemRed below 20% (the box's alert flag), the Wi-Fi
+            // arcs dim beyond the current bar count.
+            const StatusSample& status = status_host_.Sample();
             for (std::size_t i = 0; i < right_boxes_.size(); ++i) {
                 const RightBox& box = right_boxes_[i];
                 const render::RectF rect{box.rect.left, box.rect.top + offset, box.rect.right,
@@ -1215,16 +1287,49 @@ void FinderBar::Repaint() {
                 if (static_cast<int>(i) == hover_right_ && !menu_running_) {
                     backend_->FillRoundedRect(rect, 5.0f, hover_color);
                 }
-                if (box.has_icon && box.type == RightType::WeatherBrief) {
+                if (box.has_icon) {
                     const render::RectF icon{box.icon.left, box.icon.top + offset,
                                              box.icon.right, box.icon.bottom + offset};
-                    dock::DrawWeatherGlyph(*backend_, icon,
-                                           weather_.valid && !weather_.failed
-                                               ? weather_.kind
-                                               : dock::weather::Kind::Unknown);
+                    switch (box.type) {
+                        case RightType::WeatherBrief:
+                            dock::DrawWeatherGlyph(*backend_, icon,
+                                                   weather_.valid && !weather_.failed
+                                                       ? weather_.kind
+                                                       : dock::weather::Kind::Unknown);
+                            break;
+                        case RightType::Battery:
+                            DrawBatteryGlyph(*backend_, icon, status.battery_percent,
+                                             status.battery_charging, box.alert, glyph_color);
+                            break;
+                        case RightType::Network:
+                            if (status.network_kind == ConnectionKind::Ethernet) {
+                                DrawEthernetGlyph(*backend_, icon, glyph_color);
+                            } else {
+                                // Wi-Fi, and the disconnected state too: offline is
+                                // the Wi-Fi shape with every arc dim (bars 0), the
+                                // same treatment macOS gives an absent link - a plug
+                                // glyph would claim a wired connection nobody has.
+                                DrawWifiGlyph(*backend_, icon, status.wifi_bars, glyph_color);
+                            }
+                            break;
+                        default:
+                            break;
+                    }
                 }
                 if (!box.text.empty()) {
-                    backend_->DrawLabel(box.text.c_str(), rect, kMenuFontDip, text_color,
+                    const render::ColorF& item_color =
+                        box.alert ? kWidgetCriticalColor : text_color;
+                    // With an icon, centre the text in the space RIGHT of the glyph
+                    // (the layout's [padding][icon][gap][text][padding] run), not
+                    // across the whole box - the whole-box centre used to land the
+                    // battery percent on top of the glyph. Icon-less entries (the
+                    // clock, the ime label) keep the full-box centre.
+                    const render::RectF text_rect =
+                        box.has_icon
+                            ? render::RectF{box.icon.right, rect.top,
+                                            rect.right - kRightContentPaddingDip, rect.bottom}
+                            : rect;
+                    backend_->DrawLabel(box.text.c_str(), text_rect, kMenuFontDip, item_color,
                                         render::TextAlign::Center);
                 }
             }
@@ -1309,6 +1414,14 @@ bool FinderBar::Tick(double delta_ms, const core::Config& config) {
         Relayout();
     }
 
+    // Right-region status (T-306): the ime/battery/network indicators sample HERE,
+    // on the bar's Tick chain at the fixed 1s period (never inside Paint - the
+    // same C-23 rule ADR-0054 records for the centre zone). A changed label, tier
+    // or glyph kind re-lays the right region. Independent of the T-302 WidgetHost
+    // and its 2s period.
+    const bool status_changed = status_host_.Tick(delta_ms, foreground_.hwnd);
+    if (status_changed) Relayout();
+
     // The clock rolls over at most once per minute (per second with show_seconds);
     // comparing the cached text is the cheap dirty check, and it runs BEFORE the hit
     // tests so a rollover that re-lays the bar out never leaves this frame's hover
@@ -1365,7 +1478,9 @@ bool FinderBar::Tick(double delta_ms, const core::Config& config) {
 
     const bool moved = std::abs(before.progress - auto_hide_.progress) > 0.0005f;
     const bool hover_changed = previous_hover != hover_box_ || previous_right_hover != hover_right_;
-    if (!moved && !hover_changed && !foreground_changed && !widgets_changed) return false;
+    if (!moved && !hover_changed && !foreground_changed && !widgets_changed && !status_changed) {
+        return false;
+    }
 
     if (moved) ApplyRegion();
     Repaint();
@@ -1452,9 +1567,40 @@ void FinderBar::OnRightClick(const RightBox& box) {
             weather_popup_.Show(weather_, today, anchor_x_px, bottom_px, dpi_);
             break;
         }
+        case RightType::Ime: {
+            // T-306: the click IS the toggle - WM_IME_CONTROL(IMC_SETCONVERSIONMODE)
+            // with the flipped native bit to the tracked window's default IME
+            // window, then the read-back flips the label in the same frame. No
+            // popup: the spec pins the popup to the battery/network details.
+            if (!ToggleImeMode()) {
+                DF_WARN(kModule, "ime toggle unavailable (no IME window answered)");
+            }
+            break;
+        }
+        case RightType::Battery:
+        case RightType::Network: {
+            // T-306: the battery and the network item open the same simple detail
+            // card (电量与连接详情). The Wi-Fi *list* belongs to T-304b's control
+            // centre and is deliberately not here. Toggled like every status-item
+            // popup: a second click closes the open card.
+            if (status_popup_ != nullptr && status_popup_->Visible()) {
+                status_popup_->Close();
+                return;
+            }
+            if (status_popup_ == nullptr) {
+                DF_WARN(kModule, "status popup unavailable this run");
+                return;
+            }
+            const int bar_bottom_px = display_.monitor.top + height_px_;
+            const float centre_x_dip = (box.rect.left + box.rect.right) * 0.5f;
+            status_popup_->Open(dpi_, display_.monitor, bar_bottom_px, centre_x_dip,
+                                status_host_.Sample());
+            break;
+        }
         default:
-            // Registered types whose panel belongs to a later task (none today) land
-            // here; clicking them is a no-op rather than a crash.
+            // Registered types whose panel belongs to a later task (tray_mirror,
+            // control_center, notification_center) land here; clicking them is a
+            // no-op rather than a crash.
             break;
     }
 }
@@ -1519,6 +1665,31 @@ bool FinderBar::OpenWeatherPopup() {
         }
     }
     return false;
+}
+
+bool FinderBar::OpenStatusPopup() {
+    if (!ready_ || window_ == nullptr || !enabled_) return false;
+    if (!status_popup_ready_) return false;
+    // Toggle through the real click path: the first battery/network box (the
+    // default table places both) gets its click, which opens or closes the card.
+    // The sample the card shows is taken inside OnRightClick, live.
+    for (const RightBox& box : right_boxes_) {
+        if (box.type == RightType::Battery || box.type == RightType::Network) {
+            OnRightClick(box);
+            return status_popup_ != nullptr && status_popup_->Visible();
+        }
+    }
+    DF_WARN(kModule, "status popup requested but no battery/network item is configured");
+    return false;
+}
+
+void FinderBar::CloseStatusPopup() {
+    if (status_popup_ != nullptr) status_popup_->Close();
+}
+
+bool FinderBar::ToggleImeMode() {
+    if (!ready_ || !enabled_) return false;
+    return status_host_.ToggleImeConversionMode(foreground_.hwnd);
 }
 
 bool FinderBar::OpenMenuForBox(std::size_t box_index) {
@@ -1835,15 +2006,39 @@ std::string FinderBar::SnapshotJson() const {
     j["clock_text"] = core::WideToUtf8(clock_text_);
     j["right_width_dip"] = right_summary_.total_width_dip;
     j["calendar_visible"] = CalendarPanelVisible();
+    j["status_popup_visible"] = StatusPopupVisible();
     nlohmann::json right_boxes = nlohmann::json::array();
     for (const RightBox& box : right_boxes_) {
         right_boxes.push_back({{"type", core::WideToUtf8(RightTypeName(static_cast<int>(box.type)))},
                                {"left", box.rect.left},
                                {"right", box.rect.right},
                                {"text", core::WideToUtf8(box.text)},
-                               {"icon", box.has_icon}});
+                               {"icon", box.has_icon},
+                               {"alert", box.alert}});
     }
     j["right_boxes"] = right_boxes;
+
+    // T-306: the full status sample - what the indicators render, plus the
+    // sampling bookkeeping the 1Hz evidence record diffs against wall clock
+    // (samples must grow by at most ceil(elapsed_seconds) between two reads).
+    // The *_item_rendered flags answer "is there a box on the bar right now",
+    // which is what a screenshot assertion needs: the ime/battery items drop
+    // themselves when the machine cannot answer, and a type missing from the
+    // configured table was never drawn.
+    const StatusSample& status = status_host_.Sample();
+    j["status"] = nlohmann::json::parse(status_host_.SnapshotJson());
+    const auto table_has = [this](RightType type) {
+        for (const core::FinderBarRightItem& item : config_.right) {
+            const std::optional<RightType> parsed =
+                RightTypeFromName(core::Utf8ToWide(item.type).c_str());
+            if (parsed.has_value() && *parsed == type) return true;
+        }
+        return false;
+    };
+    j["status"]["ime_item_rendered"] = table_has(RightType::Ime) && status.ime_valid;
+    j["status"]["battery_item_rendered"] =
+        table_has(RightType::Battery) && status.battery_present;
+    j["status"]["network_item_rendered"] = table_has(RightType::Network);
 
     // T-302: the centre widget row, its snapshot and its summary - everything a
     // probe needs to assert on the widgets without a screenshot.

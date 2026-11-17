@@ -1,0 +1,20 @@
+﻿T-306 evidence run mode=real date=2026-11-18 03:13:17
+machine: Microsoft Windows 11 家庭版 中文版
+right_boxes: ime, battery, network, clock (total_width_dip=255.79443359375)
+  [PASS] default right table renders clock+network+battery+ime (ADR-0056)
+  [PASS] left-to-right = ime < battery < network < clock (order 6/5/4/0 from right)
+  [PASS] battery item carries the 25 DIP icon beside percent text
+status: ime(valid=True label=中 mode=1025) battery(present=True pct=99 charging=True) network(connected=True online=True kind=Wi-Fi bars=3)
+sampling: samples 5 -> 12 (delta=7), last-sample stamp span=7063ms of real time
+sampling: mean spacing between consecutive samples = 1177ms -> rate = 0.849 Hz
+  [PASS] refresh <= 1Hz: mean sample spacing 1177ms >= 950ms
+  [PASS] host running with samples counted
+ime toggle: mode 1025 (中) -> 0 (A)
+  [PASS] ime click toggles conversion mode immediately (IMC_SETCONVERSIONMODE)
+  [PASS] label follows the native bit
+  [PASS] second toggle restores the original mode
+  [PASS] status popup opens through the probe (click path)
+  [PASS] second click closes the popup (toggle)
+saved D:\MacDock\evidence\T-306\bar_status_real.png (780x320)
+saved D:\MacDock\evidence\T-306\popup_open_real.png
+verdict: ALL PASS

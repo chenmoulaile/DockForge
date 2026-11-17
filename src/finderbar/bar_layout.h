@@ -252,6 +252,14 @@ std::optional<RightType> RightTypeFromName(const wchar_t* name);
 // exactly Clock and WeatherBrief; the other six flip when their tasks land.
 bool RightTypeRegistered(RightType type);
 
+// Side of the glyph box a right entry carries, 16 DIP: the same raster family as
+// kSystemMenuGlyphDip (14 DIP) - one notch larger because status icons sit next to
+// 13 DIP text, and 14 would read small against it. Beautiful's top bar uses 16x16
+// status images for the same reason (TopBarWindow.xaml.cs NewStatusImage).
+// Declared above the entry structs because RightItem's default member initializer
+// references it.
+constexpr float kRightIconBoxDip = 16.0f;
+
 // One right-region entry, already rendered into its display form. The layout is a
 // pure function over these: a renderer (finder_bar.cpp) produces the text/icon flags
 // from live state, the layout only positions. An entry with neither icon nor text
@@ -262,17 +270,27 @@ struct RightItem {
     RightType type = RightType::Clock;
     int order = 0;          // 0 = rightmost (see the block comment above)
     std::wstring text;      // display text drawn at 13 DIP; empty = no text
-    bool has_icon = false;  // draw a 16 DIP square glyph box (kRightIconBoxDip)
+    bool has_icon = false;  // draw a glyph box (kRightIconBoxDip tall; width below)
+    // Width of the glyph box when has_icon. The default is the 16 DIP square every
+    // status icon shares; T-306's battery needs the wider macOS frame (~25 DIP,
+    // measured off the round10 top bar) and sets this. The height stays
+    // kRightIconBoxDip and the painter centres its glyph inside.
+    float icon_width_dip = kRightIconBoxDip;
+    // The item's one alarm flag (T-306 battery <20%). The painter renders the text
+    // in the frozen HIG systemRed when set; the three-tier grade machinery stays
+    // the centre zone's because the spec pins no orange band for the battery.
+    bool alert = false;
 };
 
 // One laid-out right-region box. Like BarBox, the box spans the full bar height so
-// the whole row is clickable; `icon` is the inner glyph square, valid when
-// has_icon, vertically centred.
+// the whole row is clickable; `icon` is the inner glyph rect, valid when has_icon,
+// vertically centred, `icon_width_dip` wide.
 struct RightBox {
     render::RectF rect{};
     RightType type = RightType::Clock;
     std::wstring text;
     bool has_icon = false;
+    bool alert = false;
     render::RectF icon{};
 };
 
@@ -318,12 +336,6 @@ constexpr float kRightItemGapDip = 12.0f;
 // clock) and icon entries share it, so a hover highlight has equal breathing room
 // on both shapes.
 constexpr float kRightContentPaddingDip = 6.0f;
-
-// Inner square that carries a widget glyph, 16 DIP on a side: the same raster family
-// as kSystemMenuGlyphDip (14 DIP) - one notch larger because status icons sit next to
-// 13 DIP text, and 14 would read small against it. Beautiful's top bar uses 16x16
-// status images for the same reason (TopBarWindow.xaml.cs NewStatusImage).
-constexpr float kRightIconBoxDip = 16.0f;
 
 // Gap between a glyph box and its text inside one entry (weather_brief: glyph +
 // temperature).

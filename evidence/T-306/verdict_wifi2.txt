@@ -1,0 +1,10 @@
+﻿T-306 evidence run mode=wifi2 date=2026-11-18 03:10:08
+machine: Microsoft Windows 11 家庭版 中文版
+right_boxes: ime, battery, network, clock (total_width_dip=251.45263671875)
+  [PASS] default right table renders clock+network+battery+ime (ADR-0056)
+  [PASS] left-to-right = ime < battery < network < clock (order 6/5/4/0 from right)
+  [PASS] battery item carries the 25 DIP icon beside percent text
+status: ime(valid=True label=A mode=0) battery(present=True pct=99 charging=True) network(connected=True online=True kind=Wi-Fi bars=2)
+  [PASS] demo wifi2: Wi-Fi connected, 2 bars
+saved D:\MacDock\evidence\T-306\bar_status_wifi2.png (780x320)
+verdict: ALL PASS

@@ -43,6 +43,8 @@
 #include "finderbar/bar_layout.h"
 #include "finderbar/bar_widgets.h"
 #include "finderbar/calendar_panel.h"
+#include "finderbar/status_popup.h"
+#include "finderbar/status_sampler.h"
 #include "platform/composition.h"
 #include "platform/display.h"
 #include "render/backend.h"
@@ -266,6 +268,22 @@ public:
     // foreground-claiming surface with synthetic mouse events.
     bool OpenWeatherPopup();
 
+    // T-306: opens (or toggles closed) the status detail popup under the battery /
+    // network box, exactly as a click would. Probe-path mirror of the same panel:
+    // a probe cannot drive a foreground-claiming surface with synthetic mouse
+    // events, so the click action itself is what the probe calls.
+    bool OpenStatusPopup();
+    void CloseStatusPopup();
+    bool StatusPopupVisible() const {
+        return status_popup_ && status_popup_->Visible();
+    }
+    // T-306: the ime item's click action - send WM_IME_CONTROL
+    // (IMC_SETCONVERSIONMODE) with the flipped native bit to the tracked window's
+    // default IME window. Exposed for the probe channel the same way; the bar's
+    // own OnRightClick path calls StatusHost::ToggleImeConversionMode through this
+    // method too, so the probe certifies the production path.
+    bool ToggleImeMode();
+
     const std::vector<RightBox>& RightBoxes() const { return right_boxes_; }
 
     // Centre widgets (T-302): the laid-out monitoring row and its host. The host
@@ -370,6 +388,13 @@ private:
     // must not fight over one popup window.
     dock::WeatherPopup weather_popup_;
     bool weather_popup_ready_ = false;
+
+    // Right-region status (T-306): the 1s sampler for ime/battery/network and the
+    // detail popup a battery/network click drops. The host samples on this bar's
+    // Tick chain only when the right table renders one of the three types.
+    StatusHost status_host_;
+    std::unique_ptr<StatusPopup> status_popup_;
+    bool status_popup_ready_ = false;
 
     bool menu_running_ = false;
     HANDLE menu_thread_ = nullptr;

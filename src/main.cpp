@@ -2080,6 +2080,20 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
             // T-307: opens the 3-day forecast under the weather_brief box, same rule.
             const bool opened = finder_bar.OpenWeatherPopup();
             DF_INFO("finderbar", "probe weather opened=%d", opened ? 1 : 0);
+        } else if (command == "status") {
+            // T-306: opens (or toggles) the battery/network status detail card
+            // through the same OnRightClick path a real click takes. A probe cannot
+            // drive a foreground-claiming panel with synthetic mouse events; this
+            // mirrors the "calendar"/"weather" precedents.
+            const bool opened = finder_bar.OpenStatusPopup();
+            DF_INFO("finderbar", "probe status opened=%d", opened ? 1 : 0);
+        } else if (command == "ime") {
+            // T-306: the ime item's click action - flip the IME conversion mode via
+            // WM_IME_CONTROL(IMC_SETCONVERSIONMODE) on the tracked window's default
+            // IME window. The bar's label flips in the same frame; the state file
+            // (written below) records the new mode for the probe to assert on.
+            const bool toggled = finder_bar.ToggleImeMode();
+            DF_INFO("finderbar", "probe ime toggled=%d", toggled ? 1 : 0);
         } else if (command == "cancel") {
             // The menu is modal on its own thread; a probe that opened one has to be
             // able to close it, or every later command waits behind a stuck popup.
