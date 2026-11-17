@@ -2,21 +2,21 @@
  "project": "DockForge",
  "schema": 1,
  "milestone": "M2",
- "last_task": "T-302b+T-302c",
- "last_commit": "39e1301",
+ "last_task": "T-307+T-302+T-302d+T-306+T-304",
+ "last_commit": "b540e57",
  "current_module": "finderbar+tray",
- "current_task": "T-302",
+ "current_task": null,
  "counters": {
-  "total": 36,
-  "done": 33,
-  "partial": 3,
-  "blocked": 0
+  "total": 89,
+  "done": 38,
+  "partial": 4,
+  "blocked": 2
  },
  "remote": {
   "name": "origin",
   "url": "https://github.com/chenmoulaile/DockForge.git",
-  "status": "pushed",
-  "reason": "首次推送 4d58d6a 完成；此后 credential.helper 改为 store，push 无需任何人工交互（git config --local 已固化 lowspeedlimit=0/lowspeedtime=0/http.version=HTTP\\/1.1）",
+  "status": "pending",
+  "reason": "T-307 会话推送 rc=128 失败一次；此后五包提交已随 65e37f3 推达（本机实测 origin/main=65e37f3，git log origin/main..HEAD 仅剩 b540e57 未推）；b540e57 与台账提交待统一推送。credential.helper=store 免交互可用（git config --local 固化 lowspeedlimit=0/lowspeedtime=0/http.version=HTTP/1.1）",
   "retry_command": "git push origin main"
  },
  "toolchain": {
@@ -200,5 +200,5 @@
   "ld.exe: cannot open output file bin\\DockForge.exe: Permission denied 是上一次探针留下的进程还占着 exe，不是链接配置问题",
   "运行时画的 HICON 要走 premultiplied BGRA + CreateIconIndirect；BITMAPV5HEADER 的 bV5Height 必须为负值（top-down）"
  ],
- "updated_at": "2026-11-01T04:20:00+08:00"
+ "updated_at": "2026-11-18T06:05:39+08:00"
 }

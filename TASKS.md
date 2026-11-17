@@ -1264,7 +1264,8 @@ GitHub: 已 push 至 <url> | 最新 commit <sha> | tag: <无/xxx>
 - 证据: `evidence/T-306/`
 
 ### T-307 · 时钟/日历/天气与 Finder 栏整合
-- 状态: TODO / 优先级: P5 / 依赖: T-300、T-207、T-075 / 预估: 1 会话
+- 状态: DONE（2026-11-18，ADR-0053；右区框架先行：clock/weather_brief 渲染器 + LayoutRightGroup 右起布局接入 status_width、月历面板 360×640/圆角12/今日蓝圈、finderbar.clock.* 三键与 finderbar.right 默认表进 config；诚实边界：Esc 关闭子句依赖真实前台归属未确定性验证（点击外部关闭已经真实鼠标链路验证）；浅色 plate 对比度属 T-301 既有 plate 行为本包未修） / 优先级: P5 / 依赖: T-300、T-207、T-075 / 预估: 1 会话
+- 完成: 右区实测宽 right_width_dip=158.64/154.62 两主题、左右区无重叠（左区末盒 right=176.4 << 天气盒左缘 1269.4）；月历面板点外部关闭经真实鼠标链路验证（state calendar_visible:false）；天气简显复用 dock::DrawWeatherGlyph + T-075 快照链，失败占位 --°；T-207 数字式口径对接裁决冻结在 config.h FinderBarClockConfig / finder_bar.h FormatBarClock 注释 + ADR-0053；finderbar_layout_test 新增 17 用例，tools/build.ps1 -Action all 门禁 5195 断言/522 用例全绿
 - DoD: 时钟支持 T-207 定制并与 Dock 日历共用配置；点击展开日历面板；天气可常驻（T-302）或时钟旁简显；点击显示 3 天预报；时间格式跟随系统区域 + 自定义
 - 证据: `evidence/T-307/`
 
