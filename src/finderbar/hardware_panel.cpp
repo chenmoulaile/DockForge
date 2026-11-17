@@ -267,22 +267,22 @@ const wchar_t* CcSettingsPageLabel(CcSettingsPage page) {
     }
 }
 
-// The macOS menu-bar control centre glyph. ADR-0058 redraws it: the reference
-// entrance (round10 x2816-2835, control-center.png / SymbolControlCenter) is a
-// 2x2 grid of four OUTLINED rounded squares - not the dual toggle this used to
-// draw, which the acceptance measured as a different icon at 1:1. Drawn from the
-// slot so it scales with the layout box.
+// The macOS menu-bar control centre glyph. ADR-0058 second round: the grid stays
+// (round10's SymbolControlCenter form, confirmed by the first acceptance round)
+// but the whole glyph now fits the reference's 20x20 physical px = 10 DIP on the
+// 16 DIP box - the first round drew it 1.75x too large with too-thick strokes.
 void DrawControlCenterGlyph(render::IRenderBackend& backend, const render::RectF& slot,
                             const render::ColorF& color) {
     const float w = slot.Width();
     const float h = slot.Height();
     if (w <= 0.0f || h <= 0.0f) return;
-    const float stroke = std::max(1.0f, w * 0.075f);
-    // Four squares in a 2x2 grid, centred, with a gutter between them.
-    const float gutter = w * 0.10f;
-    const float cell = (std::min(w, h) - gutter) * 0.5f;
-    const float left = slot.CenterX() - cell - gutter * 0.5f;
-    const float top = slot.CenterY() - cell - gutter * 0.5f;
+    // The glyph box is 62.5% of the slot (10 DIP at the 16 DIP icon box).
+    const float glyph = std::min(w, h) * 0.625f;
+    const float stroke = std::max(0.8f, glyph * 0.09f);
+    const float gutter = glyph * 0.20f;
+    const float cell = (glyph - gutter) * 0.5f;
+    const float left = slot.CenterX() - glyph * 0.5f;
+    const float top = slot.CenterY() - glyph * 0.5f;
     const float radius = cell * 0.30f;
     for (int row = 0; row < 2; ++row) {
         for (int col = 0; col < 2; ++col) {

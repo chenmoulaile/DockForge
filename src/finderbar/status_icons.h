@@ -6,12 +6,13 @@
 // No Apple artwork, no SF Symbols, no image files; the Beautiful round10/round5
 // evidence screenshots are measurement references only.
 //
-// ADR-0058 redraws the battery and the Wi-Fi arcs against the round10 pixel
-// scan the fidelity acceptance recorded: the reference battery is
-// VERTICAL (a ~10x30 physical px outlined body with a cap on TOP, not the
-// horizontal 25x12 pill this file used to draw), and the reference WiFi arcs are
-// SOLID strokes (dense overlapping discs), not the dotted chains the first
-// renderer used.
+// ADR-0058 second round pins every glyph's size to the reference's own pixel
+// measurements (the first round's shapes were right, the SCALE and style were
+// not): battery = SOLID white body with a grey cap, ~11x30 physical px; wifi =
+// solid bands, 19x16 px; spotlight = a solid thin-line magnifier, 16 px; tray =
+// ONE solid chevron, not a dotted mountain; bell = the reference bell.png's RED
+// rounded tile with a white bell inside; volume = an upright speaker with TWO
+// wave arcs, ~32 px wide.
 //
 // Every painter derives its geometry from the slot it is given, so the bar's 16
 // DIP icon box and the status popup's larger detail rows share one code path and
@@ -22,21 +23,17 @@
 
 namespace dockforge::finderbar {
 
-// The battery: a VERTICAL outline body with a cap on top, an interior level bar
-// that fills from the bottom, and a bolt when charging. `percent` is 0..100;
-// `alert` paints the level (and nothing else) in the frozen HIG systemRed, the
-// <20% state the T-306 spec pins. `color` is the glyph's body colour - the bar
-// passes its theme glyph colour, the popup its text colour.
+// The battery: a SOLID body (the reference's full-charge white card) with a cap on
+// top, a RED body when `alert` (<20%, the frozen HIG systemRed), and a dark bolt
+// when charging. `percent` drives nothing but the alert flag's threshold today -
+// the reference's solid card does not show a level bar.
 void DrawBatteryGlyph(render::IRenderBackend& backend, const render::RectF& slot,
                       int percent, bool charging, bool alert,
                       const render::ColorF& color);
 
-// Wi-Fi: the apex dot and the three arcs the ask names, drawn as SOLID arc bands
-// (dense overlapping discs along circular paths - an arc is not in the C-04
-// primitive set, and the acceptance measurement says the reference arcs read as
-// continuous strokes, not dot chains). `bars` is 0..4 from WifiBarsForQuality;
-// arcs beyond the bar count render dimmed, so strength is readable at a glance
-// and a disconnected state is visibly dim rather than empty.
+// Wi-Fi: the apex dot and the three arcs as SOLID bands sized to the reference's
+// 19x16 physical px (the first round drew them 1.5x too large). `bars` is 0..4
+// from WifiBarsForQuality; arcs beyond the bar count render dimmed.
 void DrawWifiGlyph(render::IRenderBackend& backend, const render::RectF& slot, int bars,
                    const render::ColorF& color);
 
@@ -45,29 +42,29 @@ void DrawWifiGlyph(render::IRenderBackend& backend, const render::RectF& slot, i
 void DrawEthernetGlyph(render::IRenderBackend& backend, const render::RectF& slot,
                        const render::ColorF& color);
 
-// The notification bell (notification_center, C-31 enum): a bell dome over a
-// base bar, with the clapper dot beneath. Resident right-cluster item per the
-// acceptance reference (round10 x2356-2765 keeps a bell among the four fixtures).
+// The notification bell: the reference bell.png's RED rounded tile with a WHITE
+// bell inside (round10 x2607-2636).
 void DrawBellGlyph(render::IRenderBackend& backend, const render::RectF& slot,
                    const render::ColorF& color);
 
-// The tray chevron (tray_mirror, C-31 enum): an upward-pointing caret built from
-// stepped squares (the same stepped-diagonal trick the weather thunder glyph
-// uses - no rotated primitive exists in the C-04 set). Marks the collapsed
-// overflow the reference shows as the ^ fixture.
+// The tray chevron (tray_mirror, C-31 enum): ONE solid upward caret built from
+// densely overlapping squares (the first round's two dotted mountain layers read
+// wrong). Marks the collapsed overflow.
 void DrawTrayGlyph(render::IRenderBackend& backend, const render::RectF& slot,
                    const render::ColorF& color);
 
-// The volume speaker (volume, C-31 enum extended by ADR-0058): a solid speaker
-// body with one sound-wave arc. The reference fixture shows the muted form
-// (speaker + slash); this painter draws the unmuted form because it is the only
-// state the bar can honestly claim without an audio read on its Tick chain - the
-// mute slash belongs to the control centre, which owns the audio state.
+// The volume speaker (volume, C-31 enum extended by ADR-0058): an UPRIGHT solid
+// speaker with TWO sound-wave arc bands, sized to the reference's ~32 px width.
+// The reference fixture shows the muted form (speaker + slash); this painter
+// draws the unmuted form because it is the only state the bar can honestly claim
+// without an audio read on its Tick chain - the mute slash belongs to the control
+// centre, which owns the audio state.
 void DrawVolumeGlyph(render::IRenderBackend& backend, const render::RectF& slot,
                      const render::ColorF& color);
 
-// The spotlight magnifier (spotlight, C-31 enum extended by ADR-0058): a ring and
-// a stepped-square handle, the launcher fixture.
+// The spotlight magnifier (spotlight, C-31 enum extended by ADR-0058): a solid
+// thin-line lens ring and a short handle, sized to the reference's 16 px (the
+// first round drew a dotted ring 2x too large).
 void DrawSpotlightGlyph(render::IRenderBackend& backend, const render::RectF& slot,
                         const render::ColorF& color);
 

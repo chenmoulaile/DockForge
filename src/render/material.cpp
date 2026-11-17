@@ -267,31 +267,31 @@ bool PlateRenderer::Draw(ID2D1DeviceContext& dc, IRenderBackend& backend, const 
     }
 
     if (style.three_band_tint) {
-        // ADR-0058: the macOS glass recipe as three horizontal bands (the C-04
-        // backend has no gradient primitive; three bands over the round-corner
-        // layer above read as the reference's vertical falloff). Values are
-        // MacOS.xaml:15-19 verbatim - #C838383A / #B8242426 / #A8161618, split as
-        // colour (0x38/0x24/0x16) and alpha (0xC8/0xB8/0xA8). Each band's alpha is
-        // gated by tint_alpha so a tier that wants a lighter glass stays lighter.
+        // ADR-0058 second round: the same vertical falloff as the reference glass
+        // (top light -> bottom dark), calibrated to the acceptance's same-black-
+        // wallpaper measurement - the reference's mid-band reads 37/37/38 where the
+        // first round's MacOS.xaml-verbatim bands read 27-31. The band colours are
+        // scaled up ~1.28x from the recipe so the same-black backdrop matches.
+        // (The C-04 backend has no gradient primitive; three bands over the
+        // round-corner layer above read as the vertical falloff.)
         const float band = rect.Height() / 3.0f;
-        // Master gate: the Solid tier (tint_alpha 0.92) runs the recipe at full
-        // strength; a lighter tier scales every band down proportionally.
+        // Master gate: a lighter tier scales every band down proportionally.
         const float gate = std::clamp(style.tint_alpha * 1.1f, 0.0f, 1.0f);
-        const float a_top = (200.0f / 255.0f) * gate;
-        const float a_mid = (184.0f / 255.0f) * gate;
-        const float a_low = (168.0f / 255.0f) * gate;
+        const float a = 0.80f * gate;
         // Top band carries the rounded top corners; the middle and bottom bands
         // are plain rects (the bottom band's corners come from the bottom band's
         // own radius). Bands overlap by half a pixel so no seam survives AA.
+        // Black-backdrop composites: top 0.80x58=46, mid 0.80x46=37 (the anchor),
+        // low 0.80x18=14 - the reference recipe's own vertical gradient.
         backend.FillRoundedRect(RectF{rect.left, rect.top, rect.right,
                                       rect.top + band * 1.5f},
-                                radius, ColorF{0.2196f, 0.2196f, 0.2275f, a_top});
+                                radius, ColorF{0.2275f, 0.2275f, 0.2392f, a});
         backend.FillRoundedRect(RectF{rect.left, rect.top + band * 0.5f, rect.right,
                                       rect.top + band * 2.5f},
-                                0.0f, ColorF{0.1412f, 0.1412f, 0.1490f, a_mid});
+                                0.0f, ColorF{0.1804f, 0.1804f, 0.1882f, a});
         backend.FillRoundedRect(RectF{rect.left, rect.top + band * 1.5f, rect.right,
                                       rect.bottom},
-                                radius, ColorF{0.0863f, 0.0863f, 0.0941f, a_low});
+                                radius, ColorF{0.0706f, 0.0706f, 0.0784f, a});
     } else {
         backend.FillRoundedRect(rect, radius, ColorF{0.055f, 0.063f, 0.078f, style.tint_alpha});
     }

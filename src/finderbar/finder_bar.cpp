@@ -621,6 +621,29 @@ std::wstring StripAccelerator(const std::wstring& title) {
         }
         out.push_back(title[i]);
     }
+    // ADR-0058 second round: Chinese menus carry the accelerator as a literal
+    // suffix - 7-Zip renders "文件(F)" where the reference top bar shows "文件"
+    // with no parenthesised key. Strip a TRAILING "(x)"/"(&x)" group (one or two
+    // ASCII alphanumerics inside), the shape every Win32 Chinese menu uses, so
+    // the bar reads like the reference regardless of how the app spells its keys.
+    if (out.size() > 3 && out.back() == L')') {
+        const std::size_t open = out.find_last_of(L'(');
+        if (open != std::wstring::npos && open + 2 <= out.size() - 1) {
+            const std::size_t inner = out.size() - 1 - (open + 1);  // chars inside ()
+            if (inner >= 1 && inner <= 3) {
+                bool accelerator_shape = true;
+                for (std::size_t k = open + 1; k < out.size() - 1; ++k) {
+                    const wchar_t ch = out[k];
+                    if (ch == L'&') continue;
+                    const bool alnum =
+                        (ch >= L'A' && ch <= L'Z') || (ch >= L'a' && ch <= L'z') ||
+                        (ch >= L'0' && ch <= L'9');
+                    if (!alnum) accelerator_shape = false;
+                }
+                if (accelerator_shape) out.resize(open);
+            }
+        }
+    }
     return out;
 }
 

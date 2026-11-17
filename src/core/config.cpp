@@ -685,27 +685,28 @@ bool SameRightItems(const std::vector<FinderBarRightItem>& a,
     return std::equal(a.begin(), a.end(), b.begin());
 }
 
-// The frozen default right-region table. T-307 (ADR-0053) pinned the clock at 0 and
-// the insertion convention; T-304 (ADR-0057) inserts control_center=1 per the same
-// convention; T-306 (ADR-0056) inserts the three status indicators at their
-// pre-agreed positions - network=4, battery=5, ime=6. ADR-0058 completes the
-// pre-agreed table with notification_center=2 and tray_mirror=3 (both types were
-// in C-31's frozen enum waiting for their renderer; the fidelity acceptance asked
-// for the bell and the tray chevron as resident right-cluster items), then
-// extends the C-31 enum additively (fidelity-approved) with volume=7 and
-// spotlight=8 for the reference's remaining two resident fixtures. macOS reading
-// order, from the right edge: clock <- control centre <- notifications <- tray <-
-// status icons <- volume <- spotlight. See config.h for the semantics.
+// The frozen default right-region table, ADR-0058 second round. History: T-307
+// (ADR-0053) pinned the clock at 0 and the insertion convention; T-306 (ADR-0056)
+// inserted network=4/battery=5/ime=6; T-304 (ADR-0057) inserted control_center=1;
+// the first fidelity round (ADR-0058) added notification_center/tray_mirror and
+// extended the C-31 enum with volume/spotlight. The second round supersedes the
+// ORDER: the acceptance measures the reference round10 with the CONTROL CENTRE
+// hard against the right edge and the clock to its left - the macOS Sequoia
+// layout the reference product renders; T-307's "clock at 0" convention predated
+// that measurement, and the acceptance's reference sequence runs to the CLOCK at
+// the far LEFT of the cluster (round10 x2097-2311, left of the volume item).
+// Final reading, from the right edge: control centre <- ime <- spotlight <- tray
+// <- notifications <- battery <- wifi <- volume <- clock. See config.h.
 std::vector<FinderBarRightItem> DefaultFinderBarRightItems() {
-    return {FinderBarRightItem{"clock", 0},
-            FinderBarRightItem{"control_center", 1},
-            FinderBarRightItem{"notification_center", 2},
+    return {FinderBarRightItem{"control_center", 0},
+            FinderBarRightItem{"ime", 1},
+            FinderBarRightItem{"spotlight", 2},
             FinderBarRightItem{"tray_mirror", 3},
-            FinderBarRightItem{"network", 4},
+            FinderBarRightItem{"notification_center", 4},
             FinderBarRightItem{"battery", 5},
-            FinderBarRightItem{"ime", 6},
+            FinderBarRightItem{"network", 6},
             FinderBarRightItem{"volume", 7},
-            FinderBarRightItem{"spotlight", 8}};
+            FinderBarRightItem{"clock", 8}};
 }
 
 bool operator==(const FinderBarWidgetItem& a, const FinderBarWidgetItem& b) {

@@ -126,14 +126,14 @@ TEST_CASE("T-304 control centre registers in the right region and the default ta
     // C-31 spelling round-trips through the name table.
     CHECK(RightTypeFromName(L"control_center").has_value());
     CHECK(*RightTypeFromName(L"control_center") == RightType::ControlCenter);
-    // ADR-0057: the frozen default table inserts control_center at order=1
-    // (clock=0 stays rightmost; macOS reading order clock <- control centre).
+    // ADR-0058 second round: control_center sits at order=0, hard against the
+    // right edge (the reference round10 measurement - macOS Sequoia layout).
     const auto defaults = dockforge::core::DefaultFinderBarRightItems();
     bool found = false;
     for (const auto& item : defaults) {
         if (item.type == "control_center") {
             found = true;
-            CHECK(item.order == 1);
+            CHECK(item.order == 0);
         }
     }
     CHECK(found);

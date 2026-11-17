@@ -672,26 +672,27 @@ TEST_CASE("T-307/T-306/T-304 config: an empty right table falls back to the froz
     REQUIRE(dockforge::core::ParseConfig("{}", config, &error));
     CHECK(error.empty());
     REQUIRE(config.finderbar.right.size() == 9);
-    CHECK(config.finderbar.right[0].type == "clock");
+    // ADR-0058 second round: the acceptance measured the reference round10 with
+    // the CONTROL CENTRE hard against the right edge and the CLOCK at the far
+    // left of the cluster (macOS Sequoia layout) - the order below follows that
+    // measurement, superseding T-307's clock-at-0.
+    CHECK(config.finderbar.right[0].type == "control_center");
     CHECK(config.finderbar.right[0].order == 0);
-    CHECK(config.finderbar.right[1].type == "control_center");
+    CHECK(config.finderbar.right[1].type == "ime");
     CHECK(config.finderbar.right[1].order == 1);
-    // ADR-0058: the pre-agreed notification/tray slots are filled (the C-31 enum
-    // always had the types; the renderers landed with the fidelity fixes).
-    CHECK(config.finderbar.right[2].type == "notification_center");
+    CHECK(config.finderbar.right[2].type == "spotlight");
     CHECK(config.finderbar.right[2].order == 2);
     CHECK(config.finderbar.right[3].type == "tray_mirror");
     CHECK(config.finderbar.right[3].order == 3);
-    CHECK(config.finderbar.right[4].type == "network");
+    CHECK(config.finderbar.right[4].type == "notification_center");
     CHECK(config.finderbar.right[4].order == 4);
     CHECK(config.finderbar.right[5].type == "battery");
     CHECK(config.finderbar.right[5].order == 5);
-    CHECK(config.finderbar.right[6].type == "ime");
+    CHECK(config.finderbar.right[6].type == "network");
     CHECK(config.finderbar.right[6].order == 6);
-    // ADR-0058's extension: volume=7 and spotlight=8 close the right cluster.
     CHECK(config.finderbar.right[7].type == "volume");
     CHECK(config.finderbar.right[7].order == 7);
-    CHECK(config.finderbar.right[8].type == "spotlight");
+    CHECK(config.finderbar.right[8].type == "clock");
     CHECK(config.finderbar.right[8].order == 8);
     CHECK(dockforge::core::SameRightItems(config.finderbar.right,
                                           dockforge::core::DefaultFinderBarRightItems()));

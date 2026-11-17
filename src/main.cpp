@@ -848,7 +848,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         }
         const auto placement = platform::ComputeDockPlacement(
             placement_display, edge, geometry.window_width_dip,
-            geometry.window_height_dip, 8.0f);
+            geometry.window_height_dip, 4.0f);
         if (placement.clamped) {
             DF_WARN("platform", "dock clamped to %dx%d px on %s (work area %dx%d)",
                     placement.width_px, placement.height_px,
@@ -2369,6 +2369,18 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     std::wstring dock_widget_time;
     std::wstring dock_widget_temp;
     int dock_widget_time_minute = -1;
+    // ADR-0058 second round: the trash fixture's icon, extracted once from the
+    // Recycle Bin shell item (its parsing name has been stable since Win95). The
+    // extraction runs through the same IconCache path as every dock tile, so the
+    // decoration trim and the disk cache apply to it too.
+    shell::IconBitmap dock_trash_icon;
+    {
+        shell::IconCache trash_cache;
+        trash_cache.Initialize(core::IconCacheDir());
+        if (!trash_cache.Get(dock::kRecycleBinParsingName, kDockIconPx, dock_trash_icon)) {
+            DF_WARN("dock", "trash icon unavailable; the trash fixture draws empty");
+        }
+    }
 
     auto repaint = [&] {
         const float dpi = static_cast<float>(window.Dpi());
@@ -2418,6 +2430,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                     dock_widget_temp = dock::WeatherTextFor(weather_snapshot);
                     input.widget_time_text = dock_widget_time.c_str();
                     input.widget_temp_text = dock_widget_temp.c_str();
+                    // ADR-0058 second round: the trash fixture rides the same band
+                    // (apps | separator | trash | widget, the reference structure).
+                    input.trash_icon = dock_trash_icon.valid() ? &dock_trash_icon : nullptr;
                 }
                 if (!dock_painter.Paint(dc, *render_backend, plate, input)) {
                     DF_WARN("dock", "dock paint failed at %.0f dpi", dpi);
@@ -3939,6 +3954,17 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                 // O(n) with no allocation, so it is cheap enough for a click path.
                 layout_now();
                 const int index = dock_painter.HitTest(x_dip, scale);
+                // ADR-0058 second round: the trash fixture takes clicks before the
+                // tile grid - it lives outside the row (apps | separator | trash |
+                // widget), so HitTest cannot see it. Opening the Recycle Bin hands
+                // the folder to Explorer, the same way a real dock click launches.
+                if (index < 0 && dock_painter.HitTrash(x_dip)) {
+                    DF_INFO("dock", "trash clicked; opening the Recycle Bin");
+                    ShellExecuteW(nullptr, L"open", dock::kRecycleBinParsingName, nullptr,
+                                  nullptr, SW_SHOWNOACTIVATE);
+                    out = 0;
+                    return true;
+                }
                 if (index < 0 || index >= static_cast<int>(tiles.size())) {
                     DF_DEBUG("dock", "click at %.1f dip hit no tile", x_dip);
                     out = 0;

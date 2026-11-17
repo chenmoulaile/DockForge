@@ -304,12 +304,17 @@ struct DockPaintInput {
     // weather tile's paint path only; a nullptr with a weather tile on the
     // row paints the failure placeholder (never assumed to be valid data).
     const weather::Snapshot* weather = nullptr;
-    // ADR-0058 trailing widget texts, owned and refreshed by the caller (the
-    // frame loop reformats them once a minute; the painter only reads). nullptr
-    // suppresses the band's text - the band itself is geometry-driven
-    // (DockGeometry::widget_band_width_dip).
+    // ADR-0058 trailing band: time + temperature texts (the frame loop reformats
+    // them once a minute; the painter only reads). nullptr suppresses the text.
+    // Layout follows the reference: the LARGE time on top, the smaller
+    // temperature below it, the weather glyph at the right of the pair.
     const wchar_t* widget_time_text = nullptr;
     const wchar_t* widget_temp_text = nullptr;
+    // The trash can's icon (extracted from the Recycle Bin shell item once at
+    // startup). nullptr = no trash fixture drawn; the fixture is ADR-0058's
+    // second-round structural addition (the reference dock is
+    // apps | separator | trash | widget).
+    const shell::IconBitmap* trash_icon = nullptr;
 };
 
 // Opacity of the lifted tile's ghost while dragging.
@@ -318,6 +323,12 @@ struct DockPaintInput {
 // tracking the row". Not far below either - at 0.7 the artwork washes out against a
 // bright backdrop and the user loses track of what they are moving.
 inline constexpr float kDragGhostOpacity = 0.82f;
+
+// ADR-0058 second round: the Recycle Bin shell item's stable parsing name (the
+// GUID has been unchanged since Win95). The dock's trash fixture extracts its
+// icon through this item and hands a click on it to Explorer as an open verb.
+inline constexpr wchar_t kRecycleBinParsingName[] =
+    L"::{645FF040-5081-101B-9F08-00AA002F954E}";
 
 // Thickness of the insertion line, in DIP.
 inline constexpr float kDropLineWidthDip = 3.0f;
@@ -369,6 +380,11 @@ class DockPainter {
     // the visible dock.
     int HitTest(float x_dip, float scale) const;
 
+    // ADR-0058 second round: true when `x_dip` is over the trash fixture drawn in
+    // the trailing band (apps | separator | trash | widget). Reads the rect the
+    // last Paint recorded; a click before the first paint misses, which is fine.
+    bool HitTrash(float x_dip) const;
+
     // Slot centres in window DIP, in tile order, from the last UpdateLayout.
     //
     // The drag controller needs them to decide the insertion slot, and they must be
@@ -400,6 +416,9 @@ class DockPainter {
     // HitTest needs the same origin Paint used, and recomputing it from the geometry
     // in two places is how the two drift apart.
     float row_origin_dip_ = 0.0f;
+    // ADR-0058 second round: the trash fixture's rect, recorded by Paint (a
+    // {-1,-1,-1,-1} rect until the first paint with a trash icon).
+    render::RectF trash_rect_dip_{-1.0f, -1.0f, -1.0f, -1.0f};
     // Baseline in window DIP, cached by UpdateLayout for the same reason.
     float baseline_dip_ = 0.0f;
     // Last geometry seen by UpdateLayout. Cached so IdleCentersDip can rebuild the

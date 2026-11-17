@@ -85,10 +85,13 @@ float MaxRowWidthDip(int tile_count, const LayoutParams& params, float scale,
 
 }  // namespace
 
-// ADR-0058: the trailing widget band's fixed width. Enough for the hairline
-// separator, an "HH:mm" time label and a temperature label at 13 DIP plus the
-// weather glyph, at any DPI (all DIP, like every dock dimension).
-constexpr float kDockWidgetBandWidthDip = 92.0f;
+// ADR-0058: the trailing band's fixed width - separator | trash fixture | two-line
+// time/temperature block | weather glyph, at any DPI (all DIP, like every dock
+// dimension). The second round stacks the time over the temperature (the
+// reference's layout) instead of the first round's single wide row, and adds the
+// trash fixture between the separator and the widget (the reference dock is
+// apps | separator | trash | widget).
+constexpr float kDockWidgetBandWidthDip = 158.0f;
 // Hairline separator colour: the reference MacOS.xaml:22-23 #33FFFFFF.
 constexpr render::ColorF kDockSeparatorColor{1.0f, 1.0f, 1.0f, 0.20f};
 
@@ -457,6 +460,11 @@ int DockPainter::HitTest(float x_dip, float scale) const {
     return -1;
 }
 
+bool DockPainter::HitTrash(float x_dip) const {
+    return trash_rect_dip_.left <= x_dip && x_dip <= trash_rect_dip_.right &&
+           trash_rect_dip_.Width() > 0.0f;
+}
+
 std::vector<float> DockPainter::IconCentersDip(float scale) const {
     std::vector<float> centers;
     if (!(scale > 0.0f)) return centers;
@@ -591,6 +599,10 @@ bool DockPainter::Paint(ID2D1DeviceContext& dc, render::IRenderBackend& backend,
         // both the plate and the window region, and SetWindowRgn would clip it.
         // Suppressed for the dragged tile: a dot hanging under an empty slot reads as
         // a running app with no icon.
+        //
+        // ADR-0058 second round: the dot is the reference's ThemeAccent blue
+        // (MacOS.xaml:12 #0A84FF, the round10 Chrome/VS Code dots), not the white
+        // of the first round.
         if (tile.run_state != TileRunState::Idle && i != drag_source) {
             const bool front = tile.run_state == TileRunState::Foreground;
             const float dot = kIndicatorDotDip;
@@ -603,8 +615,9 @@ bool DockPainter::Paint(ID2D1DeviceContext& dc, render::IRenderBackend& backend,
             const float dot_w = front ? dot : dot * 0.85f;
             const render::RectF mark{center_x_dip - dot_w * 0.5f, dot_y - dot * 0.5f,
                                      center_x_dip + dot_w * 0.5f, dot_y + dot * 0.5f};
+            // #0A84FF = (10, 132, 255) / 255.
             backend.FillRoundedRect(mark, dot_w * 0.5f,
-                                    render::ColorF{0.92f, 0.94f, 0.98f, alpha});
+                                    render::ColorF{0.0392f, 0.5176f, 1.0f, alpha});
         }
 
         // Unread-message badge (T-065, C-22 message_badge), top-right of the icon.
@@ -677,49 +690,69 @@ bool DockPainter::Paint(ID2D1DeviceContext& dc, render::IRenderBackend& backend,
         }
     }
 
-    // ADR-0058: the trailing clock + weather band, right of the icon row.
+    // ADR-0058 second round: the trailing band, right of the icon row.
     //
-    // A hairline separator first (the reference MacOS.xaml:22-23 #33FFFFFF - the
-    // acceptance measured it visible at the reference's trash end), then the time
-    // and temperature labels and the small weather glyph. The band is plate
-    // chrome: never magnified, never hit-tested, and suppressed entirely when
-    // dock.widget is off (the band width is zero, so nothing is drawn here).
+    // Structure follows the reference dock: apps | hairline separator | trash
+    // fixture | two-line widget (the LARGE time on top, the smaller temperature
+    // below it, the weather glyph beside the pair - the first round's single wide
+    // row overflowed the band and clipped its last glyph). Everything here is
+    // plate chrome: never magnified, and suppressed entirely when dock.widget is
+    // off (the band width is zero, so nothing is drawn).
     if (geometry.widget_band_width_dip > 0.0f) {
-        const float band_right = width_dip - 6.0f;
         const float band_left = width_dip - geometry.widget_band_width_dip;
-        const float band_cy = plate_top_dip + plate_height_dip * 0.5f;
         const float sep_x = band_left + 4.0f;
         const float sep_top = plate_top_dip + plate_height_dip * 0.22f;
         const float sep_bottom = plate_top_dip + plate_height_dip * 0.78f;
         backend.FillRoundedRect(render::RectF{sep_x - 0.5f, sep_top, sep_x + 0.5f, sep_bottom},
                                 0.5f, kDockSeparatorColor);
-        // Labels and glyph ride the row's own baseline band, so the band reads as
-        // part of the dock rather than as a floating caption.
+
+        // Trash fixture: the Recycle Bin's own icon at the row's icon size,
+        // bottom-aligned on the same baseline the tiles use.
+        float x = sep_x + 12.0f;
+        if (input.trash_icon != nullptr && input.trash_icon->valid()) {
+            const float icon_dip = static_cast<float>(std::max(config.dock.icon_size, 1));
+            const render::RectF trash_rect{x, baseline_dip - icon_dip, x + icon_dip,
+                                           baseline_dip};
+            const render::BitmapView view{input.trash_icon->width, input.trash_icon->height,
+                                          input.trash_icon->pixels.data()};
+            backend.DrawBitmap(Fnv1a16(std::wstring(kRecycleBinParsingName)), view, trash_rect,
+                               1.0f);
+            trash_rect_dip_ = trash_rect;
+            x = trash_rect.right + 8.0f;
+        } else {
+            trash_rect_dip_ = render::RectF{-1.0f, -1.0f, -1.0f, -1.0f};
+        }
+
+        // Two-line widget block, vertically centred in the icon band: the LARGE
+        // time on top, the smaller temperature below (the reference round5/round10
+        // layout), the weather glyph beside them.
         const float icon_dip = static_cast<float>(std::max(config.dock.icon_size, 1));
-        const float label_top = baseline_dip - icon_dip;
-        const float label_bottom = baseline_dip;
-        const float label_cy = (label_top + label_bottom) * 0.5f;
-        constexpr float kWidgetFontDip = 13.0f;
-        float x = sep_x + 10.0f;
+        const float block_top = baseline_dip - icon_dip;
+        const float block_bottom = baseline_dip;
+        const float block_cy = (block_top + block_bottom) * 0.5f;
+        constexpr float kTimeFontDip = 13.0f;
+        constexpr float kTempFontDip = 9.5f;
+        const float time_w = 44.0f;
+        const float temp_w = 34.0f;
+        const float text_left = x;
         if (input.widget_time_text != nullptr && input.widget_time_text[0] != L'\0') {
-            const render::RectF time_rect{x, label_cy - kWidgetFontDip, x + 42.0f,
-                                          label_cy + kWidgetFontDip};
-            backend.DrawLabel(input.widget_time_text, time_rect, kWidgetFontDip,
+            const render::RectF time_rect{text_left, block_cy - kTimeFontDip,
+                                          text_left + time_w, block_cy};
+            backend.DrawLabel(input.widget_time_text, time_rect, kTimeFontDip,
                               render::ColorF{1.0f, 1.0f, 1.0f, 0.96f},
                               render::TextAlign::Center);
         }
-        x += 46.0f;
         if (input.widget_temp_text != nullptr && input.widget_temp_text[0] != L'\0') {
-            const render::RectF temp_rect{x, label_cy - kWidgetFontDip, x + 24.0f,
-                                          label_cy + kWidgetFontDip};
-            backend.DrawLabel(input.widget_temp_text, temp_rect, kWidgetFontDip,
+            const render::RectF temp_rect{text_left, block_cy + 0.5f,
+                                          text_left + temp_w, block_cy + kTempFontDip + 1.0f};
+            backend.DrawLabel(input.widget_temp_text, temp_rect, kTempFontDip,
                               render::ColorF{1.0f, 1.0f, 1.0f, 0.80f},
                               render::TextAlign::Center);
         }
-        x += 28.0f;
-        const float glyph_size = std::min(16.0f, plate_height_dip * 0.5f);
-        const render::RectF glyph_rect{x, label_cy - glyph_size * 0.5f, x + glyph_size,
-                                       label_cy + glyph_size * 0.5f};
+        const float glyph_size = std::min(14.0f, plate_height_dip * 0.45f);
+        const render::RectF glyph_rect{text_left + time_w + 2.0f, block_cy - glyph_size * 0.5f,
+                                       text_left + time_w + 2.0f + glyph_size,
+                                       block_cy + glyph_size * 0.5f};
         const weather::Snapshot empty;
         const weather::Snapshot& snapshot =
             input.weather != nullptr ? *input.weather : empty;
