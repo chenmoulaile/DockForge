@@ -163,6 +163,14 @@ std::vector<RightItem> BuildRightItems(const core::FinderBarConfig& config,
                 item.has_icon = true;
                 item.text.clear();
                 break;
+            case RightType::ControlCenter:
+                // T-304: icon-only like macOS's control centre item - the dual
+                // toggle glyph IS the button, drawn in the paint switch below.
+                // The panel itself is main-owned (audio/sidecar COM objects);
+                // a run without it logs on click instead of drawing a dead slot.
+                item.has_icon = true;
+                item.text.clear();
+                break;
             default:
                 break;
         }
@@ -922,6 +930,7 @@ void FinderBar::SetEnabled(bool enabled) {
         // desktop it was anchored to.
         CloseCalendarPanel();
         CloseStatusPopup();
+        CloseControlCenterPanel();
         weather_popup_.Hide();
         capture_.Stop();
         // Give the strip back before hiding. A reservation left behind after the bar
@@ -1312,6 +1321,11 @@ void FinderBar::Repaint() {
                                 DrawWifiGlyph(*backend_, icon, status.wifi_bars, glyph_color);
                             }
                             break;
+                        case RightType::ControlCenter:
+                            // T-304: the dual-toggle glyph, self-drawn (ASSETS.md;
+                            // the Beautiful PNG is a metric reference only).
+                            DrawControlCenterGlyph(*backend_, icon, glyph_color);
+                            break;
                         default:
                             break;
                     }
@@ -1597,12 +1611,109 @@ void FinderBar::OnRightClick(const RightBox& box) {
                                 status_host_.Sample());
             break;
         }
+        case RightType::ControlCenter: {
+            // T-304: the button drops the control-centre panel straight down
+            // (C-34/ADR-0039). Toggled like every status-item popup - though a
+            // real second click re-opens rather than closes, because the click
+            // deactivates the panel first (the same measured behaviour the
+            // calendar and status popups live with; the outside-click and Esc
+            // paths are the DoD close paths).
+            OpenControlCenterPanel();
+            break;
+        }
         default:
             // Registered types whose panel belongs to a later task (tray_mirror,
-            // control_center, notification_center) land here; clicking them is a
-            // no-op rather than a crash.
+            // notification_center) land here; clicking them is a no-op rather
+            // than a crash.
             break;
     }
+}
+
+void FinderBar::SetHardwarePanel(HardwarePanel* panel) {
+    // Raw pointer, main-owned lifetime: the bar never deletes it, and Shutdown
+    // only closes the visible panel (the object outlives this call).
+    control_center_ = panel;
+}
+
+bool FinderBar::OpenControlCenterPanel() {
+    if (!ready_ || window_ == nullptr || !enabled_) return false;
+    if (control_center_ == nullptr || !control_center_->IsValid()) {
+        DF_WARN(kModule, "control centre panel unavailable this run");
+        return false;
+    }
+    if (control_center_->visible()) {
+        CloseControlCenterPanel();
+        return false;
+    }
+    // Anchor under the control-centre box (the first right-region entry whose
+    // type matches, i.e. the box a real click or the probe means).
+    float centre_x_dip = static_cast<float>(display_.monitor.right - display_.monitor.left) *
+                             0.5f / Scale() -
+                         160.0f;  // a sane fallback centre when no box is laid out
+    for (const RightBox& box : right_boxes_) {
+        if (box.type == RightType::ControlCenter) {
+            centre_x_dip = (box.rect.left + box.rect.right) * 0.5f;
+            break;
+        }
+    }
+    const int bar_bottom_px = display_.monitor.top + height_px_;
+    control_center_->Open(dpi_, display_.monitor, bar_bottom_px, centre_x_dip);
+    return control_center_->visible();
+}
+
+void FinderBar::CloseControlCenterPanel() {
+    if (control_center_ != nullptr) control_center_->Close();
+}
+
+bool FinderBar::OpenControlCenterSettingsMenu(float x_dip, float y_dip) {
+    if (!ready_ || window_ == nullptr || !enabled_) return false;
+    if (control_center_ == nullptr) {
+        DF_WARN(kModule, "control centre menu unavailable (no panel)");
+        return false;
+    }
+    // The menu belongs to the control-centre box under the point (the same hit
+    // test a right click runs). A negative point means "the first control-centre
+    // box" - the probe channel's no-cursor variant (OpenMenuForBox's precedent).
+    std::size_t right_index = kNoMenu;
+    if (x_dip < 0.0f || y_dip < 0.0f) {
+        for (std::size_t i = 0; i < right_boxes_.size(); ++i) {
+            if (right_boxes_[i].type == RightType::ControlCenter) {
+                right_index = i;
+                break;
+            }
+        }
+    } else {
+        const std::size_t hit =
+            RightBoxIndexAt(right_boxes_.data(), right_boxes_.size(), x_dip, y_dip);
+        if (hit != kNoMenu && right_boxes_[hit].type == RightType::ControlCenter) {
+            right_index = hit;
+        }
+    }
+    if (right_index == kNoMenu) return false;
+    HMENU menu = CreatePopupMenu();
+    if (menu == nullptr) return false;
+    // ADR-0039: aggregation entry only - every item opens the system's own
+    // Settings page and the panel never pretends to be it. The ids index
+    // CcSettingsPage (kCcMenuBase + the enum value) and OnMenuClosed maps them
+    // through CcSettingsPageUri.
+    const CcSettingsPage pages[] = {
+        CcSettingsPage::Sound,       CcSettingsPage::Display,
+        CcSettingsPage::Network,     CcSettingsPage::Bluetooth,
+        CcSettingsPage::Notifications,
+    };
+    for (const CcSettingsPage page : pages) {
+        AppendMenuW(menu, MF_STRING, kCcMenuBase + static_cast<UINT>(page),
+                    CcSettingsPageLabel(page));
+    }
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING, kCcMenuBase + static_cast<UINT>(CcSettingsPage::All),
+                CcSettingsPageLabel(CcSettingsPage::All));
+    const RightBox& box = right_boxes_[right_index];
+    const float scale = Scale();
+    const int x = display_.monitor.left + static_cast<int>(box.rect.left * scale);
+    const int y = display_.monitor.top + height_px_;
+    StartMenuJob(menu, window_, true, x, y);
+    return true;
 }
 
 void FinderBar::SetWeatherSnapshot(const dock::weather::Snapshot& snapshot) {
@@ -1858,8 +1969,28 @@ void FinderBar::OnMenuClosed() {
     MenuJob* job = g_menu_job.exchange(nullptr);
     if (job != nullptr) {
         const unsigned selected = job->selected.load();
-        if (job->target == window_ && selected >= kSystemIdBase) {
+        if (job->target == window_ && selected >= kSystemIdBase &&
+            selected < kCcMenuBase) {
             HandleSystemCommand(static_cast<int>(selected));
+        }
+        // T-304: the control-centre minimal menu. The id IS the CcSettingsPage
+        // value; the launch is ShellExecute on the ms-settings: URI, which hands
+        // the page to the system and never hosts it (ADR-0039's aggregation
+        // entry ruling - no takeover of the Settings app).
+        if (job->target == window_ && selected >= static_cast<unsigned>(kCcMenuBase) &&
+            selected < static_cast<unsigned>(kCcMenuBase) + 16) {
+            const auto page = static_cast<CcSettingsPage>(selected - kCcMenuBase);
+            const wchar_t* uri = CcSettingsPageUri(page);
+            if (uri != nullptr) {
+                DF_INFO(kModule, "control centre menu -> settings page %u",
+                        selected - static_cast<unsigned>(kCcMenuBase));
+                HINSTANCE result =
+                    ShellExecuteW(window_, L"open", uri, nullptr, nullptr, SW_SHOWNORMAL);
+                if (reinterpret_cast<INT_PTR>(result) <= 32) {
+                    DF_WARN(kModule, "ms-settings launch failed (hinst=%p)",
+                            static_cast<void*>(result));
+                }
+            }
         }
     }
     if (menu_thread_ != nullptr) {
@@ -1904,6 +2035,21 @@ LRESULT FinderBar::WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
             const float x = static_cast<float>(GET_X_LPARAM(lparam)) / scale;
             const float y = static_cast<float>(GET_Y_LPARAM(lparam)) / scale;
             OnClick(x, y - OffsetDip());
+            return 0;
+        }
+
+        case WM_CONTEXTMENU: {
+            // T-304 (finderbar-parity I2): the right button on the control-centre
+            // box drops the minimal settings menu. Other right clicks fall through
+            // to DefWindowProc - no menu exists for them yet (tray T-303/R2,
+            // clock/notification/status T-312 not-included list).
+            const float scale = Scale();
+            const float x = static_cast<float>(GET_X_LPARAM(lparam)) / scale;
+            const float y = static_cast<float>(GET_Y_LPARAM(lparam)) / scale;
+            // WM_CONTEXTMENU can carry screen coordinates (-1) from the keyboard;
+            // the bar only answers mouse-originated ones.
+            if (GET_X_LPARAM(lparam) == -1 && GET_Y_LPARAM(lparam) == -1) return 0;
+            OpenControlCenterSettingsMenu(x, y - OffsetDip());
             return 0;
         }
 
@@ -2007,6 +2153,13 @@ std::string FinderBar::SnapshotJson() const {
     j["right_width_dip"] = right_summary_.total_width_dip;
     j["calendar_visible"] = CalendarPanelVisible();
     j["status_popup_visible"] = StatusPopupVisible();
+    // T-304: the control centre button exists in the default right table and the
+    // panel's visibility (main owns the object; false when no panel this run).
+    j["control_center_item"] = false;
+    for (const core::FinderBarRightItem& item : config_.right) {
+        if (item.type == "control_center") j["control_center_item"] = true;
+    }
+    j["control_center_visible"] = ControlCenterPanelVisible();
     nlohmann::json right_boxes = nlohmann::json::array();
     for (const RightBox& box : right_boxes_) {
         right_boxes.push_back({{"type", core::WideToUtf8(RightTypeName(static_cast<int>(box.type)))},

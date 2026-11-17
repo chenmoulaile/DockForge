@@ -51,7 +51,9 @@ target_link_libraries(dockforge_lib PUBLIC
   # T-306: right-region status indicators - imm32 (ImmGetDefaultIMEWnd for the
   # WM_IME_CONTROL conversion-mode read/toggle) and wlanapi (WlanQueryInterface
   # current-connection signal strength).
-  iphlpapi wbemuuid imm32 wlanapi)
+  # T-304: control-centre brightness - dxva2 (Get/SetMonitorBrightness, the DDC/CI
+  # path; the spike linked the same import lib).
+  iphlpapi wbemuuid imm32 wlanapi dxva2)
 
 # ---------------------------------------------------------------- executable
 add_executable(DockForge ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp)

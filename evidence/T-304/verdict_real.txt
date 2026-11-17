@@ -1,0 +1,40 @@
+﻿T-304 evidence run date=2026-11-18 04:07:10
+machine: Microsoft Windows 11 家庭版 中文版 build=26300
+right_boxes: ime, battery, network, control_center, clock (total_width_dip=297.806640625)
+  [PASS] default right table renders clock+control_center+network+battery+ime (ADR-0057)
+  [PASS] control_center sits LEFT of the clock (order 1 vs 0 from the right)
+  [PASS] control_center box carries the 16 DIP icon (no text)
+  [PASS] finderbar snapshot reports control_center_item=true
+  [PASS] cc_open opens the panel (bar-button click path)
+panel snapshot: brightness(supported=True path=WMI level=0.6200000047683716) dnd(on=False) night(state=0) radios=2 master=0.1899999976158142
+  [PASS] panel snapshot reports visible=true width=696px height=548px at 192dpi
+  [PASS] panel carries the 2x2 connection data (radios listed or dnd state present)
+saved D:\MacDock\evidence\T-304\cc_panel_open.png
+saved D:\MacDock\evidence\T-304\cc_panel_zoom.png
+saved D:\MacDock\evidence\T-304\bar_cc_button.png
+volume: 0.1899999976158142 -> 0.4000000059604645 (probe cc_volume 40)
+  [PASS] volume slider write reaches the audio endpoint (master_level=0.4)
+  [PASS] volume restored
+brightness: independent WMI read before = 62; panel path=WMI supported=True
+brightness: WMI read after cc_brightness 70 = 70
+  [PASS] brightness write applies live (WMI value followed the slider)
+  [PASS] brightness restored to 62 (read back 62)
+wifi flip: state 1 -> 2 (expected 2)
+  [PASS] Wi-Fi SetRadio flips the real radio
+  [PASS] Wi-Fi restored to 1 (read back 1)
+bluetooth flip: state 1 -> 2 (expected 2)
+  [PASS] Bluetooth SetRadio flips the real radio
+  [PASS] Bluetooth restored to 1 (read back 1)
+dnd: ToastNotificationEnabled 1 -> 0 (expected 0)
+  [PASS] 勿扰 toggle writes ToastNotificationEnabled and it reads back
+dnd final panel state: on=True value_present=True
+night: key exists=False panel state=0 error='本机没有夜览的注册表状态（CloudStore 键不存在），无法切换；可在系统设置打开夜览'
+  [PASS] 夜览 unsupported: panel shows the hint, state stays unknown, no fake write
+click test: panel physical rect = (2184,56)-(2880,604) anchor=2599
+  [PASS] click outside closes the panel (deactivation rule after real activation)
+  [PASS] Esc closes the panel (after real activation)
+  [PASS] cc_hide closes the panel
+log tail (dockforge-20261118.log): 2026-11-18T04:08:05.028+08:00 INFO [finderbar] control centre menu -> settings page 1
+  [PASS] cc_menu selection dispatches ms-settings:sound via ShellExecuteW (log-verified)
+SystemSettings.exe opened by the menu selection and closed again (was not running before)
+verdict: ALL PASS

@@ -43,6 +43,7 @@
 #include "finderbar/bar_layout.h"
 #include "finderbar/bar_widgets.h"
 #include "finderbar/calendar_panel.h"
+#include "finderbar/hardware_panel.h"
 #include "finderbar/status_popup.h"
 #include "finderbar/status_sampler.h"
 #include "platform/composition.h"
@@ -89,6 +90,11 @@ enum class SystemCommand {
 // channel raises a command by id, and a second copy of this number is exactly the kind
 // of silent mismatch the enum exists to prevent.
 constexpr int kSystemMenuBase = 100;
+
+// First id of the control-centre button's right-click minimal menu (T-304,
+// finderbar-parity I2). Disjoint from kSystemMenuBase so OnMenuClosed can route
+// the two ranges apart; the ids index CcSettingsPage (hardware_panel.h).
+constexpr int kCcMenuBase = 200;
 
 // The foreground window's application name.
 //
@@ -277,6 +283,23 @@ public:
     bool StatusPopupVisible() const {
         return status_popup_ && status_popup_->Visible();
     }
+    // T-304: the control centre. The panel object itself is owned by main.cpp
+    // (it holds the AudioHardware/MediaSidecarBridge the panel controls); the bar
+    // only anchors it under the right-region button and toggles it, exactly like
+    // the calendar/status panels but without owning the COM objects behind it.
+    // SetHardwarePanel must be called before the first click; a null pointer
+    // turns the button into a logged no-op, never a crash.
+    void SetHardwarePanel(HardwarePanel* panel);
+    bool OpenControlCenterPanel();
+    void CloseControlCenterPanel();
+    bool ControlCenterPanelVisible() const {
+        return control_center_ != nullptr && control_center_->visible();
+    }
+    // The right-click minimal menu (finderbar-parity I2): opens the system
+    // settings pages the control centre's controls correspond to. Returns false
+    // when no control-centre box sits under the point. Public so the probe
+    // channel can drive the real TrackPopupMenuEx path without a cursor.
+    bool OpenControlCenterSettingsMenu(float x_dip, float y_dip);
     // T-306: the ime item's click action - send WM_IME_CONTROL
     // (IMC_SETCONVERSIONMODE) with the flipped native bit to the tracked window's
     // default IME window. Exposed for the probe channel the same way; the bar's
@@ -395,6 +418,11 @@ private:
     StatusHost status_host_;
     std::unique_ptr<StatusPopup> status_popup_;
     bool status_popup_ready_ = false;
+
+    // T-304: the control-centre panel, owned by main.cpp (it holds the audio and
+    // sidecar COM objects the panel drives). Raw pointer, never dereferenced
+    // before SetHardwarePanel.
+    HardwarePanel* control_center_ = nullptr;
 
     bool menu_running_ = false;
     HANDLE menu_thread_ = nullptr;

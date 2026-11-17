@@ -1,0 +1,11 @@
+=== T-304 DDC/CI + registry spike ===
+ddc: GetNumberOfPhysicalMonitorsFromHMONITOR ok=1 count=1 gle=0
+ddc: GetPhysicalMonitorsFromHMONITOR FAILED gle=1168
+
+registry:
+  t: read r=2 type=0 value=4294967295
+  N: read r=2 type=0 value=4294967295
+  nightlight-state key: r=2
+  nightlight-settings key: r=2
+
+WM_SETTINGCHANGE("Notifications") broadcast: r=1 (nonzero=delivered)

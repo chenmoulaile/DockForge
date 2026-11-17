@@ -1785,6 +1785,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     // audio_spike.cpp); media + radios go through the .NET sidecar exe
     // (MinGW cannot complete WinRT async, spike winrt_mingw.cpp). The sidecar
     // lives exactly as long as the panel is open.
+    //
+    // T-304: the panel IS the control centre now, so it is created unconditionally
+    // (the bar's finderbar.right default table renders its button); the
+    // DOCKFORGE_HW_PANEL / DOCKFORGE_HW_PANEL_SHOW pair only governs the T-068
+    // probe auto-show behaviour.
     const bool hw_panel_enabled = ReadEnvFlag(L"DOCKFORGE_HW_PANEL", false);
     finderbar::AudioHardware hw_audio([&](const finderbar::VolumeChanged& e) {
         bus.Publish(e);
@@ -1794,30 +1799,29 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     finderbar::HardwarePanel hw_panel(&hw_audio, &hw_sidecar,
                                       [&] { return hw_stats.Update(); });
     bool hw_panel_ready = false;
-    if (hw_panel_enabled) {
-        if (finderbar::HardwarePanel::RegisterWindowClass(instance)) {
-            // COM on the OLE-STA main thread (already initialized above); the
-            // endpoint change callbacks arrive here while the loop pumps.
-            if (!hw_audio.Initialize()) {
-                DF_WARN("finderbar", "Core Audio init failed; audio controls unavailable");
+    // COM on the OLE-STA main thread (already initialized above); the endpoint
+    // change callbacks arrive here while the loop pumps. Needed for the control
+    // centre's volume slider even when the T-068 probe env is unset.
+    if (!hw_audio.Initialize()) {
+        DF_WARN("finderbar", "Core Audio init failed; audio controls unavailable");
+    }
+    if (finderbar::HardwarePanel::RegisterWindowClass(instance)) {
+        if (hw_panel.Create(instance)) {
+            // Route the audio thread's notifications into the panel's
+            // WndProc (see AudioHardware::SetEventSink for why the
+            // callback itself cannot do the work).
+            hw_audio.SetEventSink(hw_panel.Handle());
+            hw_panel_ready = true;
+            if (hw_panel_enabled && ReadEnvFlag(L"DOCKFORGE_HW_PANEL_SHOW", false)) {
+                hw_sidecar.Start();
+                hw_panel.Open();
             }
-            if (hw_panel.Create(instance)) {
-                // Route the audio thread's notifications into the panel's
-                // WndProc (see AudioHardware::SetEventSink for why the
-                // callback itself cannot do the work).
-                hw_audio.SetEventSink(hw_panel.Handle());
-                hw_panel_ready = true;
-                if (ReadEnvFlag(L"DOCKFORGE_HW_PANEL_SHOW", false)) {
-                    hw_sidecar.Start();
-                    hw_panel.Open();
-                }
-                DF_INFO("finderbar", "hardware panel ready (window deferred until show)");
-            } else {
-                DF_WARN("finderbar", "hardware panel window creation failed");
-            }
+            DF_INFO("finderbar", "control centre panel ready (window hidden until opened)");
         } else {
-            DF_WARN("finderbar", "hardware panel class registration failed");
+            DF_WARN("finderbar", "control centre panel window creation failed");
         }
+    } else {
+        DF_WARN("finderbar", "control centre panel class registration failed");
     }
     // C-23 event visibility: every hardware event lands in the log, which is
     // what the evidence probe asserts on (the same pattern the settings window
@@ -1949,6 +1953,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
             core::Config bar_config = config;
             bar_config.finderbar.enabled = true;
             if (finder_bar.Initialize(instance, bar_config)) {
+                // T-304: hand the control-centre panel to the bar. The panel object
+                // stays main-owned; the bar only anchors/toggles it.
+                if (hw_panel_ready) {
+                    finder_bar.SetHardwarePanel(&hw_panel);
+                }
                 finder_bar_ready = true;
                 DF_INFO("finderbar", "bar ready (height=%d dip auto_hide=%d)",
                         bar_config.finderbar.height,
@@ -2087,6 +2096,48 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
             // mirrors the "calendar"/"weather" precedents.
             const bool opened = finder_bar.OpenStatusPopup();
             DF_INFO("finderbar", "probe status opened=%d", opened ? 1 : 0);
+        } else if (command == "cc_open") {
+            // T-304: opens (or toggles closed) the control-centre panel through the
+            // same path a real click on the bar button takes.
+            const bool opened = finder_bar.OpenControlCenterPanel();
+            DF_INFO("finderbar", "probe cc_open opened=%d", opened ? 1 : 0);
+        } else if (command == "cc_hide") {
+            finder_bar.CloseControlCenterPanel();
+            DF_INFO("finderbar", "probe cc_hide done");
+        } else if (command.rfind("cc_volume ", 0) == 0) {
+            const int pct = atoi(command.c_str() + 10);
+            const auto err = hw_panel.SetMasterVolume(static_cast<float>(pct) / 100.0f);
+            DF_INFO("finderbar", "probe cc_volume %d err='%s'", pct,
+                    core::WideToUtf8(err.message).c_str());
+        } else if (command.rfind("cc_brightness ", 0) == 0) {
+            // T-304 DoD: the brightness path is exercised with the machine's real
+            // answer - a supported monitor applies it live, an unsupported one gets
+            // the error text into the panel strip and the state file.
+            const int pct = atoi(command.c_str() + 14);
+            const auto err = hw_panel.SetBrightness(static_cast<float>(pct) / 100.0f);
+            DF_INFO("finderbar", "probe cc_brightness %d err='%s'", pct,
+                    core::WideToUtf8(err.message).c_str());
+        } else if (command.rfind("cc_radio ", 0) == 0) {
+            int kind = 0, on = 0;
+            if (sscanf(command.c_str() + 9, "%d %d", &kind, &on) == 2) {
+                const auto err = hw_panel.SetRadio(kind, on != 0);
+                DF_INFO("finderbar", "probe cc_radio kind=%d on=%d err='%s'", kind, on,
+                        core::WideToUtf8(err.message).c_str());
+            }
+        } else if (command == "cc_dnd") {
+            const auto err = hw_panel.ToggleDnd();
+            DF_INFO("finderbar", "probe cc_dnd on=%d err='%s'", hw_panel.DndOn() ? 1 : 0,
+                    core::WideToUtf8(err.message).c_str());
+        } else if (command == "cc_night") {
+            const auto err = hw_panel.ToggleNightLight();
+            DF_INFO("finderbar", "probe cc_night state=%d err='%s'",
+                    hw_panel.NightLightState(),
+                    core::WideToUtf8(err.message).c_str());
+        } else if (command == "cc_menu") {
+            // T-304 I2: opens the control-centre right-click menu through the real
+            // TrackPopupMenuEx path (same precedent as "menu <index>").
+            const bool opened = finder_bar.OpenControlCenterSettingsMenu(-1.0f, -1.0f);
+            DF_INFO("finderbar", "probe cc_menu opened=%d", opened ? 1 : 0);
         } else if (command == "ime") {
             // T-306: the ime item's click action - flip the IME conversion mode via
             // WM_IME_CONTROL(IMC_SETCONVERSIONMODE) on the tracked window's default

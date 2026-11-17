@@ -282,15 +282,16 @@ std::optional<RightType> RightTypeFromName(const wchar_t* name) {
 
 bool RightTypeRegistered(RightType type) {
     // T-307 registered Clock and WeatherBrief; T-306 flips the three status
-    // indicators. The rest flip here task by task (T-303 tray_mirror, T-304
-    // control_center, T-305 notification_center); until then they are skipped,
-    // never drawn as placeholders.
+    // indicators; T-304 flips the control centre. The rest flip here task by task
+    // (T-303 tray_mirror, T-305 notification_center); until then they are
+    // skipped, never drawn as placeholders.
     switch (type) {
         case RightType::Clock:
         case RightType::WeatherBrief:
         case RightType::Ime:
         case RightType::Battery:
         case RightType::Network:
+        case RightType::ControlCenter:
             return true;
         default:
             return false;

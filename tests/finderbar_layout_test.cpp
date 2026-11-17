@@ -514,17 +514,18 @@ TEST_CASE("T-307 right: same-order conflicts resolve by the C-31 declaration ord
     CHECK(boxes[0].type == RightType::WeatherBrief);
 }
 
-TEST_CASE("T-307/T-306 right: unregistered types are skipped, never drawn as placeholders") {
+TEST_CASE("T-307/T-306/T-304 right: unregistered types are skipped, never drawn as placeholders") {
     // The ask's rule, updated as the tasks land: T-307 registered clock and
     // weather_brief; T-306 flipped the three status indicators (ime/battery/
-    // network). The rest wait for T-303..T-305 and cost no box, no gap, no width.
+    // network); T-304 flipped the control centre. The rest wait for T-303/T-305
+    // and cost no box, no gap, no width.
     CHECK(dockforge::finderbar::RightTypeRegistered(RightType::Clock));
     CHECK(dockforge::finderbar::RightTypeRegistered(RightType::WeatherBrief));
     CHECK(dockforge::finderbar::RightTypeRegistered(RightType::Ime));
     CHECK(dockforge::finderbar::RightTypeRegistered(RightType::Battery));
     CHECK(dockforge::finderbar::RightTypeRegistered(RightType::Network));
+    CHECK(dockforge::finderbar::RightTypeRegistered(RightType::ControlCenter));
     CHECK_FALSE(dockforge::finderbar::RightTypeRegistered(RightType::TrayMirror));
-    CHECK_FALSE(dockforge::finderbar::RightTypeRegistered(RightType::ControlCenter));
     CHECK_FALSE(dockforge::finderbar::RightTypeRegistered(RightType::NotificationCenter));
 
     // An entry that no renderer produced (a caller filtered it out before layout)
@@ -655,23 +656,27 @@ TEST_CASE("T-307 clock: show_date off removes the date part entirely") {
           L"17:27");
 }
 
-TEST_CASE("T-307/T-306 config: an empty right table falls back to the frozen default") {
-    // The frozen default: ADR-0053 pinned the clock at 0; ADR-0056 inserted the
-    // three status indicators at the pre-agreed positions - network=4, battery=5,
-    // ime=6 (order counts from the right edge, macOS reading order).
+TEST_CASE("T-307/T-306/T-304 config: an empty right table falls back to the frozen default") {
+    // The frozen default: ADR-0053 pinned the clock at 0; ADR-0057 inserted
+    // control_center=1 (T-304, per the same insertion convention); ADR-0056
+    // inserted the three status indicators at the pre-agreed positions -
+    // network=4, battery=5, ime=6 (order counts from the right edge, macOS
+    // reading order clock <- control centre <- status icons).
     dockforge::core::Config config;
     std::string error;
     REQUIRE(dockforge::core::ParseConfig("{}", config, &error));
     CHECK(error.empty());
-    REQUIRE(config.finderbar.right.size() == 4);
+    REQUIRE(config.finderbar.right.size() == 5);
     CHECK(config.finderbar.right[0].type == "clock");
     CHECK(config.finderbar.right[0].order == 0);
-    CHECK(config.finderbar.right[1].type == "network");
-    CHECK(config.finderbar.right[1].order == 4);
-    CHECK(config.finderbar.right[2].type == "battery");
-    CHECK(config.finderbar.right[2].order == 5);
-    CHECK(config.finderbar.right[3].type == "ime");
-    CHECK(config.finderbar.right[3].order == 6);
+    CHECK(config.finderbar.right[1].type == "control_center");
+    CHECK(config.finderbar.right[1].order == 1);
+    CHECK(config.finderbar.right[2].type == "network");
+    CHECK(config.finderbar.right[2].order == 4);
+    CHECK(config.finderbar.right[3].type == "battery");
+    CHECK(config.finderbar.right[3].order == 5);
+    CHECK(config.finderbar.right[4].type == "ime");
+    CHECK(config.finderbar.right[4].order == 6);
     CHECK(dockforge::core::SameRightItems(config.finderbar.right,
                                           dockforge::core::DefaultFinderBarRightItems()));
 

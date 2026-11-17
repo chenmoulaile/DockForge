@@ -1,0 +1,2 @@
+WmiMonitorBrightness: CurrentBrightness=62 Levels=101
+WmiMonitorBrightnessMethods: present instance=True

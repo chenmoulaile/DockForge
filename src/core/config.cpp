@@ -686,11 +686,13 @@ bool SameRightItems(const std::vector<FinderBarRightItem>& a,
 }
 
 // The frozen default right-region table. T-307 (ADR-0053) pinned the clock at 0 and
-// the insertion convention; T-306 (ADR-0056) inserts the three status indicators at
-// their pre-agreed positions - network=4, battery=5, ime=6, i.e. leftmost of the
-// right group, the macOS reading order. See config.h for the semantics.
+// the insertion convention; T-304 (ADR-0057) inserts control_center=1 per the same
+// convention; T-306 (ADR-0056) inserts the three status indicators at their
+// pre-agreed positions - network=4, battery=5, ime=6 - the macOS reading order:
+// clock <- control centre <- status icons. See config.h for the semantics.
 std::vector<FinderBarRightItem> DefaultFinderBarRightItems() {
     return {FinderBarRightItem{"clock", 0},
+            FinderBarRightItem{"control_center", 1},
             FinderBarRightItem{"network", 4},
             FinderBarRightItem{"battery", 5},
             FinderBarRightItem{"ime", 6}};
