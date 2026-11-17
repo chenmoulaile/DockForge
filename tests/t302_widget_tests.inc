@@ -285,19 +285,17 @@ TEST_CASE("T-302 layout: a null measurer falls back to the approximation") {
     CHECK(boxes[0].rect.Width() > 0.0f);
 }
 
-TEST_CASE("T-302 config: the default table is the five monitoring widgets") {
+TEST_CASE("T-302 config: the default table is EMPTY (ADR-0058 supersedes ADR-0054)") {
     dockforge::core::Config config;
     std::string error;
     REQUIRE(dockforge::core::ParseConfig("{}", config, &error));
     CHECK(error.empty());
-    REQUIRE(config.finderbar.widgets.size() == 5);
-    CHECK(config.finderbar.widgets[0].type == "cpu");
-    CHECK(config.finderbar.widgets[0].order == 0);
-    CHECK(config.finderbar.widgets[1].type == "memory");
-    CHECK(config.finderbar.widgets[2].type == "disk");
-    CHECK(config.finderbar.widgets[3].type == "network");
-    CHECK(config.finderbar.widgets[4].type == "temperature");
-    CHECK(config.finderbar.widgets[4].order == 4);
+    // ADR-0054 pinned the five monitoring widgets as the default; ADR-0058
+    // supersedes it - the fidelity acceptance baseline shows the macOS menu bar's
+    // centre is EMPTY, so the monitoring zone stays opt-in. The renderers and the
+    // finderbar.widgets grammar are unchanged; an omitted key falls back to the
+    // empty table, and widgets_refresh_ms keeps its default.
+    REQUIRE(config.finderbar.widgets.empty());
     CHECK(config.finderbar.widgets_refresh_ms == 2000);
     CHECK(dockforge::core::SameWidgetItems(config.finderbar.widgets,
                                            dockforge::core::DefaultFinderBarWidgets()));

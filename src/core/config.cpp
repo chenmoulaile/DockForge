@@ -23,7 +23,7 @@ using json = nlohmann::json;
 // Keys owned by the schema. Anything else survives a save round-trip.
 const std::unordered_set<std::string> kDockKeys = {
     "icon_size", "gap", "magnification", "hover_falloff",
-    "influence_radius", "falloff_sharpness", "position", "tiles", "hidden"};
+    "influence_radius", "falloff_sharpness", "position", "widget", "tiles", "hidden"};
 const std::unordered_set<std::string> kAppearanceKeys = {"material", "corner_radius", "theme"};
 const std::unordered_set<std::string> kBehaviorKeys = {"autostart", "hide_taskbar", "dock_visible"};
 const std::unordered_set<std::string> kLaunchpadKeys = {"extra_paths", "columns", "icon_size",
@@ -688,14 +688,24 @@ bool SameRightItems(const std::vector<FinderBarRightItem>& a,
 // The frozen default right-region table. T-307 (ADR-0053) pinned the clock at 0 and
 // the insertion convention; T-304 (ADR-0057) inserts control_center=1 per the same
 // convention; T-306 (ADR-0056) inserts the three status indicators at their
-// pre-agreed positions - network=4, battery=5, ime=6 - the macOS reading order:
-// clock <- control centre <- status icons. See config.h for the semantics.
+// pre-agreed positions - network=4, battery=5, ime=6. ADR-0058 completes the
+// pre-agreed table with notification_center=2 and tray_mirror=3 (both types were
+// in C-31's frozen enum waiting for their renderer; the fidelity acceptance asked
+// for the bell and the tray chevron as resident right-cluster items), then
+// extends the C-31 enum additively (fidelity-approved) with volume=7 and
+// spotlight=8 for the reference's remaining two resident fixtures. macOS reading
+// order, from the right edge: clock <- control centre <- notifications <- tray <-
+// status icons <- volume <- spotlight. See config.h for the semantics.
 std::vector<FinderBarRightItem> DefaultFinderBarRightItems() {
     return {FinderBarRightItem{"clock", 0},
             FinderBarRightItem{"control_center", 1},
+            FinderBarRightItem{"notification_center", 2},
+            FinderBarRightItem{"tray_mirror", 3},
             FinderBarRightItem{"network", 4},
             FinderBarRightItem{"battery", 5},
-            FinderBarRightItem{"ime", 6}};
+            FinderBarRightItem{"ime", 6},
+            FinderBarRightItem{"volume", 7},
+            FinderBarRightItem{"spotlight", 8}};
 }
 
 bool operator==(const FinderBarWidgetItem& a, const FinderBarWidgetItem& b) {
@@ -711,13 +721,15 @@ bool SameWidgetItems(const std::vector<FinderBarWidgetItem>& a,
     return std::equal(a.begin(), a.end(), b.begin());
 }
 
-// T-302 (ADR-0054): the frozen default centre table - the five monitoring widgets
-// in C-31's own declaration order, which is their natural left-to-right reading
-// order. weather / media / calendar_brief stay out until T-302d renders them.
+// T-302 (ADR-0054) pinned the five monitoring widgets; ADR-0058 supersedes that
+// default. The fidelity acceptance baseline (the round5/round10 reference top-bar
+// measurements) shows the macOS menu bar's centre is empty - the monitoring row
+// was the only content the reference never renders. The frozen default is the
+// EMPTY table: the renderers, the config grammar and finderbar.widgets all still
+// work, the zone just stays opt-in. The round-trip treats the empty table as the
+// default, so an omitted key and an explicit [] both serialize quietly.
 std::vector<FinderBarWidgetItem> DefaultFinderBarWidgets() {
-    return {FinderBarWidgetItem{"cpu", 0}, FinderBarWidgetItem{"memory", 1},
-            FinderBarWidgetItem{"disk", 2}, FinderBarWidgetItem{"network", 3},
-            FinderBarWidgetItem{"temperature", 4}};
+    return {};
 }
 
 bool SameFinderBar(const FinderBarConfig& a, const FinderBarConfig& b) {
@@ -1006,6 +1018,7 @@ bool ParseConfig(const std::string& json_text, Config& out, std::string* error) 
         bad_value |= ReadNumber(node, "falloff_sharpness", parsed.dock.falloff_sharpness);
         bad_value |= ReadEnum(node, "hover_falloff", ParseFalloff, parsed.dock.hover_falloff);
         bad_value |= ReadEnum(node, "position", ParsePosition, parsed.dock.position);
+        bad_value |= ReadBool(node, "widget", parsed.dock.widget);
         bad_value |= ReadIdentityList(node, "tiles", parsed.dock.tiles);
         bad_value |= ReadIdentityList(node, "hidden", parsed.dock.hidden);
     }
@@ -1286,6 +1299,11 @@ std::string SerializeConfig(const Config& config) {
         {"falloff_sharpness", RoundForJson(config.dock.falloff_sharpness)},
         {"position", ToString(config.dock.position)},
     };
+    // dock.widget (ADR-0058): default ON, written only when off - the same
+    // quiet-file rule the other bools follow.
+    if (!config.dock.widget) {
+        document["dock"]["widget"] = false;
+    }
     // Written only when the user has actually curated the dock. An empty array in
     // every default file would suggest a feature nobody used and add two lines of
     // noise to the first thing a new user opens.
@@ -1406,9 +1424,9 @@ std::string SerializeConfig(const Config& config) {
     // table, "clock" only when any of its fields differs from its default. Unknown
     // type strings survive this path untouched, so a table referencing a widget a
     // later task will register round-trips without loss.
-    // T-302 (ADR-0054): "widgets" / "widgets_refresh_ms" follow the same rule. An
-    // explicitly emptied centre table is NOT the default and is written as [] -
-    // "user removed every widget" is a fact worth persisting, not a gap to refill.
+    // T-302 (ADR-0054): "widgets" / "widgets_refresh_ms" follow the same rule.
+    // ADR-0058 made the empty table the default, so an omitted key and an explicit
+    // [] both round-trip quietly - the centre zone is opt-in either way.
     const bool right_default =
         SameRightItems(config.finderbar.right, DefaultFinderBarRightItems());
     const bool widgets_default =
@@ -1416,7 +1434,7 @@ std::string SerializeConfig(const Config& config) {
     const bool clock_default = config.finderbar.clock.format.empty() &&
                                config.finderbar.clock.show_date &&
                                !config.finderbar.clock.show_seconds;
-    if (!config.finderbar.enabled || config.finderbar.height != 28 ||
+    if (!config.finderbar.enabled || config.finderbar.height != 24 ||
         !config.finderbar.show_system_menu || !config.finderbar.show_app_name ||
         !config.finderbar.show_app_menu || config.finderbar.max_menu_items != 6 ||
         config.finderbar.auto_hide || !right_default || !clock_default ||

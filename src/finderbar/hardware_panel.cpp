@@ -267,29 +267,31 @@ const wchar_t* CcSettingsPageLabel(CcSettingsPage page) {
     }
 }
 
-// The macOS menu-bar control centre glyph: two toggle pills side by side, one
-// knob up, the other down. Drawn from the slot so it scales with the layout box.
+// The macOS menu-bar control centre glyph. ADR-0058 redraws it: the reference
+// entrance (round10 x2816-2835, control-center.png / SymbolControlCenter) is a
+// 2x2 grid of four OUTLINED rounded squares - not the dual toggle this used to
+// draw, which the acceptance measured as a different icon at 1:1. Drawn from the
+// slot so it scales with the layout box.
 void DrawControlCenterGlyph(render::IRenderBackend& backend, const render::RectF& slot,
                             const render::ColorF& color) {
     const float w = slot.Width();
     const float h = slot.Height();
     if (w <= 0.0f || h <= 0.0f) return;
-    const float pill_w = w * 0.36f;
-    const float pill_h = h * 0.72f;
-    const float radius = pill_w * 0.5f;
-    const float gap = w * 0.10f;
-    const float x0 = slot.CenterX() - gap * 0.5f - pill_w;
-    const float x1 = slot.CenterX() + gap * 0.5f;
-    const float py = slot.CenterY() - pill_h * 0.5f;
-    // Pill outlines.
-    backend.StrokeRoundedRect(render::RectF{x0, py, x0 + pill_w, py + pill_h}, radius,
-                              color, std::max(1.0f, w * 0.08f));
-    backend.StrokeRoundedRect(render::RectF{x1, py, x1 + pill_w, py + pill_h}, radius,
-                              color, std::max(1.0f, w * 0.08f));
-    // Knobs: one up, one down (the glyph that reads as "toggles" at 16 DIP).
-    const float knob = pill_w * 0.34f;
-    FillCircle(backend, x0 + radius, py + radius, knob, color);
-    FillCircle(backend, x1 + pill_w - radius, py + pill_h - radius, knob, color);
+    const float stroke = std::max(1.0f, w * 0.075f);
+    // Four squares in a 2x2 grid, centred, with a gutter between them.
+    const float gutter = w * 0.10f;
+    const float cell = (std::min(w, h) - gutter) * 0.5f;
+    const float left = slot.CenterX() - cell - gutter * 0.5f;
+    const float top = slot.CenterY() - cell - gutter * 0.5f;
+    const float radius = cell * 0.30f;
+    for (int row = 0; row < 2; ++row) {
+        for (int col = 0; col < 2; ++col) {
+            const float x = left + static_cast<float>(col) * (cell + gutter);
+            const float y = top + static_cast<float>(row) * (cell + gutter);
+            backend.StrokeRoundedRect(render::RectF{x, y, x + cell, y + cell}, radius,
+                                      color, stroke);
+        }
+    }
 }
 
 // ---- construction / window ------------------------------------------------------

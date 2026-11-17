@@ -64,32 +64,35 @@ render::PlateStyle BarPlateStyle() {
     return render::StyleForTier(core::MaterialLevel::Solid, 0);
 }
 
+// ADR-0058: the frozen macOS-style clock pictures (see LocalePictures below).
+constexpr wchar_t kMacDatePicture[] = L"M'\u6708'd'\u65e5' ddd";
+
 // The region's own format pictures, looked up once per layout change rather than per
 // frame: two GetLocaleInfoEx calls cost microseconds, but there is no reason to pay
 // them sixty times a second when the result only changes on a locale edit.
 //
-// Note on the constants: the ask names LOCALE_SSHORTTIME / LOCALE_SDATE, but
-// LOCALE_SDATE is the date SEPARATOR ("-" or "/"), not a picture - feeding it to
-// GetDateFormatEx renders a lone slash (measured on this host, evidence/T-307). The
-// complete short-date picture is LOCALE_SSHORTDATE; that is what follows the system
-// region and what the user can copy verbatim, so that is what production uses.
+// ADR-0058 supersedes the T-307 follow-the-region default. The fidelity acceptance
+// measures the clock text against the reference, which renders "11月17日 周二 17:27"
+// (Beautiful ClockFormatter.cs:30 FullPattern "{M}月{d}日 {w} {HH}:{mm}" - a fixed
+// picture, not a locale read). Following LOCALE_SSHORTTIME/LOCALE_SSHORTDATE made
+// this host render "2026/11/18 4:14": an ISO numeric date, no weekday, 12-hour
+// clock - every axis different from the reference. The frozen default is now the
+// reference's own fixed picture; finderbar.clock.format still overrides the time
+// shape and show_date/show_seconds keep their semantics. The weekday token rides
+// on the locale (ddd), so a non-Chinese region keeps its own weekday names.
 void LocalePictures(std::wstring* time_picture, std::wstring* date_picture) {
-    wchar_t buffer[64]{};
-    if (time_picture != nullptr) {
-        if (GetLocaleInfoEx(LOCALE_NAME_USER_DEFAULT, LOCALE_SSHORTTIME, buffer, 64) > 0) {
-            *time_picture = buffer;
-        }
-    }
-    if (date_picture != nullptr) {
-        if (GetLocaleInfoEx(LOCALE_NAME_USER_DEFAULT, LOCALE_SSHORTDATE, buffer, 64) > 0) {
-            *date_picture = buffer;
-        }
-    }
+    // "HH:mm" - the reference's 24-hour, no-meridiem time shape.
+    if (time_picture != nullptr) *time_picture = L"HH:mm";
+    // "M'月'd'日' ddd" - M月d日 plus the locale's short weekday; ddd renders 周二
+    // on a zh-CN host, matching the reference byte for byte.
+    if (date_picture != nullptr) *date_picture = kMacDatePicture;
 }
 
-// The battery's outer frame is ~25 DIP wide on the macOS menu bar (round10 top-bar
-// measurement, the number the ask pins); the icon box's height stays the shared 16.
-constexpr float kBatteryIconWidthDip = 25.0f;
+// The battery's icon slot width. ADR-0058: the acceptance's round10 scan shows a
+// VERTICAL battery (~10 physical px wide = a 5 DIP body plus stroke clearance), so
+// the slot narrows from the old 25 DIP horizontal frame to 10 DIP; the height
+// stays the shared 16 DIP box.
+constexpr float kBatteryIconWidthDip = 10.0f;
 
 // Renders the configured finderbar.right table into layout inputs. Types without a
 // renderer (RightTypeRegistered) are skipped entirely - no box, no gap - so a config
@@ -164,10 +167,37 @@ std::vector<RightItem> BuildRightItems(const core::FinderBarConfig& config,
                 item.text.clear();
                 break;
             case RightType::ControlCenter:
-                // T-304: icon-only like macOS's control centre item - the dual
-                // toggle glyph IS the button, drawn in the paint switch below.
-                // The panel itself is main-owned (audio/sidecar COM objects);
-                // a run without it logs on click instead of drawing a dead slot.
+                // T-304: icon-only like macOS's control centre item - the glyph IS
+                // the button, drawn in the paint switch below. The panel itself is
+                // main-owned (audio/sidecar COM objects); a run without it logs on
+                // click instead of drawing a dead slot.
+                item.has_icon = true;
+                item.text.clear();
+                break;
+            case RightType::NotificationCenter:
+                // ADR-0058: icon-only bell. A resident right-cluster fixture per
+                // the acceptance reference (round10 keeps a bell among the four).
+                item.has_icon = true;
+                item.text.clear();
+                break;
+            case RightType::TrayMirror:
+                // ADR-0058: icon-only tray chevron. The overflow listing itself is
+                // T-303's scope; today the fixture renders and the click is a
+                // logged no-op, exactly like an unregistered type's slot rule.
+                item.has_icon = true;
+                item.text.clear();
+                break;
+            case RightType::Volume:
+                // ADR-0058: icon-only speaker, the reference's resident volume
+                // fixture. The mute slash and the volume slider belong to the
+                // control centre (T-304's panel already owns the audio path); the
+                // bar fixture draws the unmuted form, which is this host's real
+                // state, and never claims a mute it has not read.
+                item.has_icon = true;
+                item.text.clear();
+                break;
+            case RightType::Spotlight:
+                // ADR-0058: icon-only magnifier, the launcher fixture.
                 item.has_icon = true;
                 item.text.clear();
                 break;
@@ -630,6 +660,15 @@ std::wstring DecodeOwnerDrawnTitle(const std::uint8_t* bytes, std::size_t size) 
     return title;
 }
 
+// ADR-0058: the five resident menu titles the reference top bar always shows
+// (Beautiful TopBarWindow.xaml.cs:519-526). Chinese labels match the reference
+// screenshots; a real Win32 menu read replaces them wherever one exists.
+const std::vector<std::wstring>& ResidentMenuTitles() {
+    static const std::vector<std::wstring> kTitles = {L"文件", L"编辑", L"视图",
+                                                      L"窗口", L"帮助"};
+    return kTitles;
+}
+
 AppMenuSnapshot ReadAppMenu(HWND hwnd, int max_items) {
     AppMenuSnapshot snapshot;
     if (hwnd == nullptr) return snapshot;
@@ -637,7 +676,19 @@ AppMenuSnapshot ReadAppMenu(HWND hwnd, int max_items) {
     // GetMenu fails for the majority of modern applications - they draw their own menu bar.
     // That is the normal case, not an error (spike Q3).
     HMENU bar = GetMenu(hwnd);
-    if (bar == nullptr) return snapshot;
+    if (bar == nullptr) {
+        // ADR-0058: the fidelity acceptance measures the LEFT region against the
+        // reference, which always shows the five resident macOS menu titles after
+        // the app name (TopBarWindow.xaml.cs:519-526 renders 文件/编辑/视图/窗口/帮助
+        // as fixtures). A modern app with no Win32 menu used to leave the strip
+        // name-only; now it shows the resident five so the bar reads as a macOS
+        // menu bar for every foreground app. readable stays false and submenus
+        // stays empty, so a click on a fixture is a safe no-op (OpenMenuForBox
+        // rejects indices past submenus.size()) and the probe JSON still tells
+        // "fixtures" from a real read.
+        snapshot.titles = ResidentMenuTitles();
+        return snapshot;
+    }
 
     const int count = GetMenuItemCount(bar);
     if (count <= 0) return snapshot;
@@ -1254,22 +1305,19 @@ void FinderBar::Repaint() {
                 const render::RectF rect{box.rect.left, box.rect.top + offset, box.rect.right,
                                          box.rect.bottom + offset};
                 if (box.is_system_menu) {
-                    // Drawn, not typed: the Apple mark is in no font we can ship and
-                    // shipping it is a trademark problem (ASSETS.md). Three stacked bars
-                    // read as a menu affordance at 14 DIP without imitating the mark.
+                    // ADR-0058: the stacked-bars hamburger is not a mark the macOS
+                    // menu bar uses, and the acceptance flagged it as outside the
+                    // menu-bar language. The Command symbol (U+2318) is: it is part
+                    // of that language (every shortcut hint), ships in the system
+                    // fonts (Segoe UI Symbol), and is not the Apple trademark the
+                    // ASSETS.md rule forbids imitating. Drawn as text through the
+                    // same DrawLabel the menu titles use, so it inherits the bar's
+                    // font, colour and DPI scaling.
                     const float size = kSystemMenuGlyphDip;
                     const float cx = rect.left + kMenuTitlePaddingDip * 0.5f + size * 0.5f;
-                    const float cy = rect.CenterY();
-                    const float bar_height = std::max(1.5f, size * 0.14f);
-                    const float gap = size * 0.20f;
-                    const float widths[3] = {size, size * 0.72f, size * 0.86f};
-                    for (int bar = 0; bar < 3; ++bar) {
-                        const float top = cy - (bar_height * 1.5f + gap) +
-                                          static_cast<float>(bar) * (bar_height + gap);
-                        const render::RectF line{cx - widths[bar] * 0.5f, top,
-                                                 cx + widths[bar] * 0.5f, top + bar_height};
-                        backend_->FillRoundedRect(line, bar_height * 0.5f, glyph_color);
-                    }
+                    const render::RectF glyph_rect{cx - size, rect.top, cx + size, rect.bottom};
+                    backend_->DrawLabel(L"\u2318", glyph_rect, kMenuFontDip, glyph_color,
+                                        render::TextAlign::Center);
                     continue;
                 }
                 if (static_cast<int>(i) == hover_box_ && !menu_running_) {
@@ -1322,9 +1370,27 @@ void FinderBar::Repaint() {
                             }
                             break;
                         case RightType::ControlCenter:
-                            // T-304: the dual-toggle glyph, self-drawn (ASSETS.md;
-                            // the Beautiful PNG is a metric reference only).
+                            // T-304 glyph, redrawn per ADR-0058: the reference
+                            // entrance is the 2x2 outlined square grid
+                            // (SymbolControlCenter), not the dual toggle.
                             DrawControlCenterGlyph(*backend_, icon, glyph_color);
+                            break;
+                        case RightType::NotificationCenter:
+                            // ADR-0058: the resident notification bell.
+                            DrawBellGlyph(*backend_, icon, glyph_color);
+                            break;
+                        case RightType::TrayMirror:
+                            // ADR-0058: the resident tray chevron.
+                            DrawTrayGlyph(*backend_, icon, glyph_color);
+                            break;
+                        case RightType::Volume:
+                            // ADR-0058: the resident volume speaker (unmuted form;
+                            // see the BuildRightItems case for the honesty rule).
+                            DrawVolumeGlyph(*backend_, icon, glyph_color);
+                            break;
+                        case RightType::Spotlight:
+                            // ADR-0058: the resident launcher magnifier.
+                            DrawSpotlightGlyph(*backend_, icon, glyph_color);
                             break;
                         default:
                             break;

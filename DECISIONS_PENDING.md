@@ -22,3 +22,10 @@
 - 阻塞移交：T-082（MSIX）→ `BLOCKED`，见 B-004；T-080（FlaUI）→ `BLOCKED`，见 B-005，前置任务 T-079 承担 UIA 提供者实现。
 - 另修正一处任务书前提：任务书称「上一阶段完成 P0：Dock 栏 + Finder Bar」，实际 `src/finderbar` 不存在，M2 Finder Bar 仍为 `TODO`。已完成范围是 M0 + M1（T-001..T-016）。
 - 如需推翻：安装 VS 2022 (Desktop C++) + Windows SDK + Windows App SDK 后新开 ADR 迁回 XAML 方案，届时 Launchpad 与设置窗口需重写。
+
+## 待决-01 · behavior.hide_taskbar 出厂默认是否在 T-312 发布冻结时翻为 true（视觉修复会话升级裁决，2026-11-18）
+- 背景：验收以 D:/Beautiful 参考截图为基准，"Windows 11 任务栏完整可见"是整屏观感最大单点偏差（参考产品把原生任务栏移出屏幕）。隐藏能力 T-061 已完整实现（Shell_TrayWnd + Shell_SecondaryTrayWnd、异步 settle、设置开关/Ctrl+Alt+T/正常退出/崩溃过滤器四路恢复，evidence/T-061/）。
+- 升级裁决（主控批复）：C-01 冻结默认 false **不改**——PROMPT.md 第 9 条「改变系统行为的功能默认关闭」与 T-312 发布冻结 DoD「默认安全」是发布级裁决，不属于本修复冲刺。
+- 本轮已执行：本机 config.json 的 behavior.hide_taskbar 已设 true（用户最高指令覆盖本机观感，一键可还原：改回 false 或托盘/设置开关）；整屏取证按此真实效果评。
+- 待决：T-312（发布冻结）时是否把默认翻为 true。证据：本会话整屏对比截图（隐藏前后）；还原路径齐备（四路恢复均实证）。
+- 决策人动作：在 T-312 开工时裁决 ADR（翻/不翻），并把裁决结果同步 C-01 表与迁移说明。

@@ -171,12 +171,15 @@ TEST_CASE("T-306 popup height: sections add, an empty card stack is zero") {
           StatusPopupHeightFor(true, true, true));
 }
 
-TEST_CASE("T-306 wifi glyph geometry: three arcs, dots sized from the slot") {
+TEST_CASE("T-306 wifi glyph geometry: three arcs, solid bands sized from the slot") {
     using dockforge::finderbar::WifiGlyphGeometry;
     const auto g =
         WifiGlyphGeometry::Compute(dockforge::render::RectF{0.0f, 0.0f, 16.0f, 16.0f});
     CHECK(g.arc_count == 3);
-    CHECK(g.dots_per_arc > 3);  // enough discs to read as an arc, not a dotted line
+    // ADR-0058: the arcs are SOLID bands - enough overlapping discs that the chain
+    // never reads as a dotted line. The band stride is 85% of the disc radius, so
+    // the 90-degree arc of the 16 DIP slot lays 11 discs with ~55% overlap.
+    CHECK(g.steps_per_arc >= 10);
     // Radii grow and stay inside the slot: the outermost arc's reach along either
     // axis must not exceed the slot's half-extent beyond the apex.
     CHECK(g.radii[0] < g.radii[1]);

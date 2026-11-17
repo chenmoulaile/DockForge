@@ -37,6 +37,13 @@ struct DockConfig {
     // order does not mention" would resurrect every removed tile on the next
     // launch - the app is still in AppsFolder, so the scan finds it again.
     std::vector<std::string> hidden;
+
+    // dock.widget (ADR-0058, new key - C-01 has no widget entry): the trailing
+    // clock + weather brief at the dock's right end, behind a hairline separator
+    // (the macOS dock's own trailing widget, and Beautiful's DockWidgetEnabled
+    // default ON). Default true to match the reference; written only when false
+    // (quiet-file rule).
+    bool widget = true;
 };
 
 struct AppearanceConfig {
@@ -243,9 +250,13 @@ struct FinderBarConfig {
     // run, finderbar.enabled=false in config.json for good, and the system menu's
     // "Quit DockForge" for the whole app.
     bool enabled = true;
-    // C-31 says 28px at 100%. Height is DIP, so the bar is 56 physical px at the
-    // 192 DPI this host runs at.
-    int height = 28;
+    // C-31 (as amended by ADR-0058, fidelity-approved): 24px at 100%, the
+    // reference top bar's own height (Beautiful TopBarWindow.xaml.cs:59
+    // BarHeightDip=24). The old 28 read 56 physical px at 192 DPI against the
+    // reference's 47 - the whole right region sat visibly looser. Height is DIP;
+    // an explicit value in an existing config.json is untouched, only new/absent
+    // configs pick the new default.
+    int height = 24;
     bool show_system_menu = true;
     bool show_app_name = true;
     bool show_app_menu = true;
@@ -271,14 +282,14 @@ struct FinderBarConfig {
     // writes no finderbar key at all. See bar_layout.h for the order semantics; the
     // renderer skips types whose widget task has not landed yet.
     std::vector<FinderBarRightItem> right = DefaultFinderBarRightItems();
-    // T-302 (ADR-0054): the centre-zone monitoring table, C-31's finderbar.widgets.
-    // Same quiet-file rule as `right`: the member starts at the frozen default
-    // table, not at empty. One deliberate difference from `right`: an explicit
-    // empty array here STAYS empty - the centre zone is optional chrome, and a
-    // user writing "widgets": [] is asking for no widgets (the clock on the right
-    // has no equivalent argument, which is why `right` falls back there). See
-    // bar_widgets.h for the sampling/colour rules; the renderer skips types whose
-    // task has not landed yet.
+    // Centre-zone monitoring table, C-31's finderbar.widgets. ADR-0058 supersedes
+    // ADR-0054's five-monitor default: the fidelity acceptance baseline (the round5
+    // / round10 top-bar measurements) shows the macOS menu bar's centre is EMPTY -
+    // the monitoring row is the one thing the reference top bar never renders, so
+    // the frozen default is now the empty table and the zone stays opt-in (the
+    // renderers and the config grammar are unchanged). Same quiet-file rule as
+    // before: an explicit "widgets": [] STAYS empty and an omitted key falls back
+    // to this default. See bar_widgets.h for the sampling/colour rules.
     std::vector<FinderBarWidgetItem> widgets = DefaultFinderBarWidgets();
     // T-302 (ADR-0054): centre-widget refresh period in milliseconds. Default 2000
     // = C-23's 0.5Hz ceiling; the clamp floor is 2000 so the ceiling can never be

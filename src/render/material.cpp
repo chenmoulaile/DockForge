@@ -7,6 +7,7 @@
 #include <d2d1effects.h>
 #include <d2d1helper.h>
 
+#include <algorithm>
 #include <cmath>
 
 namespace dockforge::render {
@@ -265,7 +266,35 @@ bool PlateRenderer::Draw(ID2D1DeviceContext& dc, IRenderBackend& backend, const 
         dc.SetTransform(base);
     }
 
-    backend.FillRoundedRect(rect, radius, ColorF{0.055f, 0.063f, 0.078f, style.tint_alpha});
+    if (style.three_band_tint) {
+        // ADR-0058: the macOS glass recipe as three horizontal bands (the C-04
+        // backend has no gradient primitive; three bands over the round-corner
+        // layer above read as the reference's vertical falloff). Values are
+        // MacOS.xaml:15-19 verbatim - #C838383A / #B8242426 / #A8161618, split as
+        // colour (0x38/0x24/0x16) and alpha (0xC8/0xB8/0xA8). Each band's alpha is
+        // gated by tint_alpha so a tier that wants a lighter glass stays lighter.
+        const float band = rect.Height() / 3.0f;
+        // Master gate: the Solid tier (tint_alpha 0.92) runs the recipe at full
+        // strength; a lighter tier scales every band down proportionally.
+        const float gate = std::clamp(style.tint_alpha * 1.1f, 0.0f, 1.0f);
+        const float a_top = (200.0f / 255.0f) * gate;
+        const float a_mid = (184.0f / 255.0f) * gate;
+        const float a_low = (168.0f / 255.0f) * gate;
+        // Top band carries the rounded top corners; the middle and bottom bands
+        // are plain rects (the bottom band's corners come from the bottom band's
+        // own radius). Bands overlap by half a pixel so no seam survives AA.
+        backend.FillRoundedRect(RectF{rect.left, rect.top, rect.right,
+                                      rect.top + band * 1.5f},
+                                radius, ColorF{0.2196f, 0.2196f, 0.2275f, a_top});
+        backend.FillRoundedRect(RectF{rect.left, rect.top + band * 0.5f, rect.right,
+                                      rect.top + band * 2.5f},
+                                0.0f, ColorF{0.1412f, 0.1412f, 0.1490f, a_mid});
+        backend.FillRoundedRect(RectF{rect.left, rect.top + band * 1.5f, rect.right,
+                                      rect.bottom},
+                                radius, ColorF{0.0863f, 0.0863f, 0.0941f, a_low});
+    } else {
+        backend.FillRoundedRect(rect, radius, ColorF{0.055f, 0.063f, 0.078f, style.tint_alpha});
+    }
 
     if (layer) dc.PopLayer();
 

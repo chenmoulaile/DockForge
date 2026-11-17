@@ -27,8 +27,11 @@
 
 namespace dockforge::finderbar {
 
-// C-31: 28 DIP at 100%. Named so a caller reads the intent, not the number.
-constexpr float kDefaultBarHeightDip = 28.0f;
+// C-31 (as amended by ADR-0058): 24 DIP at 100%, the reference top bar's own
+// height. Named so a caller reads the intent, not the number. Layout tests pin
+// their own 28 explicitly via Params(), so this constant only feeds the fallback
+// path and the FinderBar member's initial value (config.height overrides both).
+constexpr float kDefaultBarHeightDip = 24.0f;
 
 // macOS insets the leading edge by 20 DIP. The system-menu glyph is 14 DIP and the
 // pointer target is the full bar height, so the visible margin is what reads as
@@ -232,19 +235,22 @@ bool AutoHideInteractive(const AutoHideState& state);
 // ---------------------------------------------------------------------------
 
 enum class RightType {
-    TrayMirror = 0,        // T-303
+    TrayMirror = 0,        // T-303 slot, renderer ADR-0058
     ControlCenter,         // T-304
-    NotificationCenter,    // T-305
+    NotificationCenter,    // T-305 slot, renderer ADR-0058
     Ime,                   // T-306
     Battery,               // T-306
     Network,               // T-306
     Clock,                 // T-307
     WeatherBrief,          // T-307
+    Volume,                // ADR-0058: C-31 enum extended (additive) for the
+                           // fidelity acceptance's resident volume fixture
+    Spotlight,             // ADR-0058: same extension, the launcher magnifier
 };
 
 // The C-31 spelling of each type ("clock", "weather_brief", ...). Declaration order,
 // so a caller can iterate [0, Count) to enumerate in C-31 order.
-constexpr int kRightTypeCount = 8;
+constexpr int kRightTypeCount = 10;
 const wchar_t* RightTypeName(int type_index);
 std::optional<RightType> RightTypeFromName(const wchar_t* name);
 

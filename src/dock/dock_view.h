@@ -231,6 +231,13 @@ struct DockGeometry {
     // Where the icon row's bottom edge sits, measured from the window's top. Icons
     // are bottom-aligned here and the indicator band occupies the space below it.
     float baseline_dip = 0.0f;
+    // ADR-0058: the trailing clock + weather brief band (dock.widget, default on),
+    // drawn behind a hairline separator at the row's right end - the macOS dock's
+    // own trailing widget, and the acceptance's round5/round10 reference shows
+    // "17:27 10°" there. Zero when dock.widget is off. The band is NOT part of the
+    // icon row: it never magnifies, never hit-tests, and the row centres itself in
+    // the width that remains after this band is subtracted.
+    float widget_band_width_dip = 0.0f;
 };
 
 // Pure function of config + tile count + scale, so the window size can be asserted
@@ -297,6 +304,12 @@ struct DockPaintInput {
     // weather tile's paint path only; a nullptr with a weather tile on the
     // row paints the failure placeholder (never assumed to be valid data).
     const weather::Snapshot* weather = nullptr;
+    // ADR-0058 trailing widget texts, owned and refreshed by the caller (the
+    // frame loop reformats them once a minute; the painter only reads). nullptr
+    // suppresses the band's text - the band itself is geometry-driven
+    // (DockGeometry::widget_band_width_dip).
+    const wchar_t* widget_time_text = nullptr;
+    const wchar_t* widget_temp_text = nullptr;
 };
 
 // Opacity of the lifted tile's ghost while dragging.

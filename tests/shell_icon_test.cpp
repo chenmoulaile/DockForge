@@ -137,9 +137,14 @@ TEST_CASE("Get extracts a real icon and serves the second call from memory") {
     IconBitmap first;
     REQUIRE(cache.Get(notepad, 64, first));
     CHECK(first.valid());
-    CHECK(first.width == 64);
-    CHECK(first.height == 64);
-    CHECK(first.pixels.size() == static_cast<std::size_t>(64 * 64 * 4));
+    // ADR-0058: the decoration trim may legitimately return a SMALLER bitmap than
+    // the request - it crops the shell's outline compositions (and their
+    // transparent margins) to the artwork's bounding box. It never exceeds it.
+    CHECK(first.width <= 64);
+    CHECK(first.height <= 64);
+    CHECK(first.width >= 32);
+    CHECK(first.pixels.size() ==
+          static_cast<std::size_t>(first.width * first.height * 4));
     CHECK(cache.Stats().extractions >= 1);
     CHECK(cache.Stats().last_extract_ms > 0.0);
 
@@ -167,14 +172,16 @@ TEST_CASE("Disk cache round-trips pixels for a fresh cache instance") {
     }
 
     // A new instance shares no memory, so a hit here can only come from disk.
+    // ADR-0058: the stored bitmap may be smaller than the request (the decoration
+    // trim), which the disk loader now accepts.
     IconCache cold;
     cold.Initialize(dir);
     IconBitmap cached;
     REQUIRE(cold.Get(notepad, 48, cached));
     CHECK(cold.Stats().disk_hits == 1);
     CHECK(cold.Stats().extractions == 0);
-    CHECK(cached.width == 48);
-    CHECK(cached.height == 48);
+    CHECK(cached.width <= 48);
+    CHECK(cached.height <= 48);
     CHECK(cached.pixels.size() == original.pixels.size());
 }
 
@@ -387,11 +394,13 @@ TEST_CASE("Fully opaque pixels are left alone", "[shell][icons][alpha]") {
 
 TEST_CASE("The disk cache key carries the alpha-layout version",
           "[shell][icons][alpha][cache]") {
-    // v3 is the layout that stores premultiplied pixels. v2 files were written after an
-    // Unpremultiply pass that made them doubly wrong; they must never be loaded again.
+    // v6 stores premultiplied pixels AND the ADR-0058 decoration trim (the shell's
+    // outline-composition bitmaps are cropped before save). v3/v4/v5 files predate
+    // the trim and must never be loaded again; v2 files were written after an
+    // Unpremultiply pass that made them doubly wrong.
     const std::wstring key = IconCache::CacheKey(L"C:\\app.exe", 256);
     INFO("key = " << std::string(key.begin(), key.end()));
-    CHECK(key.rfind(L"v3_", 0) == 0);
+    CHECK(key.rfind(L"v6_", 0) == 0);
 }
 
 TEST_CASE("A real shell icon comes back with no colour above alpha",
@@ -421,4 +430,94 @@ TEST_CASE("A real shell icon comes back with no colour above alpha",
     INFO("partial=" << partial << " violations=" << violations);
     CHECK(partial > 0);  // the icon really does have anti-aliased edges
     CHECK(violations == 0);
+}
+// ---- ADR-0058: the shell decoration trim ------------------------------------
+//
+// The shell composes small-icon sources into a 256px canvas with a decorative
+// outline rectangle at the edge; the trim must detect that shape and crop to the
+// artwork, and must leave every other shape alone. All three cases run on
+// synthetic bitmaps, so they pin the DETECTION RULES, not one shell version's
+// output.
+
+namespace {
+
+IconBitmap SolidBitmap(int w, int h, std::function<void(int, int, std::uint8_t*)> paint) {
+    IconBitmap b;
+    b.width = w;
+    b.height = h;
+    b.pixels.assign(static_cast<std::size_t>(w) * h * 4, 0);
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            paint(x, y, b.pixels.data() + (static_cast<std::size_t>(y) * w + x) * 4);
+        }
+    }
+    return b;
+}
+
+}  // namespace
+
+TEST_CASE("shell icons: the trim crops the outline-composition to its artwork",
+          "[shell][adr0058]") {
+    // The measured composition: a 1px decorative outline hugging the canvas edge,
+    // a transparent band inside it, the artwork centred at ~40%.
+    IconBitmap composed = SolidBitmap(64, 64, [](int x, int y, std::uint8_t* px) {
+        const bool outline = x == 0 || y == 0 || x == 63 || y == 63;
+        const bool art = x >= 20 && x < 44 && y >= 20 && y < 44;
+        if (outline) {
+            px[0] = px[1] = px[2] = 160;
+            px[3] = 255;
+        } else if (art) {
+            px[0] = 40;
+            px[1] = 160;
+            px[2] = 90;
+            px[3] = 255;
+        }
+    });
+    dockforge::shell::TrimShellDecoration(composed);
+    CHECK(composed.width == 24);
+    CHECK(composed.height == 24);
+    // The artwork survives; the outline does not.
+    CHECK(composed.pixels[0 + 3] == 255);
+}
+
+TEST_CASE("shell icons: the trim keeps a full-bleed square icon", "[shell][adr0058]") {
+    // 7-Zip's white card: opaque right up to the edges - opaque inner band means
+    // "design, not decoration".
+    IconBitmap card = SolidBitmap(64, 64, [](int, int, std::uint8_t* px) {
+        px[0] = px[1] = px[2] = 250;
+        px[3] = 255;
+    });
+    const IconBitmap before = card;
+    dockforge::shell::TrimShellDecoration(card);
+    CHECK(card.width == before.width);
+    CHECK(card.height == before.height);
+}
+
+TEST_CASE("shell icons: the trim keeps a round icon with transparent corners",
+          "[shell][adr0058]") {
+    // The Bandizip diamond: the edge ring is only partially covered (the corners
+    // are transparent), so the OUTLINE rule must not fire - the artwork survives
+    // intact. The transparent margin around the diamond itself is still tightened
+    // (that pass runs for every bitmap), so the size may shrink a few pixels, but
+    // the outline crop's deep inset would have left far less.
+    IconBitmap diamond = SolidBitmap(64, 64, [](int x, int y, std::uint8_t* px) {
+        const int dx = std::abs(x - 32);
+        const int dy = std::abs(y - 32);
+        if (dx + dy < 30) {
+            px[0] = 150;
+            px[1] = 90;
+            px[2] = 200;
+            px[3] = 255;
+        }
+    });
+    dockforge::shell::TrimShellDecoration(diamond);
+    CHECK(diamond.width >= 50);
+    CHECK(diamond.width <= 64);
+    CHECK(diamond.height >= 50);
+    CHECK(diamond.height <= 64);
+    // The diamond's centre pixel survives either pass.
+    const std::uint8_t* centre =
+        diamond.pixels.data() + (static_cast<std::size_t>(diamond.height / 2) * diamond.width +
+                                 diamond.width / 2) * 4;
+    CHECK(centre[3] == 255);
 }

@@ -567,8 +567,15 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     }
     render::MaterialCaps caps = render::ProbeMaterialCaps(config.appearance.corner_radius);
     const core::MaterialLevel tier = render::ResolveMaterialTier(requested, caps);
-    const render::PlateStyle plate_style =
+    render::PlateStyle plate_style =
         render::StyleForTier(tier, config.appearance.corner_radius);
+    // ADR-0058: the dock's glass draws the macOS three-band tint (MacOS.xaml
+    // recipe) instead of the flat plate colour - the acceptance measured the flat
+    // tint at RGB(13,15,18) over a black wallpaper where the reference glass
+    // reads 35/35/35. Material reloads rebuild this struct below, so the flag is
+    // set at every construction site (grep "StyleForTier" - the Finder bar and
+    // popups keep the flat tint deliberately).
+    plate_style.three_band_tint = true;
     DF_INFO("app", "material: requested=%s resolved=%s os_build=%d backdrop=%d capture=%d",
             core::ToString(requested), core::ToString(tier), caps.os_build,
             caps.system_backdrop_supported ? 1 : 0, caps.capture_available ? 1 : 0);
@@ -827,8 +834,21 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         // readable after Create(), and WM_DPICHANGED lands here too. Sizing the
         // window from a stale scale would clip the row at 150%/200%.
         geometry = dock::ComputeGeometry(config, static_cast<int>(tiles.size()), window.Scale());
+        // ADR-0058: with the taskbar hidden (behaviour.hide_taskbar, the
+        // reference product's own posture) the dock owns the monitor's TRUE
+        // bottom edge - the spike behind C-20 measured that hiding Shell_TrayWnd
+        // does NOT shrink the work area, so the work-area placement would leave
+        // the dead taskbar strip as a wallpaper gap under the dock, exactly the
+        // reference delta the acceptance flags ("Dock 与屏幕真底边无缝衔接").
+        // With the taskbar visible the dock keeps the work-area rule: it must
+        // not sit under the taskbar.
+        platform::DisplayInfo placement_display = target_display;
+        if (config.behavior.hide_taskbar) {
+            placement_display.work = placement_display.monitor;
+        }
         const auto placement = platform::ComputeDockPlacement(
-            target_display, edge, geometry.window_width_dip, geometry.window_height_dip, 8.0f);
+            placement_display, edge, geometry.window_width_dip,
+            geometry.window_height_dip, 8.0f);
         if (placement.clamped) {
             DF_WARN("platform", "dock clamped to %dx%d px on %s (work area %dx%d)",
                     placement.width_px, placement.height_px,
@@ -2343,6 +2363,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         write_tray_state_file();
     };
 
+    // ADR-0058 trailing-widget texts, cached: the time reformats once a minute on
+    // the paint path (a GetLocalTime + a format call per frame would be cheap but
+    // pointless), the temperature rides the T-075 snapshot chain's own updates.
+    std::wstring dock_widget_time;
+    std::wstring dock_widget_temp;
+    int dock_widget_time_minute = -1;
+
     auto repaint = [&] {
         const float dpi = static_cast<float>(window.Dpi());
         const std::int64_t paint_start = core::QueryPerformanceTicks();
@@ -2372,6 +2399,26 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                 // fixture tile is on the row; a missing pointer paints the
                 // placeholder inside the weather branch.
                 input.weather = weather_tile_index() >= 0 ? &weather_snapshot : nullptr;
+                // ADR-0058: the trailing clock + weather band's texts. The clock
+                // reformats when the minute flips; the temperature text re-derives
+                // from the same snapshot the weather tile consumes ("--°" while no
+                // snapshot has landed, the T-075 placeholder contract).
+                if (config.dock.widget) {
+                    SYSTEMTIME widget_now{};
+                    GetLocalTime(&widget_now);
+                    if (widget_now.wMinute != dock_widget_time_minute ||
+                        dock_widget_time.empty()) {
+                        wchar_t formatted[16]{};
+                        if (GetTimeFormatEx(LOCALE_NAME_USER_DEFAULT, 0, &widget_now,
+                                            L"HH:mm", formatted, 16) > 0) {
+                            dock_widget_time = formatted;
+                        }
+                        dock_widget_time_minute = widget_now.wMinute;
+                    }
+                    dock_widget_temp = dock::WeatherTextFor(weather_snapshot);
+                    input.widget_time_text = dock_widget_time.c_str();
+                    input.widget_temp_text = dock_widget_temp.c_str();
+                }
                 if (!dock_painter.Paint(dc, *render_backend, plate, input)) {
                     DF_WARN("dock", "dock paint failed at %.0f dpi", dpi);
                 }

@@ -53,6 +53,15 @@ struct PlateStyle {
     float border_alpha = 0.16f;
     bool use_capture = false;
     bool use_system_backdrop = false;
+    // ADR-0058: the dock's glass reads as the macOS recipe - a THREE-BAND vertical
+    // tint (Beautiful MacOS.xaml:15-19, #C838383A -> #B8242426 -> #A8161618) drawn
+    // instead of the single flat tint. The single colour measured RGB(13,15,18)
+    // over a black wallpaper while the reference reads 35/35/35 - the flat tint is
+    // both darker and flatter than the reference glass. The bands' alphas come
+    // from the recipe and are gated by `tint_alpha`, so a tier that wants a light
+    // glass stays light. Only the dock opts in; the Finder bar and popups keep
+    // the flat tint they were measured with.
+    bool three_band_tint = false;
 };
 
 PlateStyle StyleForTier(core::MaterialLevel tier, int corner_radius);

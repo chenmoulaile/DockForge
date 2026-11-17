@@ -525,8 +525,13 @@ TEST_CASE("T-307/T-306/T-304 right: unregistered types are skipped, never drawn 
     CHECK(dockforge::finderbar::RightTypeRegistered(RightType::Battery));
     CHECK(dockforge::finderbar::RightTypeRegistered(RightType::Network));
     CHECK(dockforge::finderbar::RightTypeRegistered(RightType::ControlCenter));
-    CHECK_FALSE(dockforge::finderbar::RightTypeRegistered(RightType::TrayMirror));
-    CHECK_FALSE(dockforge::finderbar::RightTypeRegistered(RightType::NotificationCenter));
+    // ADR-0058 flipped the last two C-31 enum types: the bell and the tray chevron
+    // are resident right-cluster fixtures per the acceptance reference.
+    CHECK(dockforge::finderbar::RightTypeRegistered(RightType::TrayMirror));
+    CHECK(dockforge::finderbar::RightTypeRegistered(RightType::NotificationCenter));
+    // ADR-0058's additive enum extension ships with its renderers - no dead value.
+    CHECK(dockforge::finderbar::RightTypeRegistered(RightType::Volume));
+    CHECK(dockforge::finderbar::RightTypeRegistered(RightType::Spotlight));
 
     // An entry that no renderer produced (a caller filtered it out before layout)
     // must also be invisible here - layout sees only what it is given.
@@ -666,17 +671,28 @@ TEST_CASE("T-307/T-306/T-304 config: an empty right table falls back to the froz
     std::string error;
     REQUIRE(dockforge::core::ParseConfig("{}", config, &error));
     CHECK(error.empty());
-    REQUIRE(config.finderbar.right.size() == 5);
+    REQUIRE(config.finderbar.right.size() == 9);
     CHECK(config.finderbar.right[0].type == "clock");
     CHECK(config.finderbar.right[0].order == 0);
     CHECK(config.finderbar.right[1].type == "control_center");
     CHECK(config.finderbar.right[1].order == 1);
-    CHECK(config.finderbar.right[2].type == "network");
-    CHECK(config.finderbar.right[2].order == 4);
-    CHECK(config.finderbar.right[3].type == "battery");
-    CHECK(config.finderbar.right[3].order == 5);
-    CHECK(config.finderbar.right[4].type == "ime");
-    CHECK(config.finderbar.right[4].order == 6);
+    // ADR-0058: the pre-agreed notification/tray slots are filled (the C-31 enum
+    // always had the types; the renderers landed with the fidelity fixes).
+    CHECK(config.finderbar.right[2].type == "notification_center");
+    CHECK(config.finderbar.right[2].order == 2);
+    CHECK(config.finderbar.right[3].type == "tray_mirror");
+    CHECK(config.finderbar.right[3].order == 3);
+    CHECK(config.finderbar.right[4].type == "network");
+    CHECK(config.finderbar.right[4].order == 4);
+    CHECK(config.finderbar.right[5].type == "battery");
+    CHECK(config.finderbar.right[5].order == 5);
+    CHECK(config.finderbar.right[6].type == "ime");
+    CHECK(config.finderbar.right[6].order == 6);
+    // ADR-0058's extension: volume=7 and spotlight=8 close the right cluster.
+    CHECK(config.finderbar.right[7].type == "volume");
+    CHECK(config.finderbar.right[7].order == 7);
+    CHECK(config.finderbar.right[8].type == "spotlight");
+    CHECK(config.finderbar.right[8].order == 8);
     CHECK(dockforge::core::SameRightItems(config.finderbar.right,
                                           dockforge::core::DefaultFinderBarRightItems()));
 

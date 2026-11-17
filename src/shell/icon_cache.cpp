@@ -111,6 +111,10 @@ ComPtr<IWICImagingFactory> CreateWicFactory() {
 // from there. GetDIBits with a negative height is the one path whose output order is
 // guaranteed by the API contract regardless of the source's row order; its copy cost
 // (~0.1ms) is noise next to the ~25ms shell extraction around it.
+// Declared before its only caller: the trim is part of every extraction path
+// (see the block above IconBitmapFromHBitmap's neighbours for the rationale).
+void TrimShellDecoration(IconBitmap& bitmap);
+
 bool IconBitmapFromHBitmap(HBITMAP bitmap, IconBitmap& out) {
     if (!bitmap) return false;
     BITMAP plain{};
@@ -141,7 +145,114 @@ bool IconBitmapFromHBitmap(HBITMAP bitmap, IconBitmap& out) {
     // IconBitmap is documented as premultiplied because that is what the D2D texture
     // tag demands; the shell gives straight alpha. See PremultiplyIfStraight.
     PremultiplyIfStraight(out.pixels);
+    TrimShellDecoration(out);
     return true;
+}
+
+// ---- shell decoration trim (ADR-0058) ------------------------------------------
+//
+// The fidelity acceptance measured the dock's "8 icons in outlined boxes, glyph
+// only ~50% inside": the shell's IShellItemImageFactory, asked for a 256px ICONONLY
+// bitmap of a source whose largest icon frame is small (32px AHK/CHM/7z-era
+// resources), returns a 256px COMPOSITION - the icon content centred at its native
+// size, surrounded by transparency and a thin decorative outline rectangle hugging
+// the canvas edge (evidence/fidelity-fix/cache_12fad1fed92dd8c7_256.png). Drawing
+// that composition 1:1 is what produced the "box with a tiny glyph inside" look;
+// the macOS reference dock draws every icon full-bleed.
+//
+// The trim runs on every extracted bitmap before it reaches the cache. Detection is
+// measured, not assumed: an outline composition has an opaque edge ring and a
+// TRANSPARENT band just inside it; a real full-bleed icon (7-Zip's white card, the
+// Bandizip diamond) is opaque or partially covered right up to its own edge. So:
+//
+//   outer ring opacity high  &&  inner band opacity low  ->  outline composition,
+//   crop everything outside the inner band's content bounding box;
+//   anything else stays exactly as the shell returned it.
+namespace {
+
+struct BBox {
+    int left = 0;
+    int top = 0;
+    int right = 0;   // exclusive
+    int bottom = 0;  // exclusive
+    bool empty = true;
+};
+
+BBox AlphaBoundingBox(const IconBitmap& b, int x0, int y0, int x1, int y1,
+                      std::uint8_t alpha_min) {
+    BBox box;
+    box.left = x1;
+    box.top = y1;
+    x1 = std::min(x1, b.width);
+    y1 = std::min(y1, b.height);
+    for (int y = std::max(0, y0); y < y1; ++y) {
+        const std::uint8_t* row = b.pixels.data() + static_cast<std::size_t>(y) * b.width * 4;
+        for (int x = std::max(0, x0); x < x1; ++x) {
+            if (row[static_cast<std::size_t>(x) * 4 + 3] >= alpha_min) {
+                box.empty = false;
+                box.left = std::min(box.left, x);
+                box.right = std::max(box.right, x + 1);
+                box.top = std::min(box.top, y);
+                box.bottom = std::max(box.bottom, y + 1);
+            }
+        }
+    }
+    return box;
+}
+
+}  // namespace
+
+void TrimShellDecoration(IconBitmap& bitmap) {
+    if (!bitmap.valid() || bitmap.width < 24 || bitmap.height < 24) return;
+    const BBox content = AlphaBoundingBox(bitmap, 0, 0, bitmap.width, bitmap.height, 10);
+    if (content.empty) return;
+    // First drop any transparent margin around the whole composition (the shell
+    // does not always draw its outline at the canvas edge; a Win11-design icon's
+    // own padding tightens the same way, which is exactly the full-bleed look the
+    // reference dock draws).
+    if (content.left > 0 || content.top > 0 || content.right < bitmap.width ||
+        content.bottom < bitmap.height) {
+        IconBitmap tightened;
+        tightened.width = content.right - content.left;
+        tightened.height = content.bottom - content.top;
+        tightened.pixels.reserve(static_cast<std::size_t>(tightened.width) *
+                                 tightened.height * 4);
+        for (int y = content.top; y < content.bottom; ++y) {
+            const std::uint8_t* src = bitmap.pixels.data() +
+                                      (static_cast<std::size_t>(y) * bitmap.width +
+                                       content.left) * 4;
+            tightened.pixels.insert(tightened.pixels.end(), src,
+                                    src + static_cast<std::size_t>(tightened.width) * 4);
+        }
+        bitmap = std::move(tightened);
+    }
+    // The outline composition (measured, evidence/fidelity-fix/ring_probe.ps1
+    // against real cache files): a decorative rectangle hugging the artwork's
+    // bounding box, transparency between it and the centred artwork. The DISCRIMINATOR
+    // is area, not ring shape: inside the outline, the artwork's bounding box
+    // collapses to a fraction of the canvas (the AHK H measured 38%, the CHM
+    // composition ~14%), while every genuine icon keeps most of its canvas past a
+    // 6px inset - the white 7-Zip card is opaque, the Bandizip diamond keeps
+    // ~94%. So: bound the artwork excluding a 6px frame band; when that box
+    // covers less than half the canvas, the frame band was decoration - crop it.
+    const BBox art = AlphaBoundingBox(bitmap, 6, 6, bitmap.width - 6, bitmap.height - 6, 10);
+    if (art.empty || art.right - art.left < 16 || art.bottom - art.top < 16) return;
+    const long long art_area =
+        static_cast<long long>(art.right - art.left) * (art.bottom - art.top);
+    const long long canvas_area =
+        static_cast<long long>(bitmap.width) * bitmap.height;
+    if (art_area * 2 >= canvas_area) return;
+    IconBitmap trimmed;
+    trimmed.width = art.right - art.left;
+    trimmed.height = art.bottom - art.top;
+    trimmed.pixels.reserve(static_cast<std::size_t>(trimmed.width) * trimmed.height * 4);
+    for (int y = art.top; y < art.bottom; ++y) {
+        const std::uint8_t* src =
+            bitmap.pixels.data() + (static_cast<std::size_t>(y) * bitmap.width + art.left) * 4;
+        trimmed.pixels.insert(trimmed.pixels.end(), src,
+                              src + static_cast<std::size_t>(trimmed.width) * 4);
+    }
+    bitmap = std::move(trimmed);
 }
 
 std::size_t IconCache::KeyHash::operator()(const Key& key) const {
@@ -167,9 +278,12 @@ std::wstring IconCache::CacheKey(const std::wstring& source, int size_px) {
     //
     // v3 is the alpha-layout fix: v2 files hold straight-alpha pixels that were written
     // after an Unpremultiply pass, so they are doubly wrong and must not be reused.
+    // v6 is the decoration-trim fix (ADR-0058): pre-v6 files may hold the shell's
+    // outline-composition bitmaps (decorative frame + centred small artwork); the
+    // area-based trim runs before save, so every pre-v6 file is stale by definition.
     // Bumping the version is the only safe way to invalidate them - nothing in the PNG
     // records which layout it was encoded from.
-    constexpr wchar_t kKeyFormat[] = L"v3_%016llx_%d.png";
+    constexpr wchar_t kKeyFormat[] = L"v6_%016llx_%d.png";
     std::uint64_t hash = 1469598103934665603ull;
     for (const wchar_t ch : source) {
         hash ^= static_cast<std::uint64_t>(ch);
@@ -304,10 +418,14 @@ bool IconCache::LoadFromDisk(const std::wstring& path, int expected_size, IconBi
     UINT height = 0;
     if (FAILED(frame->GetSize(&width, &height))) return false;
     if (width == 0 || height == 0) return false;
-    // A cache file written for a different size means the key collided or the
-    // file was tampered with; re-extract rather than draw a wrong-sized tile.
-    if (static_cast<int>(width) != expected_size ||
-        static_cast<int>(height) != expected_size) {
+    // A cache file must not EXCEED the requested size (the shell never returns
+    // more than asked). It may legitimately be SMALLER: the ADR-0058 decoration
+    // trim crops the shell's outline compositions to the artwork's bounding box
+    // before save, so the stored dimensions are the artwork's, not the request's.
+    // Larger means the key collided or the file was tampered with; re-extract
+    // rather than draw a wrong-sized tile.
+    if (static_cast<int>(width) > expected_size ||
+        static_cast<int>(height) > expected_size) {
         return false;
     }
 

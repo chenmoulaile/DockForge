@@ -95,4 +95,15 @@ private:
     IconCacheStats stats_;
 };
 
+// ADR-0058: the shell's IShellItemImageFactory, asked for a 256px ICONONLY bitmap
+// of a source whose largest icon frame is small, returns a 256px composition - the
+// artwork centred at its native size, transparency around it, and a thin decorative
+// outline rectangle hugging the canvas edge. Drawing that composition 1:1 is the
+// "outlined box with a tiny glyph inside" dock look the acceptance flags. This
+// trim detects the composition (opaque edge ring + transparent band inside it) and
+// crops to the artwork's bounding box; any other bitmap passes through unchanged.
+// Declared at namespace scope (not a member) because it operates on IconBitmap
+// alone; exposed for the synthetic-bitmap unit tests.
+void TrimShellDecoration(IconBitmap& bitmap);
+
 }  // namespace dockforge::shell

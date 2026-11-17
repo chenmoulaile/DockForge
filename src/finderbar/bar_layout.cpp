@@ -262,11 +262,13 @@ bool AutoHideInteractive(const AutoHideState& state) {
 // ---- right group (T-307) -----------------------------------------------------
 
 const wchar_t* RightTypeName(int type_index) {
-    // C-31's declaration sequence. The index form keeps this table iterable without
-    // casting the enum at every call site.
+    // C-31's declaration sequence (ADR-0058 appends volume/spotlight to the frozen
+    // enum's tail). The index form keeps this table iterable without casting the
+    // enum at every call site.
     static const wchar_t* kNames[kRightTypeCount] = {
-        L"tray_mirror", L"control_center", L"notification_center", L"ime",
-        L"battery",     L"network",        L"clock",              L"weather_brief",
+        L"tray_mirror",  L"control_center", L"notification_center", L"ime",
+        L"battery",      L"network",        L"clock",               L"weather_brief",
+        L"volume",       L"spotlight",
     };
     if (type_index < 0 || type_index >= kRightTypeCount) return L"";
     return kNames[type_index];
@@ -282,9 +284,10 @@ std::optional<RightType> RightTypeFromName(const wchar_t* name) {
 
 bool RightTypeRegistered(RightType type) {
     // T-307 registered Clock and WeatherBrief; T-306 flips the three status
-    // indicators; T-304 flips the control centre. The rest flip here task by task
-    // (T-303 tray_mirror, T-305 notification_center); until then they are
-    // skipped, never drawn as placeholders.
+    // indicators; T-304 flips the control centre. ADR-0058 flips tray_mirror and
+    // notification_center - both were in C-31's frozen enum waiting for their
+    // renderer - and lands the two NEW enum members (volume, spotlight) with their
+    // renderers in the same amendment, so the extension never ships a dead value.
     switch (type) {
         case RightType::Clock:
         case RightType::WeatherBrief:
@@ -292,6 +295,10 @@ bool RightTypeRegistered(RightType type) {
         case RightType::Battery:
         case RightType::Network:
         case RightType::ControlCenter:
+        case RightType::NotificationCenter:
+        case RightType::TrayMirror:
+        case RightType::Volume:
+        case RightType::Spotlight:
             return true;
         default:
             return false;

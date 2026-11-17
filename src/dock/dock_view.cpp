@@ -85,6 +85,13 @@ float MaxRowWidthDip(int tile_count, const LayoutParams& params, float scale,
 
 }  // namespace
 
+// ADR-0058: the trailing widget band's fixed width. Enough for the hairline
+// separator, an "HH:mm" time label and a temperature label at 13 DIP plus the
+// weather glyph, at any DPI (all DIP, like every dock dimension).
+constexpr float kDockWidgetBandWidthDip = 92.0f;
+// Hairline separator colour: the reference MacOS.xaml:22-23 #33FFFFFF.
+constexpr render::ColorF kDockSeparatorColor{1.0f, 1.0f, 1.0f, 0.20f};
+
 std::uint64_t IconKeyFor(const std::wstring& source) { return Fnv1a16(source); }
 
 // ---- message badge (T-065, C-22) -------------------------------------------
@@ -335,19 +342,27 @@ DockGeometry ComputeGeometry(const core::Config& config, int tile_count, float s
     geometry.content_width_dip = content_px / scale;
 
     const float icon_dip = static_cast<float>(std::max(config.dock.icon_size, 1));
+    // ADR-0058: the trailing clock + weather band rides at the row's right end
+    // when dock.widget is on (default). It is plate chrome, not a tile: it never
+    // magnifies and never hit-tests, and the row centres in the width LEFT after
+    // the band is subtracted (see row_origin_dip in UpdateLayout / Paint /
+    // IdleCentersDip - all three must agree).
+    geometry.widget_band_width_dip = config.dock.widget ? kDockWidgetBandWidthDip : 0.0f;
     // The plate keeps its idle height while icons magnify, the way macOS does: the
     // icons lift out of the dock and overhang the background, which reads as growth
     // rather than the dock inflating. The plate height therefore does not depend on
     // hover at all.
     geometry.plate_height_dip = icon_dip + 2.0f * kPlatePaddingDip;
 
-    geometry.plate_width_dip = geometry.content_width_dip + 2.0f * kPlatePaddingDip;
+    geometry.plate_width_dip =
+        geometry.content_width_dip + 2.0f * kPlatePaddingDip + geometry.widget_band_width_dip;
     // Width has to hold the widest row the pointer can produce, not the idle row: a
     // 1.8x icon with its neighbours pushed aside needs more room than the idle slots.
     const float widest_dip = MaxRowWidthDip(geometry.tile_count, geometry.params, scale,
                                             content_px);
     geometry.window_width_dip =
-        std::max(geometry.plate_width_dip, widest_dip + 2.0f * kPlatePaddingDip);
+        std::max(geometry.plate_width_dip,
+                 widest_dip + 2.0f * kPlatePaddingDip + geometry.widget_band_width_dip);
 
     // The window reserves room for the tallest icon, which overhangs above the
     // plate. The band between the window top and the plate is transparent dead
@@ -368,7 +383,10 @@ std::vector<float> IdleCentersDip(const DockGeometry& geometry, float scale) {
     if (!(scale > 0.0f)) return centers;
     const int count = std::max(geometry.tile_count, 0);
     centers.reserve(static_cast<std::size_t>(count));
-    const float origin_dip = (geometry.window_width_dip - geometry.content_width_dip) * 0.5f;
+    // ADR-0058: the row centres in the width that remains after the trailing
+    // widget band - the band sits at the right edge and never shifts the tiles.
+    const float origin_dip = (geometry.window_width_dip - geometry.content_width_dip -
+                              geometry.widget_band_width_dip) * 0.5f;
     const float pitch_px =
         static_cast<float>(geometry.params.icon_size + geometry.params.gap);
     const float half_px = static_cast<float>(geometry.params.icon_size) * 0.5f;
@@ -411,8 +429,10 @@ const LayoutSummary& DockPainter::UpdateLayout(const DockGeometry& geometry,
     LayoutParams params = geometry.params;
     params.magnification = 1.0f + (params.magnification - 1.0f) * intensity;
 
-    const float row_origin_dip =
-        (geometry.window_width_dip - geometry.content_width_dip) * 0.5f;
+    // ADR-0058: same row-origin rule as IdleCentersDip - the row centres in the
+    // width left after the trailing widget band, and all three derivations agree.
+    const float row_origin_dip = (geometry.window_width_dip - geometry.content_width_dip -
+                                  geometry.widget_band_width_dip) * 0.5f;
     row_origin_dip_ = row_origin_dip;
     scratch_.resize(static_cast<std::size_t>(count));
     const float mouse_px = (hover.mouse_x_dip - row_origin_dip) * geometry.scale;
@@ -495,7 +515,10 @@ bool DockPainter::Paint(ID2D1DeviceContext& dc, render::IRenderBackend& backend,
 
     // Layout in device pixels, then convert once. `mouse_x_dip` is DIP because the
     // window receives DIP-scaled coordinates from Windows; C-05 wants pixels.
-    const float row_origin_dip = (width_dip - geometry.content_width_dip) * 0.5f;
+    // ADR-0058: the row-origin rule now subtracts the trailing widget band, same
+    // as UpdateLayout and IdleCentersDip.
+    const float row_origin_dip = (width_dip - geometry.content_width_dip -
+                                  geometry.widget_band_width_dip) * 0.5f;
 
     // Icons are bottom-aligned to the plate's inner edge and grow upward, so the
     // row never dips below the dock and the tallest icon defines the top. The
@@ -652,6 +675,57 @@ bool DockPainter::Paint(ID2D1DeviceContext& dc, render::IRenderBackend& backend,
                 backend.StrokeRoundedRect(ring, ring.Width() * 0.5f, color, kPulseRingWidthDip);
             }
         }
+    }
+
+    // ADR-0058: the trailing clock + weather band, right of the icon row.
+    //
+    // A hairline separator first (the reference MacOS.xaml:22-23 #33FFFFFF - the
+    // acceptance measured it visible at the reference's trash end), then the time
+    // and temperature labels and the small weather glyph. The band is plate
+    // chrome: never magnified, never hit-tested, and suppressed entirely when
+    // dock.widget is off (the band width is zero, so nothing is drawn here).
+    if (geometry.widget_band_width_dip > 0.0f) {
+        const float band_right = width_dip - 6.0f;
+        const float band_left = width_dip - geometry.widget_band_width_dip;
+        const float band_cy = plate_top_dip + plate_height_dip * 0.5f;
+        const float sep_x = band_left + 4.0f;
+        const float sep_top = plate_top_dip + plate_height_dip * 0.22f;
+        const float sep_bottom = plate_top_dip + plate_height_dip * 0.78f;
+        backend.FillRoundedRect(render::RectF{sep_x - 0.5f, sep_top, sep_x + 0.5f, sep_bottom},
+                                0.5f, kDockSeparatorColor);
+        // Labels and glyph ride the row's own baseline band, so the band reads as
+        // part of the dock rather than as a floating caption.
+        const float icon_dip = static_cast<float>(std::max(config.dock.icon_size, 1));
+        const float label_top = baseline_dip - icon_dip;
+        const float label_bottom = baseline_dip;
+        const float label_cy = (label_top + label_bottom) * 0.5f;
+        constexpr float kWidgetFontDip = 13.0f;
+        float x = sep_x + 10.0f;
+        if (input.widget_time_text != nullptr && input.widget_time_text[0] != L'\0') {
+            const render::RectF time_rect{x, label_cy - kWidgetFontDip, x + 42.0f,
+                                          label_cy + kWidgetFontDip};
+            backend.DrawLabel(input.widget_time_text, time_rect, kWidgetFontDip,
+                              render::ColorF{1.0f, 1.0f, 1.0f, 0.96f},
+                              render::TextAlign::Center);
+        }
+        x += 46.0f;
+        if (input.widget_temp_text != nullptr && input.widget_temp_text[0] != L'\0') {
+            const render::RectF temp_rect{x, label_cy - kWidgetFontDip, x + 24.0f,
+                                          label_cy + kWidgetFontDip};
+            backend.DrawLabel(input.widget_temp_text, temp_rect, kWidgetFontDip,
+                              render::ColorF{1.0f, 1.0f, 1.0f, 0.80f},
+                              render::TextAlign::Center);
+        }
+        x += 28.0f;
+        const float glyph_size = std::min(16.0f, plate_height_dip * 0.5f);
+        const render::RectF glyph_rect{x, label_cy - glyph_size * 0.5f, x + glyph_size,
+                                       label_cy + glyph_size * 0.5f};
+        const weather::Snapshot empty;
+        const weather::Snapshot& snapshot =
+            input.weather != nullptr ? *input.weather : empty;
+        DrawWeatherGlyph(backend, glyph_rect,
+                         snapshot.valid && !snapshot.failed ? snapshot.kind
+                                                            : weather::Kind::Unknown);
     }
 
     // External drag (T-014): a caret at the slot the payload would land in.

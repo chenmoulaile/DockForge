@@ -137,5 +137,9 @@ TEST_CASE("T-304 control centre registers in the right region and the default ta
         }
     }
     CHECK(found);
-    CHECK(defaults.size() == 5);  // clock, control_center, network, battery, ime
+    // ADR-0058 completed the pre-agreed table with notification_center=2 and
+    // tray_mirror=3, then extended the C-31 enum additively with volume=7 and
+    // spotlight=8: clock, control_center, notification_center, tray_mirror,
+    // network, battery, ime, volume, spotlight.
+    CHECK(defaults.size() == 9);
 }

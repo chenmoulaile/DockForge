@@ -1109,11 +1109,11 @@ per_app_hide_overrides: [{ app_id, hide_mode }]
 
 ```
 finderbar.enabled: bool = true
-finderbar.height: int = 28 (px@100%DPI)
+finderbar.height: int = 24 (px@100%DPI)  // ADR-0058 修订（原 28）：参考 TopBarWindow.xaml.cs:59 BarHeightDip=24
 finderbar.position: enum{top, bottom} = top
 finderbar.left: enum{system_menu, app_name, app_name_with_menu} = app_name_with_menu
 finderbar.widgets: [{ type: enum{cpu, memory, disk, network, temperature, weather, media, calendar_brief}, order: int }]
-finderbar.right: [{ type: enum{tray_mirror, control_center, notification_center, ime, battery, network, clock, weather_brief}, order: int }]
+finderbar.right: [{ type: enum{tray_mirror, control_center, notification_center, ime, battery, network, clock, weather_brief, volume, spotlight}, order: int }]  // ADR-0058 加法式扩枚举 volume/spotlight
 finderbar.tray_order: [string]  // 托盘图标标识列表，按渲染顺序
 finderbar.hide_mode: enum{normal, auto_hide, smart_hide, always_visible} = normal
 ```
@@ -1124,7 +1124,7 @@ T-301 只落地了左侧区所需的最小键集合，其余键等对应任务�
 
 ```
 finderbar.enabled: bool = true            // 默认开启：栏不 hook、不碰 taskbar，只用 AppBar 协议预留自己的条带
-finderbar.height: int = 28                // 钳制 [18, 96]
+finderbar.height: int = 24                // 钳制 [18, 96]；ADR-0058 修订（原 28），显式写值的旧配置不受影响
 finderbar.show_system_menu: bool = true   // 对应 left=system_menu
 finderbar.show_app_name: bool = true      // 对应 left=app_name_with_menu
 finderbar.show_app_menu: bool = true      // 读 GetMenu 渲染菜单项
