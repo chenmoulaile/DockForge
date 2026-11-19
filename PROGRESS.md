@@ -1,4 +1,4 @@
-# PROGRESS.md · 执行日志（按时间正序追加）
+﻿# PROGRESS.md · 执行日志（按时间正序追加）
 
 > 每任务追加一条。格式见 PROMPT.md · CLOSE PROTOCOL。
 
@@ -774,6 +774,6 @@ config=false 不动任务——不主动清除用户手工创建的同名任务�
 - spike 结论（spikes/t085_theme_dist/）：shell zip 解包路线被证据否决——`IShellDispatch::NameSpace` 对 .zip 在本控制台进程恒 S_FALSE/E_FAIL+null（字节相同的文件 PowerShell 下正常，进程形态相关），BHID_SFObject 报 SFGAO_FOLDER=0，`.dockforge-theme` 扩展名首调 E_FAIL；zipfldr CLSID 已注册但 `.zip\shellex` namespace 键缺失。选型 vendored miniz（third_party/miniz 拆分文件集+本地 miniz_export.h 存根，与 B-003 vendoring 先例一致）。另实测 PS5.1 Compress-Archive 写反斜杠条目名（`icons\sample.png`）→ 安装器归一+建父目录，并有单测锁定；WinHTTP 对 raw.githubusercontent 用 DEFAULT_PROXY 间歇 12002 超时而 NO_PROXY 5/5 过 → 新代码统一 NO_PROXY（T-075 天气链是既成事实不改动）。
 - 实测依据：① 单测 `tests/theme_dist_test.cpp` 19 用例 133 断言全绿（zip 写手造 store-only zip 实测解包/穿越拒绝/C-02 校验/安装/SHA 拒装无残留/重装替换/卸载/config roundtrip/HttpGetBytes 无 scheme 拒绝/SettingsModel 字段）；② 探针 `tools/theme_dist_probe.{cpp,ps1}` VERDICT=PASS——Part A 生产模块 P1..P6 全 PASS（回环 HttpListener origin），Part B 真实 app 经 probe 通道 B1..B9 全过（Index loaded 1 theme → Installed 'mono' → config.json `"theme":"mono"` 持久化 → disable 回 default → delete 目录消失 → open folder 日志），截图 themes_section_light/dark.png（Themes 分区全景：URL 框/远程列表 mono 行/Refresh/Install/本地列表 default[built-in][active]+dark+mono/四按钮）；③ 门禁 `tools/gate.ps1 -Action all` exit 0：5730 断言全过、585 用例 = 583 过 + 2 显式 SKIP。
 - 顺带修复既有失败（非本任务引入，基线 97e24dd worktree 复跑同挂）：dock_indicator_test 两个用例在本 harness 会话挂——根因实测 `DWMWA_CLOAKED=1`（cloak_probe.exe：新显示窗口 visible=1 cloaked=1，整个会话的窗口被命令外壳 cloak；IsAppWindow 排除 cloaked 是 T-011 的刻意产品行为）。处置：两用例加 `SessionCloaksItsOwnWindows` 环境守卫，命中 SKIP 并打印原因（普通桌面守卫为 false 断言照常跑），产品代码零改动，test.log 可见 skipped 明细。
-- 诚实边界：① 预览图（preview_url）只解析保存，浏览器列表不渲染图片（v1.1 打磨）；② 安装/刷新无进度条，状态行文本反馈，同类任务并发被拒；③ 删除无确认对话框（先选中再删除两步操作，包可从索引重装，内建名拒删）；④ 探针 Part B 走 probe 文件通道（与按钮同方法链），未做真人 BM_CLICK（T-062 已验证控件转发机制）；⑤ 深浅截图差异仅在 D2D 导航配色，PrintWindow 在本机抓不到该子面（HEAD 同样，既有环境限制，verify.txt 第四节）；⑥ 默认 URL 的公网可达性取决于本次 push 是否成功（STATE.json remote 记录结果）。
+- 诚实边界：① 预览图（preview_url）只解析保存，浏览器列表不渲染图片（v1.1 打磨）；② 安装/刷新无进度条，状态行文本反馈，同类任务并发被拒；③ 删除无确认对话框（先选中再删除两步操作，包可从索引重装，内建名拒删）；④ 探针 Part B 走 probe 文件通道（与按钮同方法链），未做真人 BM_CLICK（T-062 已验证控件转发机制）；⑤ 深浅截图差异仅在 D2D 导航配色，PrintWindow 在本机抓不到该子面（HEAD 同样，既有环境限制，verify.txt 第四节）；⑥ 默认 URL 公网可达性：f077f39 已推送（65e37f3..f077f39 rc=0），推送后 tools/t085_default_url_check.ps1 实测 R1 真实 app 从 raw.githubusercontent.com 拉到索引、R2 装包、R3 mono\theme.json 落盘（evidence/T-085/default_url_check.txt + default_url_app_log.txt）。
 - 证据：evidence/T-085/（verify.txt 逐条 DoD、probe.txt、app_log.txt、build.log gate exit 0、test.log 5730 断言、双截图）；spikes/t085_theme_dist/（findings.md + spike_run.log）；TASKS.md：T-085 TODO→DONE（M4 行同步、P1.5 定义勾选）。
 - 下轮候选：T-303 托盘镜像 / T-304b 控制中心收口 / T-305 通知中心整合。

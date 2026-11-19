@@ -108,6 +108,14 @@ T-085 · 社区主题分发替代方案 — 验证记录
    powershell -NoProfile -ExecutionPolicy Bypass -File tools/gate.ps1 -Action all
    → exit 0：5730 断言全过，585 用例 = 583 过 + 2 显式 SKIP（test.log）
 
+5. 真实默认 URL 端到端（提交 f077f39 推送后，tools/t085_default_url_check.ps1，
+   真实 app + 生产默认 URL，无任何回环替身）:
+   R1 ok: theme browser: Index loaded: 1 theme(s) from
+         https://raw.githubusercontent.com/chenmoulaile/DockForge/main/theme-index/index.json
+   R2 ok: theme browser: Installed 'mono' - switch to it under Installed themes
+   R3 ok: mono\theme.json landed from the default URL
+   （default_url_check.txt / default_url_app_log.txt；网络直达生产链路全通）
+
 三、既有失败的两个指示器用例：根因与处置（本会话完成，非本任务引入）
 ----------------------------------------------------------------
 dock_indicator_test.cpp 的 "a visible window makes its app running or foreground"
@@ -139,9 +147,10 @@ T-050 时代的截图能抓到，说明是此后 OS/环境变化所致。因此�
 1. 预览图不渲染（DoD 2 的括号字段解析并保存，列表不显示图片）——v1.1 打磨项。
 2. 安装/刷新是按点击触发的阻塞式 worker（30s 下载超时、64MB 上限），无进度条，
    状态行文本反馈；并发同类任务被拒（"already running"）。
-3. 默认索引 URL 的内容要等仓库推送后才能从公网拉到（本次会话结束时已尝试推送，
-   结果见 STATE.json remote）；推送前的"真实 URL"访问会得到 404 → 浏览器状态行
-   显示失败原因，不崩溃（探针第一轮实测过 404 路径）。
+3. 默认索引 URL 的公网可达性：提交 f077f39 已推送（65e37f3..f077f39 main→main
+   实测 rc=0），第五节的 R1-R3 即推送后经真实 URL 的端到端实测——默认 URL
+   现已可从公网拉取真实索引与包。推送失败时浏览器状态行显示失败原因不崩溃
+   （探针第一轮实测过 404 路径）。
 4. 探针 Part B 驱动的是 probe 文件通道（与按钮调用同一方法），真实 BM_CLICK
    只在 T-062 修 SubclassPane 转发时验证过控件链，本包沿用该机制未重复验证。
 5. 单测对 SHA256 用 bcrypt 假设系统可用（XP 以后标配）；无 bcrypt 的环境会在

@@ -15,8 +15,8 @@
  "remote": {
   "name": "origin",
   "url": "https://github.com/chenmoulaile/DockForge.git",
-  "status": "pending",
-  "reason": "T-085 会话提交后待推送；credential.helper=store 免交互可用",
+  "status": "pushed",
+  "reason": "T-085 提交 f077f39 已随 65e37f3..f077f39 推达 origin/main（实测 rc=0）；推送后默认主题索引 URL 已公网可达并经 t085_default_url_check.ps1 实测",
   "retry_command": "git push origin main"
  },
  "toolchain": {

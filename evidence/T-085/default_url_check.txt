@@ -1,0 +1,3 @@
+R1 ok: 2026-11-20T02:24:00.788+08:00 INFO [settings] theme browser: Index loaded: 1 theme(s) from https://raw.githubusercontent.com/chenmoulaile/DockForge/main/theme-index/index.json
+R2 ok: 2026-11-20T02:24:01.392+08:00 INFO [settings] theme browser: Installed 'mono' - switch to it under Installed themes
+R3 ok: mono\theme.json landed from the default URL
