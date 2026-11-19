@@ -1,0 +1,120 @@
+2026-11-20T02:11:43.792+08:00 INFO [app] logger started, file=C:\Users\chenk\AppData\Local\Temp\dockforge-t085-10153953\logs\dockforge-20261120.log
+2026-11-20T02:11:43.792+08:00 INFO [app] DockForge 0.1.2 starting
+2026-11-20T02:11:43.792+08:00 INFO [app] config path = C:\Users\chenk\AppData\Local\Temp\dockforge-t085-10153953\config\config.json
+2026-11-20T02:11:43.792+08:00 INFO [taskbar] crash recovery filter installed
+2026-11-20T02:11:43.810+08:00 INFO [crash] crash dump filter installed (dir=C:\Users\chenk\AppData\Local\DockForge\dumps prev=00007ff6745c8e50)
+2026-11-20T02:11:43.810+08:00 INFO [core] config loaded from C:\Users\chenk\AppData\Local\Temp\dockforge-t085-10153953\config\config.json
+2026-11-20T02:11:43.812+08:00 INFO [app] config: icon_size=48 gap=8 mag=1.80 falloff=sine material=mica corner=22
+2026-11-20T02:11:44.173+08:00 INFO [shell] AppsFolder scan: 261 entries (shortcut=49 uwp=43 desktop-id=88 namespace=81 skipped=1)
+2026-11-20T02:11:44.199+08:00 INFO [app] apps: 261 (shortcut=49 uwp=43 desktop-id=88 namespace=81 skipped=1) scan=369.5ms icons=24/24 in 17.5ms
+2026-11-20T02:11:44.199+08:00 INFO [app] dock tiles: 12 of 261 apps (limit=12 icon=256px)
+2026-11-20T02:11:44.199+08:00 INFO [app] material: requested=mica resolved=blur os_build=26300 backdrop=1 capture=1
+2026-11-20T02:11:44.199+08:00 WARN [render] material degraded mica -> blur: system backdrop cannot be clipped to a custom corner radius
+2026-11-20T02:11:44.203+08:00 INFO [app] message-count adapters: 2 registered, poll 1000ms
+2026-11-20T02:11:44.203+08:00 INFO [dock] message count 'weixin.exe' -> 0
+2026-11-20T02:11:44.203+08:00 INFO [dock] message count 'qq.exe' -> 0
+2026-11-20T02:11:44.203+08:00 INFO [app] taskbar-progress white list: 1 entry, poll 500ms
+2026-11-20T02:11:44.203+08:00 INFO [platform] window created hwnd=0000000000050990 dpi=192
+2026-11-20T02:11:44.250+08:00 INFO [platform] display[0] \\.\DISPLAY1 monitor=0,0,2880,1920 work=0,56,2880,1760 dpi=192 raw=243 primary=1
+2026-11-20T02:11:44.266+08:00 INFO [app] dock placed edge=0 work=0,56,2880,1760 target=527,1539 1826x213 rect=527,1539,2353,1752 dpi=192
+2026-11-20T02:11:44.266+08:00 INFO [render] backdrop capture started: 1826x213 @527,1539 every 200ms
+2026-11-20T02:11:44.282+08:00 INFO [launchpad] initialized 1 overlay(s), tier=solid
+2026-11-20T02:11:44.616+08:00 INFO [shell] AppsFolder scan: 261 entries (shortcut=49 uwp=43 desktop-id=88 namespace=81 skipped=1)
+2026-11-20T02:11:44.616+08:00 INFO [shell] launchpad index: 243 items (apps=261 accepted=243 extra=0 dup=0 skipped=18 upstream=1 pathfail=0) in 336.0ms
+2026-11-20T02:11:44.616+08:00 INFO [launchpad] index rebuilt: items=243 apps=261 accepted=243 extra=0 dup=0 skipped=18 pathfail=0 scan=336.0ms total=328.0ms
+2026-11-20T02:11:44.616+08:00 INFO [shell] launchpad watcher watching 2 directories
+2026-11-20T02:11:44.657+08:00 INFO [launchpad] tiles built: 70 prewarmed of 243 items at 192px in 47.0ms
+2026-11-20T02:11:44.657+08:00 INFO [launchpad] index warmed: items=243 in 375.0ms
+2026-11-20T02:11:44.657+08:00 INFO [shell] launchpad watcher watching 1 directories
+2026-11-20T02:11:44.657+08:00 INFO [notifications] banner material tier=blur alpha=248
+2026-11-20T02:11:44.657+08:00 INFO [notifications] disabled (notifications.enabled=0 ready=1)
+2026-11-20T02:11:44.674+08:00 INFO [settings] settings window created (1760x1160 @ 192 dpi)
+2026-11-20T02:11:45.199+08:00 INFO [settings] ready (window deferred until show)
+2026-11-20T02:11:45.199+08:00 INFO [launchpad] hotkey registered: Ctrl+Alt+Space
+2026-11-20T02:11:45.199+08:00 INFO [core] emergency hotkey registered: Ctrl+Alt+T restores the taskbar
+2026-11-20T02:11:45.199+08:00 INFO [settings] probe file=C:\Users\chenk\AppData\Local\Temp\dockforge-t085-10153953\settings_cmd.txt
+2026-11-20T02:11:45.367+08:00 INFO [hwpanel] brightness via WMI, level=0.64
+2026-11-20T02:11:45.367+08:00 INFO [finderbar] control centre panel ready (window hidden until opened)
+2026-11-20T02:11:45.367+08:00 INFO [finderbar] probe cmd=<none> state=<none>
+2026-11-20T02:11:45.389+08:00 INFO [render] backdrop capture started: 2880x48 @0,0 every 200ms
+2026-11-20T02:11:45.423+08:00 INFO [finderbar] status host started (refresh 1000ms)
+2026-11-20T02:11:45.423+08:00 INFO [finderbar] Finder Bar ready display=\\.\DISPLAY1 dpi=192 height_dip=24.0 tier=3
+2026-11-20T02:11:45.442+08:00 INFO [finderbar] reserved top strip height_px=48 work=0,104,2880,1760
+2026-11-20T02:11:45.481+08:00 INFO [finderbar] bar ready (height=24 dip auto_hide=0)
+2026-11-20T02:11:45.481+08:00 INFO [finderbar] probe cmd=<none> state=<none>
+2026-11-20T02:11:45.490+08:00 INFO [tray] ready icon_px=32 taskbar_created=0xc07a
+2026-11-20T02:11:45.525+08:00 INFO [tray] tray icon added hwnd=00000000000f0814
+2026-11-20T02:11:45.525+08:00 INFO [tray] probe cmd=<none> state=<none>
+2026-11-20T02:11:45.530+08:00 INFO [hotkeys] applied 0 hotkey entries, 0 registered, 0 failed
+2026-11-20T02:11:45.534+08:00 INFO [dock] drop target registered (12 slots, scale=2.000)
+2026-11-20T02:11:45.534+08:00 INFO [app] dock placed edge=0 work=0,56,2880,1760 target=527,1539 1826x213 rect=527,1539,2353,1752 dpi=192
+2026-11-20T02:11:45.545+08:00 INFO [core] hide_taskbar off (default); taskbar untouched
+2026-11-20T02:11:46.070+08:00 INFO [settings] theme browser: index refresh requested url=http://127.0.0.1:19432/theme-index/index.json
+2026-11-20T02:11:46.084+08:00 INFO [settings] theme browser: Index loaded: 1 theme(s) from http://127.0.0.1:19432/theme-index/index.json
+2026-11-20T02:11:46.327+08:00 INFO [settings] theme browser: install requested name=mono sha=a8ba3db357cb...
+2026-11-20T02:11:46.333+08:00 INFO [theme_install] installed theme 'mono' (1209 bytes, sha a8ba3db357cb...)
+2026-11-20T02:11:46.335+08:00 INFO [settings] theme browser: Installed 'mono' - switch to it under Installed themes
+2026-11-20T02:11:46.579+08:00 INFO [settings] theme browser: enable mono via RecordEdit
+2026-11-20T02:11:46.888+08:00 INFO [settings] flush applied=1 changed=1 saved=1
+2026-11-20T02:11:46.888+08:00 INFO [settings] config published icon_size=48 launchpad_columns=0
+2026-11-20T02:11:47.207+08:00 INFO [core] config reloaded (); publishing ConfigChanged
+2026-11-20T02:11:47.207+08:00 INFO [settings] config published icon_size=48 launchpad_columns=0
+2026-11-20T02:11:47.464+08:00 INFO [settings] theme browser: disable, back to default
+2026-11-20T02:11:47.788+08:00 INFO [settings] flush applied=1 changed=1 saved=1
+2026-11-20T02:11:47.788+08:00 INFO [settings] config published icon_size=48 launchpad_columns=0
+2026-11-20T02:11:48.043+08:00 INFO [settings] theme browser: delete mono requested
+2026-11-20T02:11:48.043+08:00 INFO [theme_install] uninstalled theme 'mono'
+2026-11-20T02:11:48.106+08:00 INFO [core] config reloaded (); publishing ConfigChanged
+2026-11-20T02:11:48.106+08:00 INFO [settings] config published icon_size=48 launchpad_columns=0
+2026-11-20T02:11:49.150+08:00 INFO [settings] opened themes folder (C:\Users\chenk\AppData\Local\Temp\dockforge-t085-10153953\themes)
+2026-11-20T02:11:59.350+08:00 INFO [app] logger started, file=C:\Users\chenk\AppData\Local\Temp\dockforge-t085-10153953\logs\dockforge-20261120.log
+2026-11-20T02:11:59.350+08:00 INFO [app] DockForge 0.1.2 starting
+2026-11-20T02:11:59.350+08:00 INFO [app] config path = C:\Users\chenk\AppData\Local\Temp\dockforge-t085-10153953\config\config.json
+2026-11-20T02:11:59.350+08:00 INFO [taskbar] crash recovery filter installed
+2026-11-20T02:11:59.353+08:00 INFO [crash] crash dump filter installed (dir=C:\Users\chenk\AppData\Local\DockForge\dumps prev=00007ff6745c8e50)
+2026-11-20T02:11:59.354+08:00 INFO [core] config loaded from C:\Users\chenk\AppData\Local\Temp\dockforge-t085-10153953\config\config.json
+2026-11-20T02:11:59.354+08:00 INFO [app] config: icon_size=48 gap=8 mag=1.80 falloff=sine material=mica corner=22
+2026-11-20T02:11:59.725+08:00 INFO [shell] AppsFolder scan: 261 entries (shortcut=49 uwp=43 desktop-id=88 namespace=81 skipped=1)
+2026-11-20T02:11:59.744+08:00 INFO [app] apps: 261 (shortcut=49 uwp=43 desktop-id=88 namespace=81 skipped=1) scan=371.6ms icons=24/24 in 19.0ms
+2026-11-20T02:11:59.745+08:00 INFO [app] dock tiles: 12 of 261 apps (limit=12 icon=256px)
+2026-11-20T02:11:59.745+08:00 INFO [app] material: requested=mica resolved=blur os_build=26300 backdrop=1 capture=1
+2026-11-20T02:11:59.745+08:00 WARN [render] material degraded mica -> blur: system backdrop cannot be clipped to a custom corner radius
+2026-11-20T02:11:59.750+08:00 INFO [app] message-count adapters: 2 registered, poll 1000ms
+2026-11-20T02:11:59.756+08:00 INFO [dock] message count 'weixin.exe' -> 0
+2026-11-20T02:11:59.762+08:00 INFO [dock] message count 'qq.exe' -> 0
+2026-11-20T02:11:59.763+08:00 INFO [app] taskbar-progress white list: 1 entry, poll 500ms
+2026-11-20T02:11:59.764+08:00 INFO [platform] window created hwnd=0000000000180776 dpi=192
+2026-11-20T02:11:59.811+08:00 INFO [platform] display[0] \\.\DISPLAY1 monitor=0,0,2880,1920 work=0,56,2880,1760 dpi=192 raw=243 primary=1
+2026-11-20T02:11:59.813+08:00 INFO [app] dock placed edge=0 work=0,56,2880,1760 target=527,1539 1826x213 rect=527,1539,2353,1752 dpi=192
+2026-11-20T02:11:59.813+08:00 INFO [render] backdrop capture started: 1826x213 @527,1539 every 200ms
+2026-11-20T02:11:59.831+08:00 INFO [launchpad] initialized 1 overlay(s), tier=solid
+2026-11-20T02:12:00.157+08:00 INFO [shell] AppsFolder scan: 261 entries (shortcut=49 uwp=43 desktop-id=88 namespace=81 skipped=1)
+2026-11-20T02:12:00.158+08:00 INFO [shell] launchpad index: 243 items (apps=261 accepted=243 extra=0 dup=0 skipped=18 upstream=1 pathfail=0) in 327.1ms
+2026-11-20T02:12:00.158+08:00 INFO [launchpad] index rebuilt: items=243 apps=261 accepted=243 extra=0 dup=0 skipped=18 pathfail=0 scan=327.1ms total=328.0ms
+2026-11-20T02:12:00.159+08:00 INFO [shell] launchpad watcher watching 2 directories
+2026-11-20T02:12:00.193+08:00 INFO [launchpad] tiles built: 70 prewarmed of 243 items at 192px in 31.0ms
+2026-11-20T02:12:00.193+08:00 INFO [launchpad] index warmed: items=243 in 359.0ms
+2026-11-20T02:12:00.195+08:00 INFO [shell] launchpad watcher watching 1 directories
+2026-11-20T02:12:00.196+08:00 INFO [notifications] banner material tier=blur alpha=248
+2026-11-20T02:12:00.196+08:00 INFO [notifications] disabled (notifications.enabled=0 ready=1)
+2026-11-20T02:12:00.215+08:00 INFO [settings] settings window created (1760x1160 @ 192 dpi)
+2026-11-20T02:12:00.808+08:00 INFO [settings] ready (window deferred until show)
+2026-11-20T02:12:00.808+08:00 INFO [launchpad] hotkey registered: Ctrl+Alt+Space
+2026-11-20T02:12:00.808+08:00 INFO [core] emergency hotkey registered: Ctrl+Alt+T restores the taskbar
+2026-11-20T02:12:00.808+08:00 INFO [settings] probe file=C:\Users\chenk\AppData\Local\Temp\dockforge-t085-10153953\settings_cmd.txt
+2026-11-20T02:12:00.949+08:00 INFO [hwpanel] brightness via WMI, level=0.64
+2026-11-20T02:12:00.949+08:00 INFO [finderbar] control centre panel ready (window hidden until opened)
+2026-11-20T02:12:00.949+08:00 INFO [finderbar] probe cmd=<none> state=<none>
+2026-11-20T02:12:00.969+08:00 INFO [render] backdrop capture started: 2880x48 @0,0 every 200ms
+2026-11-20T02:12:01.002+08:00 INFO [finderbar] status host started (refresh 1000ms)
+2026-11-20T02:12:01.002+08:00 INFO [finderbar] Finder Bar ready display=\\.\DISPLAY1 dpi=192 height_dip=24.0 tier=3
+2026-11-20T02:12:01.020+08:00 INFO [finderbar] reserved top strip height_px=48 work=0,104,2880,1760
+2026-11-20T02:12:01.058+08:00 INFO [finderbar] bar ready (height=24 dip auto_hide=0)
+2026-11-20T02:12:01.058+08:00 INFO [finderbar] probe cmd=<none> state=<none>
+2026-11-20T02:12:01.068+08:00 INFO [tray] ready icon_px=32 taskbar_created=0xc07a
+2026-11-20T02:12:01.097+08:00 INFO [tray] tray icon added hwnd=00000000000f0aaa
+2026-11-20T02:12:01.097+08:00 INFO [tray] probe cmd=<none> state=<none>
+2026-11-20T02:12:01.100+08:00 INFO [hotkeys] applied 0 hotkey entries, 0 registered, 0 failed
+2026-11-20T02:12:01.106+08:00 INFO [dock] drop target registered (12 slots, scale=2.000)
+2026-11-20T02:12:01.111+08:00 INFO [app] dock placed edge=0 work=0,56,2880,1760 target=527,1539 1826x213 rect=527,1539,2353,1752 dpi=192
+2026-11-20T02:12:01.124+08:00 INFO [core] hide_taskbar off (default); taskbar untouched

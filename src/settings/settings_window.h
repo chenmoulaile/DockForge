@@ -23,9 +23,13 @@
 
 #include "core/config_events.h"
 #include "core/event_bus.h"
+#include "core/theme_index.h"
 #include "settings/settings_model.h"
 
+#include <memory>
+#include <mutex>
 #include <string>
+#include <vector>
 
 #include "platform/win_common.h"
 
@@ -74,12 +78,45 @@ class SettingsWindow {
     // next CreateControls seeds the same text.
     void SetShortcutsStatus(const std::string& text);
 
+    // T-085 theme browser. The buttons call exactly these methods, and the
+    // probe channel drives the same methods, so a probe PASS certifies the
+    // chain a user click takes (the T-050 RecordEdit precedent).
+    void ThemeRefreshIndex();       // fetch the remote index into the browser list
+    void ThemeInstallSelected();    // one-click install of the selected entry
+    void ThemeEnableSelected();     // set appearance.theme = selected local pack
+    void ThemeDisable();            // back to the built-in "default"
+    void ThemeDeleteSelected();     // uninstall the selected local pack
+    void ThemeOpenFolder();         // Explorer on ThemesDir()
+    void ThemeReloadLocalList();    // re-seed the local list from disk
+    void ThemeSetStatus(const std::string& text);
+
   private:
+    // One async job (index fetch or pack install). The worker thread fills it
+    // and PostMessages kThemeJobDoneMsg; the UI thread applies it. The window
+    // pointer never crosses the boundary - the state is a shared_ptr kept
+    // alive by theme_jobs_ until the handler consumes it, so a window closed
+    // mid-download just makes the PostMessage fail harmlessly.
+    enum class ThemeJobKind { kIndex, kInstall };
+    struct ThemeJobState {
+        ThemeJobKind kind = ThemeJobKind::kIndex;
+        std::mutex mutex;
+        bool done = false;
+        std::string status;                       // final status line text
+        std::vector<core::ThemeIndexEntry> entries;  // kIndex: parsed entries
+        bool installed = false;                   // kInstall: refresh local list
+    };
+
+    bool ThemeJobBusy(ThemeJobKind kind) const;
+    void HandleThemeJobDone(void* raw_state);
+    // Reads the selected row's raw theme name (suffix decoration stripped).
+    bool ThemeSelectedName(bool local, std::string& name_out) const;
+
     static LRESULT CALLBACK NavWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam);
     static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam);
     LRESULT HandleMessage(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam);
 
     void CreateControls();
+    void CreateThemeControls(HWND pane, RECT client);  // T-085 Themes section
     void DestroyControls();
     void ApplySectionVisibility();
     void EchoValues(const std::vector<std::string>& fields);
@@ -105,6 +142,20 @@ class SettingsWindow {
     int import_shortcuts_id_ = 0;
     HWND shortcuts_status_ = nullptr;  // T-069 conflict line (STATIC)
     std::string shortcuts_status_text_;
+
+    // T-085 theme browser state.
+    int theme_refresh_id_ = 0;
+    int theme_install_id_ = 0;
+    int theme_enable_id_ = 0;
+    int theme_disable_id_ = 0;
+    int theme_delete_id_ = 0;
+    int theme_open_id_ = 0;
+    HWND theme_remote_list_ = nullptr;
+    HWND theme_local_list_ = nullptr;
+    HWND theme_status_ = nullptr;
+    std::string theme_status_text_;
+    std::vector<core::ThemeIndexEntry> theme_entries_;  // rows behind remote_list_
+    std::vector<std::shared_ptr<ThemeJobState>> theme_jobs_;
 
     // One HWND per bound field, keyed by the dotted C-01 name. Static labels are
     // not in here - they carry no state.

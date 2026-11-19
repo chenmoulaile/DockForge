@@ -61,7 +61,16 @@ std::wstring ConfigPath() {
 }
 
 
-std::wstring ThemesDir() { return ConfigDir() + L"\\themes"; }
+std::wstring ThemesDir() {
+    // Probe/test isolation (T-085), same contract as DOCKFORGE_CONFIG_PATH: the
+    // theme installer and the theme browser tests point this at a scratch
+    // directory so they never write into the real profile.
+    if (std::wstring overridden = EnvDirOverride(L"DOCKFORGE_THEMES_DIR");
+        !overridden.empty()) {
+        return overridden;
+    }
+    return ConfigDir() + L"\\themes";
+}
 
 std::wstring LogsDir() {
     static const std::wstring cached = [] {

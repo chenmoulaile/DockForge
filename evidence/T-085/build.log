@@ -1,0 +1,13 @@
+[  1%] Built target hw_sidecar
+[  5%] Built target thirdparty_miniz
+[  6%] Built target message_badge_probe_app
+[  6%] Built target notification_sidecar_stub
+[  7%] Built target notification_sidecar
+[ 65%] Built target dockforge_lib
+[ 66%] Built target layout_bench
+[ 67%] Built target DockForge
+[ 68%] Built target autostart_probe
+[ 70%] Built target log_probe
+[ 72%] Built target theme_dist_probe
+[100%] Built target dockforge_tests
+build exit=0

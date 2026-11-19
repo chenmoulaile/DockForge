@@ -1639,6 +1639,21 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
             settings.Destroy();
         } else if (command.rfind("section ", 0) == 0) {
             settings.ShowSection(command.c_str() + 8);
+        } else if (command == "theme-refresh") {
+            // T-085: the probe drives the same methods the buttons call, so a
+            // probe PASS certifies the chain a user click takes (T-050's
+            // RecordEdit precedent).
+            settings.ThemeRefreshIndex();
+        } else if (command == "theme-install") {
+            settings.ThemeInstallSelected();
+        } else if (command == "theme-enable") {
+            settings.ThemeEnableSelected();
+        } else if (command == "theme-disable") {
+            settings.ThemeDisable();
+        } else if (command == "theme-delete") {
+            settings.ThemeDeleteSelected();
+        } else if (command == "theme-open-folder") {
+            settings.ThemeOpenFolder();
         } else if (command.rfind("set ", 0) == 0) {
             const std::size_t first = command.find(' ');
             const std::size_t second = command.find(' ', first + 1);

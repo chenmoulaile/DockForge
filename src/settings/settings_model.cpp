@@ -17,8 +17,9 @@ constexpr char kLogModule[] = "settings";
 struct FieldSpec {
     const char* name;
     // Kind discriminator: int/float ranges come from core, enums parse by name,
-    // bools parse 0/1/false/true, City is a free-text identifier.
-    enum class Kind { Int, Float, Bool, Position, Material, Falloff, Theme, City } kind;
+    // bools parse 0/1/false/true, City/Url are trimmed free text differing only
+    // in the byte cap the loader applies (40 vs 256, T-075 vs T-085).
+    enum class Kind { Int, Float, Bool, Position, Material, Falloff, Theme, City, Url } kind;
 };
 
 // The field table is the single place a settings control maps onto C-01. The
@@ -47,6 +48,9 @@ constexpr FieldSpec kFields[] = {
     {"weather.enabled", FieldSpec::Kind::Bool},
     {"weather.city", FieldSpec::Kind::City},
     {"weather.refresh_minutes", FieldSpec::Kind::Int},
+    // T-085: the community index URL. Trimmed free text with the loader's
+    // 256-byte cap; an empty value reads as the frozen default.
+    {"themes.index_url", FieldSpec::Kind::Url},
     // T-065 (C-25): one switch per shipped adapter. The adapter id sits verbatim
     // in the field name, matching the C-01 template
     // integrations.message_counts.<adapter_id>.enabled.
@@ -233,6 +237,8 @@ std::string SettingsModel::CurrentValueText(const core::Config& config,
             return config.appearance.theme;
         case FieldSpec::Kind::City:
             return config.weather.city;
+        case FieldSpec::Kind::Url:
+            return config.themes.index_url;
     }
     return std::string(buffer);
 }
@@ -503,6 +509,25 @@ int SettingsModel::Apply(core::Config& config, std::vector<std::string>* changed
                 parsed = true;  // an empty city is legal: it just disables the tile
                 moved = value != config.weather.city;
                 config.weather.city = value;
+                break;
+            }
+            case FieldSpec::Kind::Url: {
+                // T-085: same trim + cap shape as City, with the loader's 256
+                // cap and the empty-means-default rule (config.cpp parse).
+                std::string value = edit.text;
+                const std::size_t first = value.find_first_not_of(" \t\r\n");
+                if (first == std::string::npos) {
+                    value.clear();
+                } else {
+                    const std::size_t last = value.find_last_not_of(" \t\r\n");
+                    value = value.substr(first, last - first + 1);
+                }
+                constexpr std::size_t kMaxUrlBytes = 256;  // config.cpp clamp width
+                if (value.size() > kMaxUrlBytes) value.resize(kMaxUrlBytes);
+                if (value.empty()) value = core::DefaultThemeIndexUrl();
+                parsed = true;
+                moved = value != config.themes.index_url;
+                config.themes.index_url = value;
                 break;
             }
         }

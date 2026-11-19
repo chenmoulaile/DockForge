@@ -250,4 +250,52 @@ std::vector<std::string> ListThemes() {
     return names;
 }
 
+bool ReadThemeInfoFromDir(const std::wstring& dir, ThemeInfo& info) {
+    // Same parse rules as ReadThemeFile (1MB cap, JSON object) but on an
+    // explicit path - the installer validates a staging tree with this before
+    // the pack lands in ThemesDir().
+    const std::wstring path = dir + L"\\theme.json";
+    HANDLE h = CreateFileW(path.c_str(), GENERIC_READ,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                           OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    LARGE_INTEGER size{};
+    if (!GetFileSizeEx(h, &size) || size.QuadPart < 0 || size.QuadPart > (1 << 20)) {
+        CloseHandle(h);
+        return false;
+    }
+    std::string data(static_cast<std::size_t>(size.QuadPart), '\0');
+    DWORD got = 0;
+    const BOOL ok = ReadFile(h, data.data(), static_cast<DWORD>(data.size()), &got, nullptr);
+    CloseHandle(h);
+    if (!ok) return false;
+    data.resize(got);
+
+    const json parsed = json::parse(data, nullptr, false);
+    if (parsed.is_discarded() || !parsed.is_object()) return false;
+    info.name = parsed.value("name", "");
+    info.author = parsed.value("author", "");
+    info.version = parsed.value("version", "");
+    info.extends = parsed.value("extends", "");
+    return true;
+}
+
+std::vector<ThemeDetails> ListThemeDetails() {
+    std::vector<ThemeDetails> out;
+    for (const std::string& name : ListThemes()) {
+        ThemeDetails details;
+        details.name = name;
+        details.builtin = name == "default" || name == "dark";
+        if (!details.builtin) {
+            ThemeInfo info;
+            if (ReadThemeFile(name, nullptr, &info, nullptr)) {
+                details.author = info.author;
+                details.version = info.version;
+            }
+        }
+        out.push_back(std::move(details));
+    }
+    return out;
+}
+
 }  // namespace dockforge::core

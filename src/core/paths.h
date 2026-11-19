@@ -18,6 +18,8 @@ std::wstring ConfigDir();
 std::wstring ConfigPath();
 
 // %APPDATA%\DockForge\themes
+// Overridable with DOCKFORGE_THEMES_DIR (probe/test isolation, T-085, same
+// contract as DOCKFORGE_CONFIG_PATH).
 std::wstring ThemesDir();
 
 // %LOCALAPPDATA%\DockForge\logs

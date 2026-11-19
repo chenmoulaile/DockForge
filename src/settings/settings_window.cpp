@@ -2,9 +2,11 @@
 
 #include "core/hotkeys.h"
 #include "core/theme.h"
+#include "core/theme_install.h"
 
 #include "core/log.h"
 #include "core/paths.h"
+#include "platform/http_client.h"
 
 #include <d2d1.h>
 #include <dwrite.h>
@@ -13,6 +15,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <thread>
 
 namespace dockforge::settings {
 namespace {
@@ -26,6 +29,10 @@ constexpr char kLogModule[] = "settings";
 constexpr UINT kDebounceTimerId = 1;
 constexpr UINT kDebounceMs = 300;
 
+// T-085: completion signal from a theme worker thread. WPARAM carries the raw
+// ThemeJobState pointer; the state stays alive in theme_jobs_ until consumed.
+constexpr UINT kThemeJobDoneMsg = WM_APP + 0x85;
+
 // Layout, in DIP at 96 DPI. Everything multiplies by the window's DPI.
 constexpr int kWindowW = 880;
 constexpr int kWindowH = 580;
@@ -36,15 +43,17 @@ constexpr int kRowH = 34;
 constexpr int kPaneX = kNavW + 24;
 constexpr int kPaneY = 28;
 
-// Section order is the T-050 DoD order (T-069 appended "Shortcuts" before
-// "About"). The probe references sections by the same lowercase names.
+// Section order is the T-050 DoD order; T-069 appended "Shortcuts" before
+// "About" and T-085 inserts "Themes" right after "Appearance" (the theme
+// combo the section already owns is where a browser belongs). The probe
+// references sections by the same lowercase names.
 constexpr const wchar_t* kSectionNames[] = {
-    L"Dock", L"Launchpad", L"Appearance", L"Behavior", L"Shortcuts", L"About",
+    L"Dock", L"Launchpad", L"Appearance", L"Themes", L"Behavior", L"Shortcuts", L"About",
 };
 constexpr const char* kSectionKeys[] = {
-    "dock", "launchpad", "appearance", "behavior", "shortcuts", "about",
+    "dock", "launchpad", "appearance", "themes", "behavior", "shortcuts", "about",
 };
-constexpr int kSectionCount = 6;
+constexpr int kSectionCount = 7;
 
 constexpr int kCtrlFirst = 100;
 
@@ -53,7 +62,9 @@ constexpr int kCtrlFirst = 100;
 struct ControlRow {
     const char* field;      // dotted C-01 key, empty for display-only
     const wchar_t* label;
-    enum class Kind { Edit, Combo, Check, Label, Action } kind;
+    // Kind::Url is the T-085 index URL: trimmed free text like City but with
+    // the loader's 256-byte cap instead of the city cap.
+    enum class Kind { Edit, Combo, Check, Label, Action, Url } kind;
     // Combo choices, comma-separated via separate entries; null for non-combos.
     const wchar_t* const* choices;
     int choice_count;
@@ -85,6 +96,13 @@ constexpr ControlRow kAppearanceRows[] = {
     // choices == nullptr marks the one dynamic combo: its items come from
     // core::ListThemes() at creation time, not from a static table.
     {"appearance.theme", L"Theme", ControlRow::Kind::Combo, nullptr, 0},
+};
+
+// T-085: the Themes section. The bound field row (index URL) rides the normal
+// ControlRow pipeline; the two listboxes and six action buttons are created by
+// CreateThemeControls after the row loop - listboxes bind to no C-01 field.
+constexpr ControlRow kThemesRows[] = {
+    {"themes.index_url", L"Index URL", ControlRow::Kind::Url, nullptr, 0},
 };
 
 constexpr ControlRow kBehaviorRows[] = {
@@ -167,12 +185,14 @@ constexpr ControlRow kAboutRows[] = {
 };
 
 constexpr const ControlRow* kSectionRows[] = {
-    kDockRows, kLaunchpadRows, kAppearanceRows, kBehaviorRows, kShortcutsRows, kAboutRows,
+    kDockRows, kLaunchpadRows, kAppearanceRows, kThemesRows, kBehaviorRows, kShortcutsRows,
+    kAboutRows,
 };
 constexpr int kSectionRowCount[] = {
     static_cast<int>(std::size(kDockRows)),
     static_cast<int>(std::size(kLaunchpadRows)),
     static_cast<int>(std::size(kAppearanceRows)),
+    static_cast<int>(std::size(kThemesRows)),
     static_cast<int>(std::size(kBehaviorRows)),
     static_cast<int>(std::size(kShortcutsRows)),
     static_cast<int>(std::size(kAboutRows)),
@@ -345,6 +365,14 @@ LRESULT SettingsWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wparam, LPARAM
                 return 0;
             }
             break;
+        case kThemeJobDoneMsg: {
+            // T-085: an async theme job (index fetch or pack install) finished
+            // on its worker thread. Consume the state and update the lists.
+            if (hwnd_ == nullptr) return 0;  // window dying; state freed by owner
+            auto* raw = reinterpret_cast<ThemeJobState*>(wparam);
+            HandleThemeJobDone(raw);
+            return 0;
+        }
         case WM_COMMAND: {
             const int id = LOWORD(wparam);
             const int code = HIWORD(wparam);
@@ -362,6 +390,32 @@ LRESULT SettingsWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wparam, LPARAM
                 }
                 if (id == import_shortcuts_id_ && import_shortcuts_id_ != 0) {
                     ImportShortcuts();
+                    return 0;
+                }
+                // T-085 theme browser actions, same contract: no config field,
+                // a dedicated id, one method per action.
+                if (id == theme_refresh_id_ && theme_refresh_id_ != 0) {
+                    ThemeRefreshIndex();
+                    return 0;
+                }
+                if (id == theme_install_id_ && theme_install_id_ != 0) {
+                    ThemeInstallSelected();
+                    return 0;
+                }
+                if (id == theme_enable_id_ && theme_enable_id_ != 0) {
+                    ThemeEnableSelected();
+                    return 0;
+                }
+                if (id == theme_disable_id_ && theme_disable_id_ != 0) {
+                    ThemeDisable();
+                    return 0;
+                }
+                if (id == theme_delete_id_ && theme_delete_id_ != 0) {
+                    ThemeDeleteSelected();
+                    return 0;
+                }
+                if (id == theme_open_id_ && theme_open_id_ != 0) {
+                    ThemeOpenFolder();
                     return 0;
                 }
             }
@@ -431,13 +485,17 @@ void SettingsWindow::CreateControls() {
             // The label doubles as the checkbox text for checks.
             HWND label = CreateWindowExW(0, L"STATIC", row.label,
                                          WS_CHILD | WS_VISIBLE,
-                                         dip(8), dip(y + (row.kind == ControlRow::Kind::Edit ? 4 : 0)),
+                                         dip(8), dip(y + (row.kind == ControlRow::Kind::Edit ||
+                                                                   row.kind == ControlRow::Kind::Url
+                                                               ? 4
+                                                               : 0)),
                                          dip(kLabelW), dip(22), pane, nullptr, instance_, nullptr);
             all_controls_.push_back(label);
 
             HWND control = nullptr;
             switch (row.kind) {
                 case ControlRow::Kind::Edit:
+                case ControlRow::Kind::Url:  // same EDIT; the model trims/caps
                     control = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
                                               WS_CHILD | WS_VISIBLE | WS_TABSTOP |
                                                   ES_AUTOHSCROLL,
@@ -523,10 +581,12 @@ void SettingsWindow::CreateControls() {
         // T-069: the conflict/status line for the Shortcuts section. It is not
         // a ControlRow - it has no field and its text comes from the owner
         // (SetShortcutsStatus), not from the model - so it gets its own HWND
-        // anchored below the rows.
-        if (section_panes_.size() > 4 && section_panes_[4] != nullptr) {
-            HWND pane = section_panes_[4];
-            const int status_y = 8 + kSectionRowCount[4] * kRowH + 4;
+        // anchored below the rows. T-085 moved Shortcuts from pane index 4 to 5.
+        constexpr int kShortcutsSection = 5;
+        if (section_panes_.size() > kShortcutsSection &&
+            section_panes_[kShortcutsSection] != nullptr) {
+            HWND pane = section_panes_[kShortcutsSection];
+            const int status_y = 8 + kSectionRowCount[kShortcutsSection] * kRowH + 4;
             shortcuts_status_ = CreateWindowExW(
                 0, L"STATIC", L"", WS_CHILD | SS_LEFT, dip(8), dip(status_y),
                 rc.right - dip(kPaneX + 32), dip(40), pane, nullptr, instance_, nullptr);
@@ -535,10 +595,76 @@ void SettingsWindow::CreateControls() {
                          TRUE);
             SetShortcutsStatus(shortcuts_status_text_);
         }
+        // T-085: the Themes pane (index 3) gets its listboxes and action
+        // buttons from the dedicated creator.
+        if (section == 3 && section_panes_[3] != nullptr) {
+            CreateThemeControls(section_panes_[3], rc);
+        }
     }
     ApplySectionVisibility();
     EchoValues(std::vector<std::string>());
+    ThemeReloadLocalList();
     if (nav_) SendMessageW(nav_, WM_SETFONT, reinterpret_cast<WPARAM>(ui_font_), TRUE);
+}
+
+// T-085 Themes pane layout. Everything here is DIP-scaled like the rest of the
+// window; the two listboxes and the status line bind to no C-01 field.
+void SettingsWindow::CreateThemeControls(HWND pane, RECT client) {
+    const UINT dpi = GetDpiForSystem();
+    auto dip = [dpi](int value) { return MulDiv(value, static_cast<int>(dpi), 96); };
+    int next_id = kCtrlFirst + 200;  // past every bound row id
+
+    const int pane_w = client.right - dip(kPaneX + 32);
+    auto add_button = [&](int x, int y, int w, const wchar_t* label, int* id_out) {
+        HWND button = CreateWindowExW(0, L"BUTTON", label,
+                                      WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+                                      dip(x), dip(y), dip(w), dip(24), pane,
+                                      reinterpret_cast<HMENU>(static_cast<INT_PTR>(next_id)),
+                                      instance_, nullptr);
+        SendMessageW(button, WM_SETFONT, reinterpret_cast<WPARAM>(ui_font_), TRUE);
+        all_controls_.push_back(button);
+        *id_out = next_id;
+        ++next_id;
+    };
+
+    // Remote browser list.
+    HWND remote_label =
+        CreateWindowExW(0, L"STATIC", L"Community themes (remote index):", WS_CHILD | WS_VISIBLE,
+                        dip(8), dip(50), dip(320), dip(18), pane, nullptr, instance_, nullptr);
+    all_controls_.push_back(remote_label);
+    SendMessageW(remote_label, WM_SETFONT, reinterpret_cast<WPARAM>(ui_font_), TRUE);
+    theme_remote_list_ = CreateWindowExW(
+        WS_EX_CLIENTEDGE, L"LISTBOX", nullptr,
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | LBS_NOTIFY | LBS_HASSTRINGS | WS_VSCROLL,
+        dip(8), dip(72), pane_w, dip(110), pane, nullptr, instance_, nullptr);
+    all_controls_.push_back(theme_remote_list_);
+    SendMessageW(theme_remote_list_, WM_SETFONT, reinterpret_cast<WPARAM>(ui_font_), TRUE);
+    add_button(8, 190, 150, L"Refresh index", &theme_refresh_id_);
+    add_button(170, 190, 150, L"Install selected", &theme_install_id_);
+
+    // Local manager list.
+    HWND local_label =
+        CreateWindowExW(0, L"STATIC", L"Installed themes:", WS_CHILD | WS_VISIBLE, dip(8),
+                        dip(224), dip(320), dip(18), pane, nullptr, instance_, nullptr);
+    all_controls_.push_back(local_label);
+    SendMessageW(local_label, WM_SETFONT, reinterpret_cast<WPARAM>(ui_font_), TRUE);
+    theme_local_list_ = CreateWindowExW(
+        WS_EX_CLIENTEDGE, L"LISTBOX", nullptr,
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | LBS_NOTIFY | LBS_HASSTRINGS | WS_VSCROLL,
+        dip(8), dip(246), pane_w, dip(110), pane, nullptr, instance_, nullptr);
+    all_controls_.push_back(theme_local_list_);
+    SendMessageW(theme_local_list_, WM_SETFONT, reinterpret_cast<WPARAM>(ui_font_), TRUE);
+    add_button(8, 364, 140, L"Enable selected", &theme_enable_id_);
+    add_button(160, 364, 140, L"Use default theme", &theme_disable_id_);
+    add_button(312, 364, 140, L"Delete selected", &theme_delete_id_);
+    add_button(464, 364, 160, L"Open themes folder", &theme_open_id_);
+
+    // Status line: every async outcome lands here, never silently.
+    theme_status_ = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | SS_LEFT, dip(8), dip(400),
+                                    pane_w, dip(56), pane, nullptr, instance_, nullptr);
+    all_controls_.push_back(theme_status_);
+    SendMessageW(theme_status_, WM_SETFONT, reinterpret_cast<WPARAM>(ui_font_), TRUE);
+    ThemeSetStatus(theme_status_text_);
 }
 
 void SettingsWindow::DestroyControls() {
@@ -552,6 +678,16 @@ void SettingsWindow::DestroyControls() {
     open_logs_id_ = 0;
     export_shortcuts_id_ = 0;
     import_shortcuts_id_ = 0;
+    theme_remote_list_ = nullptr;
+    theme_local_list_ = nullptr;
+    theme_status_ = nullptr;
+    theme_refresh_id_ = 0;
+    theme_install_id_ = 0;
+    theme_enable_id_ = 0;
+    theme_disable_id_ = 0;
+    theme_delete_id_ = 0;
+    theme_open_id_ = 0;
+    theme_entries_.clear();
     if (nav_ && IsWindow(nav_)) DestroyWindow(nav_);
     nav_ = nullptr;
 }
@@ -747,6 +883,267 @@ void SettingsWindow::ReloadConfig(const core::Config& config) {
     model_.Clear();
     EchoValues(std::vector<std::string>());
     DF_DEBUG(kLogModule, "reloaded config from owner");
+}
+
+// ------------------------------------------------------------------ T-085
+
+// The theme methods share one async pattern: the worker thread owns nothing
+// but its shared_ptr<ThemeJobState> and a HWND copy, so a window closed
+// mid-download cannot touch a dead object. The completion PostMessage either
+// lands (window alive) or fails harmlessly (window gone); the state dies with
+// the last shared_ptr either way.
+
+bool SettingsWindow::ThemeJobBusy(ThemeJobKind kind) const {
+    for (const auto& job : theme_jobs_) {
+        if (job->kind == kind) {
+            std::lock_guard<std::mutex> guard(job->mutex);
+            if (!job->done) return true;
+        }
+    }
+    return false;
+}
+
+void SettingsWindow::ThemeSetStatus(const std::string& text) {
+    theme_status_text_ = text;
+    if (theme_status_ && IsWindow(theme_status_)) {
+        SetWindowTextW(theme_status_, core::Utf8ToWide(text).c_str());
+    }
+}
+
+void SettingsWindow::ThemeRefreshIndex() {
+    if (ThemeJobBusy(ThemeJobKind::kIndex)) {
+        ThemeSetStatus("An index fetch is already running...");
+        return;
+    }
+    const std::string url = config_.themes.index_url.empty()
+                                ? core::DefaultThemeIndexUrl()
+                                : config_.themes.index_url;
+    auto state = std::make_shared<ThemeJobState>();
+    state->kind = ThemeJobKind::kIndex;
+    theme_jobs_.push_back(state);
+    DF_INFO(kLogModule, "theme browser: index refresh requested url=%s", url.c_str());
+    ThemeSetStatus("Fetching index: " + url);
+
+    HWND hwnd = hwnd_;
+    std::thread([state, hwnd, url]() {
+        std::string error;
+        std::vector<core::ThemeIndexEntry> entries;
+        const bool ok = core::FetchThemeIndex(url, entries, &error);
+        {
+            std::lock_guard<std::mutex> guard(state->mutex);
+            if (ok) {
+                char line[160];
+                std::snprintf(line, sizeof(line), "Index loaded: %zu theme(s) from %s",
+                              entries.size(), url.c_str());
+                state->status = line;
+                state->entries = std::move(entries);
+            } else {
+                state->status = "Index fetch failed: " + error +
+                                " (check the Index URL, or the source may be offline)";
+            }
+            state->done = true;
+        }
+        PostMessageW(hwnd, kThemeJobDoneMsg, reinterpret_cast<WPARAM>(state.get()), 0);
+    }).detach();
+}
+
+void SettingsWindow::ThemeInstallSelected() {
+    if (theme_remote_list_ == nullptr) return;
+    const LRESULT sel = SendMessageW(theme_remote_list_, LB_GETCURSEL, 0, 0);
+    if (sel < 0 || sel >= static_cast<LRESULT>(theme_entries_.size())) {
+        ThemeSetStatus("Select a theme in the community list first.");
+        return;
+    }
+    if (ThemeJobBusy(ThemeJobKind::kInstall)) {
+        ThemeSetStatus("An install is already running...");
+        return;
+    }
+    const core::ThemeIndexEntry entry = theme_entries_[static_cast<std::size_t>(sel)];
+    auto state = std::make_shared<ThemeJobState>();
+    state->kind = ThemeJobKind::kInstall;
+    theme_jobs_.push_back(state);
+    DF_INFO(kLogModule, "theme browser: install requested name=%s sha=%s...", entry.name.c_str(), entry.sha256.substr(0, 12).c_str());
+    ThemeSetStatus("Downloading '" + entry.name + "' ...");
+
+    HWND hwnd = hwnd_;
+    std::thread([state, hwnd, entry]() {
+        std::string status;
+        bool installed = false;
+        constexpr std::size_t kMaxPackBytes = 64u << 20;  // ADR-0026 sanity bound
+        const platform::HttpBytesResult downloaded =
+            platform::HttpGetBytes(entry.download_url, 30000);
+        if (!downloaded.ok) {
+            char line[160];
+            std::snprintf(line, sizeof(line), "Download failed (status=%lu err=%lu)",
+                          downloaded.status, downloaded.error);
+            status = std::string("Download of '") + entry.name + "' failed: " + line;
+        } else if (downloaded.body.size() > kMaxPackBytes) {
+            status = std::string("Download of '") + entry.name +
+                     "' refused: larger than the 64MB bound";
+        } else if (entry.size_bytes > 0 &&
+                   static_cast<long long>(downloaded.body.size()) != entry.size_bytes) {
+            char line[160];
+            std::snprintf(line, sizeof(line),
+                          "size mismatch: index says %lld bytes, server sent %zu",
+                          entry.size_bytes, downloaded.body.size());
+            status = std::string("Download of '") + entry.name + "' refused: " + line;
+        } else {
+            const core::ThemeInstallResult result =
+                core::InstallThemePackBytes(downloaded.body, entry.sha256, entry.name);
+            installed = result.ok;
+            status = result.ok ? std::string("Installed '") + entry.name +
+                                     "' - switch to it under Installed themes"
+                               : std::string("Install refused: ") + result.error;
+        }
+        {
+            std::lock_guard<std::mutex> guard(state->mutex);
+            state->status = std::move(status);
+            state->installed = installed;
+            state->done = true;
+        }
+        PostMessageW(hwnd, kThemeJobDoneMsg, reinterpret_cast<WPARAM>(state.get()), 0);
+    }).detach();
+}
+
+void SettingsWindow::HandleThemeJobDone(void* raw_state) {
+    auto* raw = static_cast<ThemeJobState*>(raw_state);
+    std::shared_ptr<ThemeJobState> state;
+    for (auto it = theme_jobs_.begin(); it != theme_jobs_.end(); ++it) {
+        if (it->get() == raw) {
+            state = *it;
+            theme_jobs_.erase(it);
+            break;
+        }
+    }
+    if (!state) return;  // unknown or already consumed
+
+    ThemeJobKind kind = ThemeJobKind::kIndex;
+    std::string status;
+    std::vector<core::ThemeIndexEntry> entries;
+    bool refresh_local = false;
+    {
+        std::lock_guard<std::mutex> guard(state->mutex);
+        kind = state->kind;
+        status = state->status;
+        entries = state->entries;
+        refresh_local = state->installed;
+    }
+
+    if (kind == ThemeJobKind::kIndex) {
+        theme_entries_ = std::move(entries);
+        if (theme_remote_list_ && IsWindow(theme_remote_list_)) {
+            SendMessageW(theme_remote_list_, LB_RESETCONTENT, 0, 0);
+            for (const core::ThemeIndexEntry& entry : theme_entries_) {
+                char line[192];
+                std::snprintf(line, sizeof(line), "%s  -  %s%s%s",
+                              entry.name.c_str(), entry.author.c_str(),
+                              entry.version.empty() ? "" : " v", entry.version.c_str());
+                const std::wstring wide = core::Utf8ToWide(line);
+                SendMessageW(theme_remote_list_, LB_ADDSTRING, 0,
+                             reinterpret_cast<LPARAM>(wide.c_str()));
+            }
+        }
+    }
+    if (refresh_local) ThemeReloadLocalList();
+    DF_INFO(kLogModule, "theme browser: %s", status.c_str());
+    ThemeSetStatus(status);
+}
+
+void SettingsWindow::ThemeReloadLocalList() {
+    if (!theme_local_list_ || !IsWindow(theme_local_list_)) return;
+    SendMessageW(theme_local_list_, LB_RESETCONTENT, 0, 0);
+    for (const core::ThemeDetails& details : core::ListThemeDetails()) {
+        std::string line = details.name;
+        if (details.builtin) {
+            line += "  (built-in)";
+        } else {
+            if (!details.author.empty()) line += "  -  " + details.author;
+            if (!details.version.empty()) line += " v" + details.version;
+        }
+        if (details.name == config_.appearance.theme) line += "   [active]";
+        const std::wstring wide = core::Utf8ToWide(line);
+        SendMessageW(theme_local_list_, LB_ADDSTRING, 0,
+                     reinterpret_cast<LPARAM>(wide.c_str()));
+    }
+}
+
+// Shared selection reader: returns the raw theme name (before any " [active]"
+// suffix decoration) for the listbox row the user clicked.
+bool SettingsWindow::ThemeSelectedName(bool local, std::string& name_out) const {
+    const HWND list = local ? theme_local_list_ : theme_remote_list_;
+    if (!list || !IsWindow(list)) return false;
+    const LRESULT sel = SendMessageW(list, LB_GETCURSEL, 0, 0);
+    if (sel < 0) return false;
+    if (local) {
+        const std::vector<core::ThemeDetails> details = core::ListThemeDetails();
+        if (sel >= static_cast<LRESULT>(details.size())) return false;
+        name_out = details[static_cast<std::size_t>(sel)].name;
+        return true;
+    }
+    if (sel >= static_cast<LRESULT>(theme_entries_.size())) return false;
+    name_out = theme_entries_[static_cast<std::size_t>(sel)].name;
+    return true;
+}
+
+void SettingsWindow::ThemeEnableSelected() {
+    std::string name;
+    if (!ThemeSelectedName(true, name)) {
+        ThemeSetStatus("Select an installed theme first.");
+        return;
+    }
+    // The normal chain: RecordEdit -> 300ms debounce -> SaveConfig ->
+    // ConfigChanged -> the theme lens applies the pack. Identical to typing
+    // into the Appearance combo, which is the point.
+    DF_INFO(kLogModule, "theme browser: enable %s via RecordEdit", name.c_str());
+    RecordEdit("appearance.theme", name);
+    ThemeSetStatus("Switching theme to '" + name + "'...");
+}
+
+void SettingsWindow::ThemeDisable() {
+    DF_INFO(kLogModule, "theme browser: disable, back to default");
+    RecordEdit("appearance.theme", "default");
+    ThemeSetStatus("Switching theme to 'default'...");
+}
+
+void SettingsWindow::ThemeDeleteSelected() {
+    std::string name;
+    if (!ThemeSelectedName(true, name)) {
+        ThemeSetStatus("Select an installed theme first.");
+        return;
+    }
+    if (name == "default" || name == "dark") {
+        ThemeSetStatus("Built-in themes cannot be deleted.");
+        return;
+    }
+    // Deleting the active theme first falls back to 'default', so the dock
+    // never references a pack that is gone (T-052 would also fall back at
+    // load, but the config should not carry a dangling id).
+    if (config_.appearance.theme == name) {
+        RecordEdit("appearance.theme", "default");
+    }
+    DF_INFO(kLogModule, "theme browser: delete %s requested", name.c_str());
+    std::string error;
+    if (core::UninstallTheme(name, error)) {
+        ThemeReloadLocalList();
+        ThemeSetStatus("Deleted '" + name + "'.");
+    } else {
+        ThemeSetStatus("Delete failed: " + error);
+    }
+}
+
+void SettingsWindow::ThemeOpenFolder() {
+    const std::wstring dir = core::ThemesDir();
+    core::EnsureDirectory(dir);
+    const intptr_t err = reinterpret_cast<intptr_t>(
+        ShellExecuteW(nullptr, L"open", dir.c_str(), nullptr, nullptr, SW_SHOWNORMAL));
+    if (err > 32) {
+        DF_INFO(kLogModule, "opened themes folder (%s)", core::WideToUtf8(dir).c_str());
+        ThemeSetStatus("Opened the themes folder.");
+    } else {
+        DF_WARN(kLogModule, "open themes folder failed, ShellExecuteW=%zd dir=%s", err,
+                core::WideToUtf8(dir).c_str());
+        ThemeSetStatus("Opening the themes folder failed.");
+    }
 }
 
 void SettingsWindow::FlushPending() {

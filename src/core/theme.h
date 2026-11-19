@@ -51,4 +51,21 @@ bool LoadThemeInto(const std::string& name, core::Config& config, std::string* e
 // ThemesDir() that holds a parseable theme.json. Built-ins always come first.
 std::vector<std::string> ListThemes();
 
+// Reads <dir>\theme.json (path-based variant of the loader's reader, used by
+// the T-085 installer to validate a staged pack and by the settings browser to
+// show name/author/version of an installed pack).
+bool ReadThemeInfoFromDir(const std::wstring& dir, ThemeInfo& info);
+
+// One row of the local theme list (T-085 local theme manager).
+struct ThemeDetails {
+    std::string name;      // directory name / combo id
+    std::string author;    // theme.json author ("" when absent)
+    std::string version;   // theme.json version ("" when absent)
+    bool builtin = false;  // "default"/"dark": cannot be deleted
+};
+
+// Every installed theme with its details. Built-ins first, then community
+// packs sorted by name; only directories with a parseable theme.json count.
+std::vector<ThemeDetails> ListThemeDetails();
+
 }  // namespace dockforge::core

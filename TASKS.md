@@ -13,7 +13,7 @@
 | M1 | Dock 核心 | 可用的 Dock 栏（放大、启动、指示、拖拽、缩略图） | DONE（T-009..T-016 全部 DONE） |
 | M2 | Finder Bar | 顶部栏 | IN PROGRESS（左区 T-301 DONE、常驻与预留 T-302b DONE；中区 T-302 DONE；右区 T-307/T-306 DONE、控制中心 T-304 第一会话 DONE（收口 T-304b）、T-303/T-305 TODO） |
 | M3 | Launchpad | 全屏网格启动器 | DONE (T-040/T-041/T-042 全部完成) |
-| M4 | 配置与主题 | 热重载 + 主题包 | DONE（T-050/T-051/T-052 全部 DONE；T-085 主题分发属 P1.5 队列） |
+| M4 | 配置与主题 | 热重载 + 主题包 | DONE（T-050/T-051/T-052/T-085 全部 DONE） |
 | M5 | 系统集成 | 自启、隐藏任务栏、转储、日志轮转 | DONE（T-060/T-061/T-062 全部 DONE） |
 | M6 | Stage Manager | 窗口分组与切换 | TODO（T-070/T-071） |
 | M7 | 质量加固与分发 | 冒烟测试、性能基准、安装包 | TODO（T-079..T-084） |
@@ -710,18 +710,18 @@
 
 ### T-085 · 社区主题分发替代方案（P1 · 低风险）
 
-- 状态: TODO
+- 状态: DONE（诚实边界见 evidence/T-085/verify.txt：预览图只解析不渲染、删除无确认对话框、真实默认 URL 待推送后可达）
 - 依赖: T-052（主题加载）
 - 上下文: `ADR-0026`
 - DoD:
-  - [ ] 不绑定 Steam Workshop；基于 GitHub Releases / 静态索引 JSON
-  - [ ] 主题浏览器：拉取远程索引（名称、作者、预览图、下载 URL、SHA256），显示在设置窗口
-  - [ ] 一键安装：下载 `.dockforge-theme`（zip）到 `%APPDATA%\DockForge\themes\<name>\`，校验 SHA256，失败拒绝安装
-  - [ ] 主题包格式遵循 C-02，不得含可执行内容
-  - [ ] 远程索引 URL 可配置，默认指向项目自己的 GitHub Pages 或 Release 资产
-  - [ ] 本地主题管理器：列表、启用/禁用、删除、打开文件夹
-  - [ ] **不实现**评分、评论、订阅推送
-- 证据: `evidence/T-085/`
+  - [x] 不绑定 Steam Workshop；基于 GitHub Releases / 静态索引 JSON —— `src/core/theme_index.{h,cpp}`（schema 1 解析）+ `theme_install.{h,cpp}`（下载/SHA256/解包/安装）；无评分评论订阅代码
+  - [x] 主题浏览器：拉取远程索引（名称、作者、预览图、下载 URL、SHA256），显示在设置窗口 —— 设置窗口新增 Themes 分区（远程列表 + Refresh/Install），实测 `Index loaded: 1 theme(s)`（probe.txt B1）+ 截图
+  - [x] 一键安装：下载 `.dockforge-theme`（zip）到 `%APPDATA%\DockForge\themes\<name>\`，校验 SHA256，失败拒绝安装 —— P2 installed+listed / P4 sha256 mismatch 拒装（Part A 生产模块全 PASS；Part B 真实 app B2/B3）
+  - [x] 主题包格式遵循 C-02，不得含可执行内容 —— 扩展名白名单 + theme.json 必须可解析（与 T-052 同解析）；P5 带 .exe 的包被拒；条目名反斜杠归一 + 穿越守卫（spike 实测 PS5.1 Compress-Archive 写 `icons\sample.png`）
+  - [x] 远程索引 URL 可配置，默认指向项目自己的 GitHub Pages 或 Release 资产 —— C-01 新键 `themes.index_url`（>256 钳制、空回默认、quiet-file）；默认指向 raw.githubusercontent.com/chenmoulaile/DockForge/main/theme-index/index.json（仓库自带 theme-index/ 内容，Pages 未开通用等价仓库静态托管，理由在 verify.txt）
+  - [x] 本地主题管理器：列表、启用/禁用、删除、打开文件夹 —— Installed themes 列表（built-in 标注 + [active]）；启用走 RecordEdit→flush→ConfigChanged 同链（B4 config.json 持久化实测）；删除拒内建名、激活包先回 default（B7）；打开文件夹（B8）
+  - [x] **不实现**评分、评论、订阅推送
+- 证据: `evidence/T-085/`（verify.txt 逐条 DoD + spike findings；probe.txt VERDICT=PASS；build.log/test.log gate exit 0；5730 断言 583 用例过 + 2 显式 SKIP）；spike `spikes/t085_theme_dist/`（shell zip 路线被证据否决 → vendored miniz）；工具链 `tools/theme_dist_probe.{cpp,ps1}`
 
 ### P1.5 完成定义
 
@@ -732,7 +732,7 @@
 - [ ] 全局热键与屏幕热区可配置，默认关闭，冲突检测有效
 - [ ] 天气高德/Open-Meteo 双路径可用，网络失败不阻塞
 - [ ] 通知中心右上角弹出、堆叠、清除可用
-- [ ] 主题浏览器可拉取远程索引并一键安装，SHA256 校验生效
+- [x] 主题浏览器可拉取远程索引并一键安装，SHA256 校验生效（T-085 DONE，evidence/T-085）
 - [ ] 所有新增能力在设置窗口中可单独开关
 - [ ] 性能增量：空闲 RSS 增量 < 40MB，空闲 CPU 增量 < 0.8%
 

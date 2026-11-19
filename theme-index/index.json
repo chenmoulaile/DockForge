@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "updated": "2026-11-20",
+  "themes": [
+    {
+      "name": "mono",
+      "author": "dockforge",
+      "version": "1.0.0",
+      "preview_url": "https://raw.githubusercontent.com/chenmoulaile/DockForge/main/theme-index/assets/mono-preview.png",
+      "download_url": "https://raw.githubusercontent.com/chenmoulaile/DockForge/main/theme-index/packs/mono-1.0.0.dockforge-theme",
+      "sha256": "80f97725b85cde51946ca806176230080b23d151d18bfb5bcceaf309bb5686bf",
+      "size_bytes": 3241
+    }
+  ]
+}

@@ -41,6 +41,8 @@ const std::unordered_set<std::string> kNotificationsKeys = {"enabled", "banner_e
                                                             "pulse_icons",
                                                             "banner_timeout_seconds",
                                                             "poll_seconds"};
+// T-085: the theme distribution section owns exactly these keys.
+const std::unordered_set<std::string> kThemesKeys = {"index_url"};
 // T-301: the Finder Bar section. Deliberately narrow - the centre widgets and the
 // tray mirror add their own keys when they land, so nothing here is a switch that
 // no code reads. T-307 added "right" (C-31 finderbar.right table) and "clock"
@@ -508,7 +510,7 @@ json StripUnknownKeys(const json& source) {
     if (!source.is_object()) return result;
 
     for (const char* section : {"dock", "appearance", "behavior", "launchpad", "integrations",
-                                "weather", "notifications"}) {
+                                "weather", "notifications", "themes"}) {
         if (!source.contains(section) || !source[section].is_object()) continue;
         json section_out = json::object();
         const std::string name = section;
@@ -518,17 +520,18 @@ json StripUnknownKeys(const json& source) {
                             : name == "integrations"  ? kIntegrationsKeys
                             : name == "weather"       ? kWeatherKeys
                             : name == "notifications" ? kNotificationsKeys
+                            : name == "themes"        ? kThemesKeys
                             : name == "finderbar"     ? kFinderBarKeys
                                                       : kLaunchpadKeys;
         PreserveUnknown(source[section], section_out, owned);
         if (!section_out.empty()) result[section] = section_out;
     }
     // Top-level unknown keys. "hotkeys"/"hotspots" (T-069), "weather" (T-075),
-    // "notifications" (T-076) and "finderbar" (T-301) are owned by the schema now,
-    // so they must NOT be double-preserved here.
+    // "notifications" (T-076), "themes" (T-085) and "finderbar" (T-301) are owned
+    // by the schema now, so they must NOT be double-preserved here.
     static const std::unordered_set<std::string> kTopKeys = {
         "dock", "appearance", "behavior", "launchpad", "integrations", "hotkeys", "hotspots",
-        "weather", "notifications", "finderbar"};
+        "weather", "notifications", "themes", "finderbar"};
     PreserveUnknown(source, result, kTopKeys);
     return result;
 }
@@ -669,6 +672,18 @@ bool SameNotifications(const NotificationsConfig& a, const NotificationsConfig& 
     return a.enabled == b.enabled && a.banner_enabled == b.banner_enabled &&
            a.pulse_icons == b.pulse_icons && a.banner_timeout_seconds == b.banner_timeout_seconds &&
            a.poll_seconds == b.poll_seconds;
+}
+
+const char* DefaultThemeIndexUrl() {
+    // The project's own static index (ADR-0026). Carried in-repo under
+    // theme-index/index.json, so this URL serves real content the moment the
+    // repo is reachable at github.com/chenmoulaile/DockForge (STATE.json remote).
+    return "https://raw.githubusercontent.com/chenmoulaile/DockForge/main/theme-index/"
+           "index.json";
+}
+
+bool SameThemes(const ThemesConfig& a, const ThemesConfig& b) {
+    return a.index_url == b.index_url;
 }
 
 bool operator==(const FinderBarRightItem& a, const FinderBarRightItem& b) {
@@ -943,6 +958,14 @@ bool ClampConfig(Config& config) {
         }
     }
 
+    // T-085: the index URL is a hand-editable string; the 256-byte cap keeps a
+    // paste accident from bloating every future save.
+    if (config.themes.index_url.size() > 256) {
+        DF_WARN("core", "config themes.index_url longer than 256 bytes, truncated");
+        config.themes.index_url.resize(256);
+        changed = true;
+    }
+
     // T-301: Finder Bar bounds.
     {
         const int height = ClampInt(config.finderbar.height, FinderBarHeightRange(),
@@ -1120,6 +1143,37 @@ bool ParseConfig(const std::string& json_text, Config& out, std::string* error) 
     }
     parsed.unknown_keys_json = StripUnknownKeys(document).dump();
 
+    // T-085: the theme distribution section. Lenient shape like the rest; an
+    // empty or non-string index_url keeps the frozen default.
+    if (document.contains("themes")) {
+        const auto& node = document["themes"];
+        if (node.is_object()) {
+            if (node.contains("index_url")) {
+                const auto& value = node.at("index_url");
+                if (value.is_string()) {
+                    std::string url = value.get<std::string>();
+                    const std::size_t first = url.find_first_not_of(" \t\r\n");
+                    if (first == std::string::npos) {
+                        url.clear();
+                    } else {
+                        url = url.substr(first, url.find_last_not_of(" \t\r\n") - first + 1);
+                    }
+                    if (url.empty()) {
+                        parsed.themes.index_url = DefaultThemeIndexUrl();
+                    } else {
+                        parsed.themes.index_url = std::move(url);
+                    }
+                } else {
+                    DF_WARN("core", "config themes.index_url is not a string, keeping default");
+                    bad_value = true;
+                }
+            }
+        } else if (!node.is_null()) {
+            DF_WARN("core", "config themes is not an object, keeping default");
+            bad_value = true;
+        }
+    }
+
     // T-076: the notification section. Same lenient shape: a wrong type warns and
     // keeps the default rather than failing the whole file.
     if (document.contains("notifications")) {
@@ -1262,6 +1316,7 @@ bool ParseConfig(const std::string& json_text, Config& out, std::string* error) 
     const LaunchpadConfig raw_launchpad = parsed.launchpad;
     const WeatherConfig raw_weather = parsed.weather;
     const NotificationsConfig raw_notifications = parsed.notifications;
+    const ThemesConfig raw_themes = parsed.themes;
     const FinderBarConfig raw_finderbar = parsed.finderbar;
 
     ClampConfig(parsed);
@@ -1283,6 +1338,7 @@ bool ParseConfig(const std::string& json_text, Config& out, std::string* error) 
         hotspots_raw != parsed.hotspots.size() ||
         !SameWeather(raw_weather, parsed.weather) ||
         !SameNotifications(raw_notifications, parsed.notifications) ||
+        !SameThemes(raw_themes, parsed.themes) ||
         !SameFinderBar(raw_finderbar, parsed.finderbar);
 
     out = std::move(parsed);
@@ -1408,6 +1464,12 @@ std::string SerializeConfig(const Config& config) {
             {"banner_timeout_seconds", config.notifications.banner_timeout_seconds},
             {"poll_seconds", config.notifications.poll_seconds},
         };
+    }
+
+    // T-085: quiet-file rule again - the default URL appears in no file the
+    // user has not touched.
+    if (config.themes.index_url != DefaultThemeIndexUrl()) {
+        document["themes"] = {{"index_url", config.themes.index_url}};
     }
 
     // T-301: the same quiet-file rule. Every default is compared against the

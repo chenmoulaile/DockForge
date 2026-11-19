@@ -1,0 +1,28 @@
+== T-085 theme distribution probe 2026-11-20T02:11:42.5011222+08:00 ==
+scratch=C:\Users\chenk\AppData\Local\Temp\dockforge-t085-10153953
+origin=http://127.0.0.1:19432 pack=C:\Users\chenk\AppData\Local\Temp\dockforge-t085-10153953\mono.dockforge-theme sha=a8ba3db357cbb0bda551f1a75781badadcbb9af53ac1c4a3141eae3fec6066af size=1209
+A0 origin ready
+--- Part A: theme_dist_probe.exe (production modules) ---
+themes_dir=C:\Users\chenk\AppData\Local\Temp\dockforge-t085-10153953\themes
+P1 PASS entries=1 name=mono sha=a8ba3db357cb
+P2 PASS status=200 bytes=1209 installed; theme.json present=1 listed=1
+P3 PASS resolved=resolved corner_radius=12
+P4 PASS sha256 mismatch (expected a8ba3db357cb..., got 9b2cdd335283...); refusing install
+P5 PASS pack rejected: pack contains disallowed file: helper.exe
+P6 PASS uninstalled, list clean
+PROBE ALL PASS
+--- Part B: DockForge.exe settings Themes section ---
+B1 refresh ok: 2026-11-20T02:11:46.084+08:00 INFO [settings] theme browser: Index loaded: 1 theme(s) from http://127.0.0.1:19432/theme-index/index.json
+B2 install ok: 2026-11-20T02:11:46.335+08:00 INFO [settings] theme browser: Installed 'mono' - switch to it under Installed themes
+B3 pack landed in themes dir (theme.json present)
+B4 enable ok: 2026-11-20T02:11:46.579+08:00 INFO [settings] theme browser: enable mono via RecordEdit
+B4 flush: 2026-11-20T02:11:46.888+08:00 INFO [settings] flush applied=1 changed=1 saved=1
+B4 config.json: appearance.theme = mono persisted
+B5 screenshot (light, themes section)
+B6 disable ok: 2026-11-20T02:11:47.464+08:00 INFO [settings] theme browser: disable, back to default
+B6 config.json: back to default
+B7 delete ok: 2026-11-20T02:11:48.043+08:00 INFO [theme_install] uninstalled theme 'mono'
+B7 pack directory removed
+B8 open folder ok: 2026-11-20T02:11:49.150+08:00 INFO [settings] opened themes folder (C:\Users\chenk\AppData\Local\Temp\dockforge-t085-10153953\themes)
+B9 screenshot (dark, themes section)
+VERDICT=PASS

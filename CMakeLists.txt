@@ -32,6 +32,26 @@ add_library(thirdparty_nlohmann INTERFACE)
 target_include_directories(thirdparty_nlohmann INTERFACE
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party/nlohmann/include)
 
+# T-085: miniz (vendored, static) unpacks .dockforge-theme packs. The shell
+# zip namespace route was measured unreliable in this process shape
+# (spikes/t085_theme_dist/findings.md item 3), so the installer reads the zip
+# itself; miniz_export.h is a local stub expanding MINIZ_EXPORT to nothing.
+# project() declares LANGUAGES CXX only - the vendored C sources need the C
+# language enabled explicitly or the target has no linker language.
+enable_language(C)
+add_library(thirdparty_miniz STATIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party/miniz/miniz.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party/miniz/miniz_tinfl.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party/miniz/miniz_tdef.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party/miniz/miniz_zip.c)
+target_include_directories(thirdparty_miniz PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party/miniz)
+if(MSVC)
+  target_compile_options(thirdparty_miniz PRIVATE /w)
+else()
+  target_compile_options(thirdparty_miniz PRIVATE -w)
+endif()
+
 # ---------------------------------------------------------------- core static lib
 file(GLOB_RECURSE DOCKFORGE_SOURCES CONFIGURE_DEPENDS
   ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
@@ -39,11 +59,13 @@ list(FILTER DOCKFORGE_SOURCES EXCLUDE REGEX "/src/main\\.cpp$")
 
 add_library(dockforge_lib STATIC ${DOCKFORGE_SOURCES})
 target_include_directories(dockforge_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(dockforge_lib PUBLIC thirdparty_nlohmann)
+target_link_libraries(dockforge_lib PUBLIC thirdparty_nlohmann thirdparty_miniz)
 
 target_link_libraries(dockforge_lib PUBLIC
   user32 gdi32 shell32 shlwapi ole32 oleaut32 uuid dwmapi
   d2d1 dwrite dcomp psapi advapi32 d3d11 dxgi shcore taskschd dbghelp oleacc
+  # T-085: bcrypt (SHA256 of downloaded theme packs) and version.
+  bcrypt
   winhttp version
   # T-302: centre-widget sampling - GetIfTable2 (network octets) and the WMI COM
   # plumbing for MSAcpi_ThermalZoneTemperature (the only allowed temperature
@@ -113,6 +135,16 @@ if(DOCKFORGE_BUILD_BENCH)
   target_link_libraries(log_probe PRIVATE dockforge_lib)
   if(MINGW)
     target_link_options(log_probe PRIVATE -static-libgcc -static-libstdc++)
+  endif()
+
+  # T-085 theme distribution probe: drives the production index fetch / SHA256
+  # / install / uninstall chain against the loopback origin that
+  # tools/theme_dist_probe.ps1 stands up (log-driven, evidence/T-085).
+  add_executable(theme_dist_probe ${CMAKE_CURRENT_SOURCE_DIR}/tools/theme_dist_probe.cpp)
+  target_link_libraries(theme_dist_probe PRIVATE dockforge_lib)
+  if(MINGW)
+    target_link_options(theme_dist_probe PRIVATE -municode -static-libgcc
+                        -static-libstdc++)
   endif()
 
   # T-065 badge probe target: a GUI window titled "(4) badge probe" owned by

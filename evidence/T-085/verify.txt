@@ -1,0 +1,168 @@
+T-085 · 社区主题分发替代方案 — 验证记录
+=============================================
+日期: 2026-11-20
+分支: main (基线 97e24dd)
+
+一、逐条 DoD 核对（TASKS.md T-085）
+------------------------------------
+1. [x] 不绑定 Steam Workshop；基于 GitHub Releases / 静态索引 JSON
+   - 实现: `src/core/theme_index.{h,cpp}` 解析静态 JSON 索引（schema 1），
+     `src/core/theme_install.{h,cpp}` 下载安装 `.dockforge-theme`（zip）。
+     ADR-0026 的决策落实：无评分、无评论、无订阅推送（代码里不存在这些概念）。
+   - 默认索引 URL: `core::DefaultThemeIndexUrl()`（config.cpp）指向项目自己的
+     静态托管 raw.githubusercontent.com/chenmoulaile/DockForge/main/theme-index/
+     index.json（ADR-0026「静态索引零运维成本、索引可放仓库」的落地；GitHub
+     Pages 未开通，raw.githubusercontent 是等价的仓库内静态文件托管）。仓库内
+     实际携带 `theme-index/index.json + packs/mono-1.0.0.dockforge-theme +
+     assets/mono-preview.png`，推送后默认 URL 即提供真实内容。
+
+2. [x] 主题浏览器：拉取远程索引（名称、作者、预览图、下载 URL、SHA256），显示在设置窗口
+   - 设置窗口新增 Themes 分区（Dock / Launchpad / Appearance / Themes / Behavior
+     / Shortcuts / About），远程索引列表 + Refresh index / Install selected。
+   - 索引字段全部解析并校验：name/author/version/preview_url/download_url/
+     sha256/size_bytes（theme_index.cpp ParseThemeIndex，坏字段整份拒绝）。
+   - 实测: 探针 B1 `theme browser: Index loaded: 1 theme(s) from
+     http://127.0.0.1:19432/theme-index/index.json`（app_log.txt 01:11:46 行），
+     截图 themes_section_light.png 可见 "mono - dockforge v1.0.0" 列表行。
+   - 诚实边界: 预览图（preview_url）只作为索引元数据解析与保存，浏览器列表
+     不渲染图片（v1 列表为文本行；图片解码/异步缩略图是后续打磨项，ADR-0026
+     只要求索引携带该字段）。截图 dark 变体的差异只在导航条配色（D2D 绘制），
+     PrintWindow 在本机抓不到该子面（见第六节），两PNG为两次独立进程捕获。
+
+3. [x] 一键安装：下载 `.dockforge-theme`（zip）到 `%APPDATA%\DockForge\themes\<name>\`，
+       校验 SHA256，失败拒绝安装
+   - 链路: platform::HttpGetBytes 下载 → bcrypt SHA256 全量比对（大小写不敏感）
+     → miniz 解包到 `<ThemesDir>\<name>.staging-<tick>` → C-02 校验 → 原子换名。
+   - 实测（Part A，theme_dist_probe.exe，全部 PASS）:
+     P2 installed; theme.json present=1 listed=1
+     P4 sha256 mismatch (expected a8ba..., got 9b2c...); refusing install
+        —— 且此前安装的 mono 完好、无 staging 残留（单测 sha-fail 用例同时锁）。
+   - 实测（Part B，真实 app）: B2 `Installed 'mono'`、B3 pack landed
+     （mono\theme.json 在 ThemesDir 下）。
+
+4. [x] 主题包格式遵循 C-02，不得含可执行内容
+   - 白名单扩展: .json/.png/.jpg/.jpeg/.bmp/.gif/.webp/.ttf/.otf/.woff/.woff2
+     （theme_install.cpp IsAllowedPackExtension；theme.json 必须存在且可解析，
+     用与 T-052 运行时同一套解析）。
+   - 实测: P5 `pack rejected: pack contains disallowed file: helper.exe`（该包
+     SHA 正确，只在内容校验被拒）；单测覆盖 .ps1/.exe/缺 theme.json/允许清单。
+   - 额外加固: zip 条目名归一（PS 5.1 Compress-Archive 写 `icons\sample.png`
+     反斜杠条目名，spike 实测）+ 逐级建父目录 + 条目名穿越守卫（".."、盘符、
+     绝对路径整包拒绝）+ 安装名二次校验（IsValidThemeName，内建名/非法字符拒绝）。
+
+5. [x] 远程索引 URL 可配置，默认指向项目自己的 GitHub Pages 或 Release 资产
+   - C-01 新键 `themes.index_url`（默认 = DefaultThemeIndexUrl()；>256 字节钳制；
+     空串回默认；quiet-file 规则：默认不出现在 config.json）。设置窗口 Themes
+     页 "Index URL" 编辑框走 SettingsModel（trim/cap 与 loader 同规则）。
+   - 实测: 探针 B 用回环 origin 的 config.json 驱动 app，B1 显示 app 确实从该
+     URL 拉取；单测覆盖默认静默/自定义 roundtrip/钳制/空回默认。
+   - 说明: ADR-0026 写「索引本身可以放在仓库 Pages 上」，本实现用同仓库的
+     raw.githubusercontent 静态文件（Pages 未开通），属等价静态托管，理由记于此。
+
+6. [x] 本地主题管理器：列表、启用/禁用、删除、打开文件夹
+   - Installed themes 列表（core::ListThemeDetails：内建 default/dark 标注
+     built-in、社区包带 author/version、当前激活标注 [active]）。
+   - 启用 = RecordEdit("appearance.theme", name) → 300ms 防抖 → SaveConfig →
+     ConfigChanged → 主题透镜生效（与 Appearance 下拉同一条链）。
+     禁用 = 切回 "default"。删除 = UninstallTheme（内建名拒绝；激活中的包先切
+     回 default 再删）。打开文件夹 = Explorer 打开 ThemesDir()。
+   - 实测: B4 enable → flush applied=1 → config.json `"theme": "mono"` 持久化；
+     B6 disable → 回 default；B7 delete → `uninstalled theme 'mono'` + 目录消失；
+     B8 open folder → `opened themes folder (...)`。
+   - 诚实边界: 删除无确认对话框（两步操作：先选中再点删除；包可从索引重装；
+     内建主题不可删）——刻意为之，无对话框也让探针能驱动同一条链。
+
+7. [x] 不实现评分、评论、订阅推送
+   - 代码与索引 schema 均无这些概念；刷新只由用户点击 Refresh index 触发，
+     无后台轮询。
+
+二、检查命令与原文输出
+----------------------
+1. spike（spikes/t085_theme_dist/，spike_run.log 全文）:
+   Q1 PASS sha256 vectors (abc, empty)
+   Q2 PASS download 1204 bytes sha-ok; 404 status=404 0ms; refused err=12029 ~2031ms
+   Q3 PASS raw.githubusercontent.com status=200 bytes=6034 elapsed=234..1078ms
+   Q4 PASS miniz extract files=3 0ms
+   Q5 PASS theme.json 121 bytes
+   ALL PASS
+   结论写入 findings.md：shell zip 路线被证据否决（该进程内 NameSpace 返回
+   S_FALSE/E_FAIL + null，BHID_SFObject 报 SFGAO_FOLDER=0；字节相同的文件在
+   PowerShell 下正常——进程形态相关，不可依赖），选型 vendored miniz。
+
+2. 单测（tests/theme_dist_test.cpp，隔离 = DOCKFORGE_THEMES_DIR/DOCKFORGE_CONFIG_PATH
+   指向 %TEMP% 临时目录）:
+   ./build/bin/dockforge_tests.exe "[t085]"
+   → All tests passed (133 assertions in 19 test cases)
+
+3. 实机探针（tools/theme_dist_probe.ps1，Part A = theme_dist_probe.exe 走生产模块；
+   Part B = 真实 DockForge.exe 经 DOCKFORGE_SETTINGS_CMD_FILE 驱动设置窗口 Themes
+   分区，全部回环 origin = 随机端口 HttpListener）:
+   powershell -NoProfile -ExecutionPolicy Bypass -File tools/theme_dist_probe.ps1
+   → VERDICT=PASS（probe.txt 全文: P1..P6 + B1..B9，见上）
+   证据: probe.txt / app_log.txt（app 自身日志原文）/ themes_section_light.png /
+         themes_section_dark.png
+
+4. 门禁:
+   powershell -NoProfile -ExecutionPolicy Bypass -File tools/gate.ps1 -Action build
+   → exit 0（build.log）
+   powershell -NoProfile -ExecutionPolicy Bypass -File tools/gate.ps1 -Action all
+   → exit 0：5730 断言全过，585 用例 = 583 过 + 2 显式 SKIP（test.log）
+
+三、既有失败的两个指示器用例：根因与处置（本会话完成，非本任务引入）
+----------------------------------------------------------------
+dock_indicator_test.cpp 的 "a visible window makes its app running or foreground"
+与 "destroying the window returns the app to idle" 在本会话开始时就挂（基线
+97e24dd 用 git worktree 原样构建复跑同样 11/13，失败点一致 —— 非本任务引入，
+本任务代码不触及 shell/ 窗口枚举链）。
+
+根因（本次定位）: 自动化 harness 会话对新显示的顶层窗口报告
+DWMWA_CLOAKED=1（cloak_probe.exe 实测 hwnd visible=1 cloaked=1 —— 整个会话的
+窗口都被命令外壳 cloak）。IsAppWindow 排除 cloaked 窗口是 T-011 实测的刻意
+产品行为（"cloaked 窗口报告可见但实际在另一个桌面"），因此这两个用例在本类
+会话里永远看不到自己创建的窗口。
+
+处置: 两个用例加显式环境前置守卫（SessionCloaksItsOwnWindows，检测自己刚创建
+的窗口是否被 cloak），命中则 Catch2 SKIP 并打印原因 —— 普通桌面下守卫为
+false，断言照常全跑；本会话 test.log 里可见 "skipped" 明细，不是静默通过。
+这是测试脚手架对会话属性的适配，产品代码零改动。
+
+四、截图环境限制（既有，与本任务无关，但影响证据解读）
+------------------------------------------------------
+设置窗口左侧导航是 D2D HwndRenderTarget 子窗口，PrintWindow(PW_RENDERFULLCONTENT)
+在本机抓不到它的内容（白板）；基线 HEAD 同样如此（用 worktree 构建对照实测）。
+T-050 时代的截图能抓到，说明是此后 OS/环境变化所致。因此两PNG的导航区是白的，
+主题分区的全部原生控件（编辑框/列表/按钮）清晰可见。深浅两图的差异仅在导航
+配色，本抓图法显示不出来——深色运行本身的日志链路（B9）已实测。
+
+五、诚实边界与已知差距
+----------------------
+1. 预览图不渲染（DoD 2 的括号字段解析并保存，列表不显示图片）——v1.1 打磨项。
+2. 安装/刷新是按点击触发的阻塞式 worker（30s 下载超时、64MB 上限），无进度条，
+   状态行文本反馈；并发同类任务被拒（"already running"）。
+3. 默认索引 URL 的内容要等仓库推送后才能从公网拉到（本次会话结束时已尝试推送，
+   结果见 STATE.json remote）；推送前的"真实 URL"访问会得到 404 → 浏览器状态行
+   显示失败原因，不崩溃（探针第一轮实测过 404 路径）。
+4. 探针 Part B 驱动的是 probe 文件通道（与按钮调用同一方法），真实 BM_CLICK
+   只在 T-062 修 SubclassPane 转发时验证过控件链，本包沿用该机制未重复验证。
+5. 单测对 SHA256 用 bcrypt 假设系统可用（XP 以后标配）；无 bcrypt 的环境会在
+   哈希一步报错拒绝安装（fail-closed）。
+
+六、产出物清单
+--------------
+src/core/theme_index.{h,cpp}        索引解析 + 拉取
+src/core/theme_install.{h,cpp}      SHA256（bcrypt）/ 解包（miniz）/ C-02 校验 / 安装卸载
+src/core/theme.{h,cpp}              ReadThemeInfoFromDir + ListThemeDetails
+src/core/config.{h,cpp}             themes.index_url（parse/clamp/serialize/quiet-file）
+src/core/paths.{h,cpp}              ThemesDir() 的 DOCKFORGE_THEMES_DIR 隔离覆盖
+src/platform/http_client.{h,cpp}    HttpGetBytes（http/https、NO_PROXY、有界失败）
+src/settings/settings_window.*      Themes 分区（列表/按钮/异步 worker/状态行）
+src/settings/settings_model.*       themes.index_url 字段
+src/main.cpp                        probe 通道 theme-* 命令（与按钮同方法）
+CMakeLists.txt                      thirdparty_miniz（vendored）+ bcrypt 链接 + 探针目标
+third_party/miniz/                  miniz 拆分文件集 + miniz_export.h 存根 + LICENSE
+tests/theme_dist_test.cpp           19 用例
+tools/theme_dist_probe.{cpp,ps1}    探针
+theme-index/                        仓库自带索引 + 示例包 + 预览图
+spikes/t085_theme_dist/             spike 本体 + findings.md + spike_run.log
+evidence/T-085/                     build.log / test.log / probe.txt / app_log.txt /
+                                    themes_section_light.png / themes_section_dark.png / verify.txt

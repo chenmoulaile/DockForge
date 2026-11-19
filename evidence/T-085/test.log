@@ -1,0 +1,33 @@
+Randomness seeded to: 2220889235
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+dockforge_tests.exe is a Catch2 v3.5.4 host application.
+Run with -? for options
+
+-------------------------------------------------------------------------------
+a visible window makes its app running or foreground
+-------------------------------------------------------------------------------
+D:\MacDock\tests\dock_indicator_test.cpp:134
+...............................................................................
+
+D:\MacDock\tests\dock_indicator_test.cpp:140: SKIPPED:
+explicitly with message:
+  session DWM-cloaks its own windows (harness/locked session); IsAppWindow
+  excludes cloaked windows by design, so the tracker cannot see them here
+
+-------------------------------------------------------------------------------
+destroying the window returns the app to idle
+-------------------------------------------------------------------------------
+D:\MacDock\tests\dock_indicator_test.cpp:155
+...............................................................................
+
+D:\MacDock\tests\dock_indicator_test.cpp:163: SKIPPED:
+explicitly with message:
+  session DWM-cloaks its own windows (harness/locked session); IsAppWindow
+  excludes cloaked windows by design, so the tracker cannot see them here
+
+================================================================================
+test cases:  585 |  583 passed | 2 skipped
+assertions: 5730 | 5730 passed
+
+test exit=0

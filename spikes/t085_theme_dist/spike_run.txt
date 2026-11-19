@@ -1,0 +1,17 @@
+﻿pack=C:\Users\chenk\AppData\Local\Temp\t085-spike\mono.dockforge-theme size=1204 sha256=70d832c94ce991ac62a8385d4685a41c3ae012ad6a222dccf0fc37c28b8cb4de
+origin ready=True port=18937
+run: D:\MacDock\spikes\t085_theme_dist\spike.exe 18937 70d832c94ce991ac62a8385d4685a41c3ae012ad6a222dccf0fc37c28b8cb4de
+Q1 PASS sha256 vectors (abc, empty)
+Q2 PASS download 1204 bytes sha-ok elapsed=31ms; 404 status=404 0ms; refused err=12029 2031ms
+Q3 PASS raw.githubusercontent.com status=200 bytes=6034 elapsed=906ms err=0
+  [miniz] entry[0] name='icons\sample.png' dir=0 crc=8839D53A
+  [miniz] entry[1] name='preview.png' dir=0 crc=44313A77
+  [miniz] entry[2] name='theme.json' dir=0 crc=67159044
+Q4 PASS miniz extract files=3 0ms (theme.json+preview.png+icons/sample.png)
+Q5 PASS theme.json 121 bytes: { "name": "mono", "author": "dockforge", "version": "1.0.0",
+  "overrides": { "appearance": { "corner_radius": 12 } } }
+
+
+ALL PASS
+spike exit=0
+driver done

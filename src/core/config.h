@@ -311,6 +311,26 @@ struct NotificationsConfig {
 
 bool SameNotifications(const NotificationsConfig& a, const NotificationsConfig& b);
 
+// The frozen default index URL (T-085, ADR-0026; chenmoulaile/DockForge per
+// STATE.json remote). Exposed so the struct default, the settings echo and the
+// quiet-file serializer share one constant.
+const char* DefaultThemeIndexUrl();
+
+// Theme distribution (T-085, ADR-0026). The community theme browser pulls a
+// static JSON index from `index_url` and installs `.dockforge-theme` packs
+// into ThemesDir(). The default points at the project's own static hosting
+// (raw.githubusercontent.com/<owner>/<repo>/main/theme-index/index.json) - a
+// plain static file, zero maintenance, exactly the ADR-0026 shape ("静态索引
+// 零运维成本"). The repo itself carries that file under theme-index/, so the
+// default URL serves real content once the repo is public. A default config
+// json stays quiet: the "themes" key is written only when index_url differs
+// from the default.
+struct ThemesConfig {
+    std::string index_url = DefaultThemeIndexUrl();
+};
+
+bool SameThemes(const ThemesConfig& a, const ThemesConfig& b);
+
 struct Config {
     DockConfig dock;
     AppearanceConfig appearance;
@@ -328,6 +348,9 @@ struct Config {
     // T-076: notification centre. Off by default; a default config.json carries
     // no "notifications" key.
     NotificationsConfig notifications;
+    // T-085: theme distribution. The struct only carries the index URL; the
+    // browser itself stores nothing else on disk beyond the installed packs.
+    ThemesConfig themes;
     // T-301: Finder Bar. Off by default; a default config.json carries no
     // "finderbar" key.
     FinderBarConfig finderbar;

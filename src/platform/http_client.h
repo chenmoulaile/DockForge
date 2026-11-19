@@ -29,4 +29,23 @@ struct HttpTextResult {
 // bounded time rather than hanging the worker.
 HttpTextResult HttpsGetText(const wchar_t* host, const wchar_t* path, int timeout_ms);
 
+// Byte-bodied GET over a full URL, http or https (T-085 theme distribution).
+//
+// Splits the URL itself - scheme, host, optional :port, path - so callers hand
+// one string and never re-implement the splitting. Proxy mode is
+// WINHTTP_ACCESS_TYPE_NO_PROXY: the T-085 spike measured the DEFAULT_PROXY
+// lookup intermittently timing out against raw.githubusercontent.com (12002,
+// twice in a row while curl succeeded concurrently), and NO_PROXY answered
+// 5/5. Every handle opens and closes inside the call; failures leave nothing
+// behind and arrive in bounded time (same timeout shape as HttpsGetText).
+struct HttpBytesResult {
+    bool ok = false;             // transport succeeded AND status is 2xx
+    unsigned long status = 0;    // HTTP status code, 0 when the request never completed
+    unsigned long error = 0;     // GetLastError()/WinHttp error on failure, 0 otherwise
+    unsigned long long elapsed_ms = 0;
+    std::string body;            // response bytes (possibly partial on failure)
+};
+
+HttpBytesResult HttpGetBytes(const std::string& url_utf8, int timeout_ms);
+
 }  // namespace dockforge::platform
